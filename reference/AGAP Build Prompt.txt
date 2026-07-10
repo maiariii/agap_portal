@@ -1,0 +1,139 @@
+This page gives an AI coding agent (or engineer) a concrete, opinionated plan for converting the single-file HTML/CSS/JS AGAP Portal prototype into a production-style **React (frontend) + Node.js (backend)** application, using **plain JavaScript throughout (no TypeScript)**, while preserving every existing feature.
+
+## 1. What the current single-file app actually contains
+
+Before splitting anything, recognize the feature surface so nothing gets lost in translation:
+
+- **Global shell**: collapsible hover sidebar nav, topbar/hero, welcome modal + guided tour (localStorage-flagged), a shared modal system (`#modal`, `#confirmCloseModal`), and a floating chart tooltip.
+- **Home / Dashboard view**: KPI cards with hover breakdowns, a Data Controls panel (position/status/item-status/assessment-status/posting-status filters + an "Advanced Controls" collapsible section), a stacked-bar/heatmap toggle chart, a donut + legend chart, a histogram chart, and a status breakdown table. All charts share one filtered dataset.
+- **Applications view**: KPIs, global search + vacancy/status filters, a fully sortable & per-column-filterable table (text, numeric range, and categorical/select filters), multi-column sort mode, pagination, row-click review modal, and a "Download IER" export.
+- **Qualified Pool view**: similar table pattern (search, vacancy + pipeline-stage filters, sort, pagination) plus a "Download CAR" export and pipeline-stage editing.
+- **Vacancies view**: postings table with search/position/status filters, pagination, "Add Vacancy" (NOSCA upload modal), open/close posting toggle, and a posting-schedule calendar modal.
+- **Appointment view**: appointed-applicants table + CSV export, and a rejected-applicants table, both paginated/sortable.
+- **Review modal**: Qualification Standards Matrix (read-only comparison), Documentary Requirements checklist (gates the next section), QS Evaluation (pass/fail per criterion), auto-computed result banner (Excluded / Pending QS Review / Disqualified / Qualified), dirty-state tracking with a "discard vs save" confirmation modal.
+- **Data layer**: a `DB` object that is really just typed localStorage collections (`positions`, `vacancies`, `applicants`, `applications`, `qual_evals`, `notifications`) plus a `seed()` mock-data generator gated by a `mockVersion` string.
+- **Derived logic**: `computeFit()` (degree/experience/training/eligibility scoring), `rowData()` (join applicant + vacancy + position + latest eval), CSV/HTML export builders (IER, CAR, Appointed list).
+
+Treat each bullet above as a *feature contract* the new architecture must reproduce — not just the DOM structure.
+
+## 2. Target architecture at a glance
+
+```jsx
+agap-portal/
+├─ apps/
+│  ├─ web/                  # React frontend (Vite + JavaScript/JSX)
+│  └─ api/                  # Node.js backend (Express/Fastify + JavaScript)
+├─ packages/
+│  └─ shared/                # Constants and pure scoring/business logic shared by web + api (plain JS, documented with JSDoc)
+├─ package.json               # workspaces root (pnpm/yarn/npm workspaces)
+└─ turbo.json | nx.json       # optional monorepo task runner
+```
+
+Using a small monorepo (pnpm workspaces + Turborepo, or Nx) is strongly recommended because `computeFit()`, status/label helpers, and validation rules must be identical on both client and server — put them once in `packages/shared` and import from both sides. Without TypeScript, add **JSDoc `@typedef` comments** for the shared shapes (`Position`, `Vacancy`, `Applicant`, `Application`, `QualEval`, `ReviewState`) so editors still get autocomplete/hover docs, and optionally enable `checkJs` in a `jsconfig.json` if the team wants lightweight type-checking without adopting full TypeScript.
+
+## 3. Frontend (`apps/web`) folder architecture
+
+```jsx
+apps/web/src/
+├─ app/
+│  ├─ App.jsx                 # Shell: sidebar + routed views
+│  ├─ routes.jsx              # React Router route table
+│  └─ providers/               # QueryClientProvider, ThemeProvider, ToastProvider
+├─ layout/
+│  ├─ Sidebar.jsx
+│  ├─ Topbar.jsx
+│  └─ AppShell.jsx
+├─ features/
+│  ├─ dashboard/
+│  │  ├─ components/          # KpiCard, DataControlsPanel, StackedBarChart, HeatmapChart, DonutChart, HistogramChart, StatusTable
+│  │  ├─ hooks/                # useDashboardFilters, useDashboardData
+│  │  └─ DashboardPage.jsx
+│  ├─ applications/
+│  │  ├─ components/          # ApplicationsTable, ColumnFilterCell (text/range/select variants), Pagination, MultiSortToggle
+│  │  ├─ hooks/                # useApplications, useColumnFilters, useSort
+│  │  └─ ApplicationsPage.jsx
+│  ├─ review/                  # the applicant review modal, extracted as its own feature
+│  │  ├─ components/          # QsMatrix, DocumentaryChecklist, QsEvaluationForm, ResultBanner, DiscardChangesDialog
+│  │  ├─ hooks/                # useReviewState (mirrors buildReviewState/reviewDirty logic)
+│  │  └─ ReviewModal.jsx
+│  ├─ qualifiedPool/
+│  ├─ vacancies/
+│  │  ├─ components/          # VacanciesTable, NoscaUploadModal, PostingScheduleCalendar
+│  ├─ appointment/
+│  │  ├─ components/          # AppointedTable, RejectedTable
+│  └─ onboarding/               # WelcomeModal + GuidedTour, localStorage "seen tutorial" flag
+├─ components/ui/               # Generic design-system atoms: Button, Select, Modal, Badge, Card, Table primitives
+├─ lib/
+│  ├─ apiClient.js             # fetch/axios wrapper + endpoint helpers
+│  ├─ formatters.js            # titleCase, cls()/badge color mapping, csvEscape
+│  └─ exporters/                 # downloadIER, downloadCAR, downloadAppointedCSV (call API for the HTML/CSV, then trigger Blob download)
+├─ store/                       # Zustand (or Redux Toolkit) slices only for cross-cutting UI state (active view, multi-sort stack, tour progress)
+└─ styles/                      # tokens.css (the existing :root variables), global.css, per-feature CSS modules or Tailwind config
+```
+
+Key conversions:
+
+- Every `document.getElementById(...).innerHTML = template literal` becomes a React component with props/state.
+- Per-column filters (`buildRangeFilterCell`, `buildSelectFilterCell`, text `column-filter`) become a single `<ColumnFilterCell type="text"|"range"|"select" />` component reused across Applications, Qualified, Vacancies, Appointment tables.
+- `debouncedRender`, `debounceColumnFilter*`, `focusPreservingRender` collapse into one `useDebouncedFilter` hook plus React's natural focus retention (no manual DOM re-query needed once inputs are controlled components).
+- Server data fetching/caching (`DB.get(...)`) becomes **TanStack Query** hooks calling the API instead of localStorage.
+- Charts (donut/histogram/heatmap/stacked bars) are hand-rolled SVG in the original — keep them as small dependency-free SVG components (or move to a lightweight chart lib like `visx`/`recharts` if the team prefers), fed by the same aggregation functions moved into `packages/shared`.
+- Use **Vite's React (JS) template** (`npm create vite@latest apps/web -- --template react`) and **PropTypes** (the `prop-types` package) on any component whose props aren't self-evident, as a lightweight runtime substitute for compile-time prop types.
+
+## 4. Backend (`apps/api`) folder architecture
+
+```jsx
+apps/api/src/
+├─ server.js                   # app bootstrap
+├─ config/                     # env, cors, passcode/auth config (DATABASE_URL for Postgres, SSL mode for production)
+├─ routes/
+│  ├─ positions.routes.js
+│  ├─ vacancies.routes.js
+│  ├─ applicants.routes.js
+│  ├─ applications.routes.js    # includes review/save-evaluation endpoint
+│  ├─ qualEvals.routes.js
+│  ├─ appointments.routes.js
+│  ├─ exports.routes.js         # /exports/ier, /exports/car, /exports/appointed-csv
+│  └─ notifications.routes.js
+├─ controllers/                # thin HTTP handlers, one per route file above
+├─ services/
+│  ├─ fitScoring.service.js     # computeFit(), goodness(), scoreTone() (re-exported from packages/shared)
+│  ├─ pipeline.service.js       # status transitions, nullifyPipelineIfDisqualified equivalent
+│  ├─ exportHtml.service.js     # buildIERSheetHtml-style generators
+│  └─ seed.service.js           # replaces the seed()/mockVersion logic for dev/demo seeding
+├─ models/                      # ORM models/schemas: Position, Vacancy, Applicant, Application, QualEval, Notification
+├─ db/                          # schema.prisma (provider = "postgresql") + generated migrations — replaces the `DB` localStorage shim
+├─ middleware/                  # auth/passcode guard, error handler, request validation
+└─ validators/                  # runtime request/response schemas (Zod or Joi) — the JS substitute for TypeScript DTOs, doubling as request validation
+```
+
+Suggested stack: **Express or Fastify + JavaScript + Prisma, targeting Postgres from the start**. Run Postgres locally via a `docker-compose.yml` (`postgres:16` service) so dev matches production, and point `DATABASE_URL` at a managed instance (RDS, Supabase, Neon, etc.) later without changing any application code. Prisma's generated client works fine from plain JS — you just lose the generated TS types, which is why `validators/` (Zod/Joi) is worth adding for runtime safety on incoming requests. Each localStorage collection (`positions`, `vacancies`, `applicants`, `applications`, `qual_evals`, `notifications`) becomes a table with the same fields; `application.history[]` becomes an `application_events` child table (or a `JSONB` column if you'd rather keep it embedded). Prefer `JSONB` over plain `TEXT` for any field that was a JS array/object in the original code (e.g. the documentary checklist state, multi-select filter values) so you can still query into it with Postgres's JSON operators.
+
+## 5. `packages/shared` — the most important folder
+
+Move these pure, side-effect-free functions here verbatim as plain JavaScript (with JSDoc `@typedef`/`@param` comments for editor intellisense, since there's no compiler to enforce shapes) so frontend and backend never disagree on business rules:
+
+- `computeFit`, `goodness`, `scoreTone`, `computeOverallAreaScore`
+- `titleCase`, `cls` (status → badge color), `csvEscape`
+- `SCORE_AREAS`, `DOC_REQUIREMENTS`, `columns` metadata, `columnTypes`
+- Status transition rules (`nullifyPipelineIfDisqualified`, review-result derivation from `buildReviewState`)
+- Shape references documented via JSDoc `@typedef` blocks: `Position`, `Vacancy`, `Applicant`, `Application`, `QualEval`, `ReviewState`, etc. — not enforced at compile time, but still valuable for autocomplete, in-editor hints, and as the single source of truth both apps import.
+
+## 6. Suggested phased migration plan
+
+1. **Extract pure logic + shared constants** into `packages/shared` directly from the existing script (fit scoring, formatters, constants), with JSDoc comments and unit tests to lock in current behavior before anything else changes.
+2. **Stand up the API against a real local Postgres instance from day one** (a one-line `docker-compose.yml` service is enough) rather than an in-memory/SQLite stand-in — this avoids a later data-type migration (e.g. arrays/JSON columns, `SERIAL`/`UUID` ids) once you port to production Postgres. Seed it by porting `seed()` into `seed.service.js`, and expose REST endpoints that mirror today's `DB.get/set` calls, with Zod/Joi schemas validating request bodies.
+3. **Scaffold the React shell**: routing for the 5 views (Home, Vacancies, Applications, Assessment/Qualified, Appointment), sidebar/topbar, and the generic `Modal`/`Table`/`ColumnFilterCell` UI primitives, all in JSX.
+4. **Port one view at a time**, starting with Applications (highest complexity: filters, sort, pagination, review modal) so the reusable table/filter/modal components get proven early, then reuse them for Qualified Pool, Vacancies, and Appointment.
+5. **Move exports server-side**: `/exports/ier`, `/exports/car`, `/exports/appointed-csv` return the file (HTML or CSV) so the frontend just triggers a download instead of building markup client-side.
+6. **Finish wiring real persistence** (Prisma + Postgres, run via `prisma migrate dev`/`prisma migrate deploy`) and add the passcode-protected close-confirmation logic as real auth/session middleware if it needs to be more than a UI gate.
+7. **Add tests**: unit tests for `packages/shared` logic (Jest or Vitest), integration tests for API routes (Supertest), and component tests (React Testing Library) for the filter/sort/pagination table behavior, since those are the most bug-prone parts of the original code.
+
+## 7. Things to watch for during the conversion
+
+- Keep the CSS design tokens (`:root` variables, DM Sans/Plus Jakarta Sans fonts) as a shared `theme.css`/Tailwind config so the visual identity doesn't drift.
+- The mobile breakpoints (`@media(max-width:1000px|760px|640px)`) already encode the intended responsive behavior — carry those breakpoints into component-level responsive styles rather than re-guessing them.
+- Preserve the *order of operations* in derived state (documentary checklist gates QS Evaluation gates the result banner) as an explicit state machine (e.g. a small reducer) rather than scattered `if` checks, to avoid regressions.
+- Any HTML strings destined for `Blob`/download (IER, CAR) must stay on the server or be built with a templating helper that HTML-escapes applicant data (equivalent to the existing `ierEscape`) to avoid broken markup.
+- Since there's no compiler catching shape mismatches, lean more heavily on the `validators/` runtime schemas and `packages/shared` JSDoc typedefs than you would in a TypeScript setup — they're doing the job the compiler would otherwise do.
+- Postgres-specific: add indexes on columns used heavily in the Applications/Qualified/Vacancies table filters and sorts (`status`, `vacancy_id`, applicant name, date columns) so server-side filtering/sorting/pagination stays fast once data is real; use `JSONB` (not `TEXT`) for anything that was a JS array/object (documentary checklist, multi-select values, `application.history[]`); and use `NUMERIC`/`DECIMAL` rather than floating-point types for the fit/area scores to avoid rounding drift versus the original client-side math.

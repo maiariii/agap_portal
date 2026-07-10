@@ -1,0 +1,210 @@
+This page gives step-by-step instructions for building the **AGAP** Postgres database and its tables, derived directly from the current single-file app's data model (the `DB` localStorage collections: `positions`, `vacancies`, `applicants`, `applications`, `qual_evals`, `notifications`, plus the `DOC_REQUIREMENTS` and `SCORE_AREAS` constants).
+
+## 0. Create the database
+
+Run this once from `psql` (or your Postgres admin tool) — `CREATE DATABASE` cannot run inside a migration transaction alongside other statements:
+
+```sql
+CREATE DATABASE agap;
+```
+
+Then connect to it before running everything below:
+
+```sql
+\c agap
+CREATE EXTENSION IF NOT EXISTS pgcrypto; -- enables gen_random_uuid() for primary keys
+```
+
+## 1. Conventions used below
+
+- **Table/column names**: `snake_case`, mapped from the code's `camelCase` fields (e.g. `positionId` → `position_id`).
+- **Primary keys**: `UUID DEFAULT gen_random_uuid()` (replaces the app's `DB.id()` random-string ids).
+- **Timestamps**: `TIMESTAMPTZ`, replacing `DB.now()` (`new Date().toISOString()`); every table gets `created_at`/`updated_at` even though the prototype doesn't track them explicitly, since real persistence needs them.
+- **Enums**: used for the small, stable value sets the UI already hardcodes as `<option>`s or literal strings (application status, posting status, pass/fail decisions, assessment status). This gives Postgres-level validation instead of relying on the front end alone.
+- **JSONB**: used for the handful of fields that are nested objects/arrays in the JS code and aren't queried by individual sub-field in the current UI (`documents`, `doc_checklist`, `comparative_assessment_scores`, `area_scores`).
+- **Arrays**: `TEXT[]` for simple string lists (`requiredDegreeKeywords`), since Postgres can index/query these natively without needing JSON.
+
+## 2. Enum types
+
+```sql
+CREATE TYPE application_status AS ENUM (
+  'pending','pending_qs_review','qualified','disqualified','excluded','for_comparative_assessment'
+);
+
+CREATE TYPE posting_status AS ENUM ('open','closed');
+
+CREATE TYPE qs_decision AS ENUM ('pass','fail');
+
+-- values pulled from homeDetailColumnOptions('assessmentStatus') in the code
+CREATE TYPE assessment_status_type AS ENUM (
+  'marked_qualified','assessment_started','assessment_completed'
+);
+```
+
+`qual_evals.result` mixes two value sets seen in the code — the seeded mock values (`qualified_suggested`/`disqualified_suggested`) and the real evaluation outcomes from `buildReviewState()` (`excluded`/`pending_qs_review`/`disqualified`/`qualified`). Rather than an enum (which is painful to extend later), use `TEXT` with a `CHECK` constraint so both are valid while you decide whether to consolidate the naming:
+
+```sql
+-- applied inline on the qual_evals table below:
+-- CHECK (result IN ('qualified','disqualified','excluded','pending_qs_review','qualified_suggested','disqualified_suggested'))
+```
+
+## 3. Core tables (in dependency order)
+
+```sql
+CREATE TABLE positions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  title TEXT NOT NULL,
+  track TEXT, -- free-form category (e.g. teacher_i, higher_teaching, administrative) — kept as TEXT since new tracks are added over time
+  required_bachelor_degree TEXT,
+  required_degree_keywords TEXT[] NOT NULL DEFAULT '{}',
+  min_years_experience INTEGER NOT NULL DEFAULT 0,
+  min_training_hours INTEGER NOT NULL DEFAULT 0,
+  eligibility_required TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE vacancies (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  position_id UUID NOT NULL REFERENCES positions(id),
+  item_no TEXT NOT NULL UNIQUE,
+  title TEXT NOT NULL,
+  school TEXT,
+  location TEXT,
+  region TEXT,
+  status posting_status NOT NULL DEFAULT 'open',
+  posting_start DATE,
+  posting_end DATE,
+  salary_grade SMALLINT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE applicants (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  code TEXT NOT NULL UNIQUE, -- e.g. DUAN-2026-000123
+  local_resident BOOLEAN NOT NULL DEFAULT false,
+  bachelor_degree TEXT,
+  major TEXT,
+  years_experience NUMERIC(5,2) NOT NULL DEFAULT 0,
+  training_hours NUMERIC(6,2) NOT NULL DEFAULT 0,
+  eligibility TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE applications (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  application_number TEXT NOT NULL UNIQUE,
+  vacancy_id UUID NOT NULL REFERENCES vacancies(id),
+  applicant_id UUID NOT NULL REFERENCES applicants(id),
+  status application_status NOT NULL DEFAULT 'pending',
+  date_applied DATE NOT NULL,
+  documents JSONB NOT NULL DEFAULT '{}'::jsonb, -- keys: loi, pds, prc, tor, diploma, oss (booleans)
+  documentary_complete BOOLEAN,
+  doc_checklist JSONB, -- keys match DOC_REQUIREMENTS: loi, pds, prc, eligibility, tor, training, employment, appointment, performance, cav, other
+  reason TEXT,
+  assessment_status assessment_status_type,
+  comparative_assessment_scores JSONB,
+  appointment_status TEXT, -- confirm exact allowed values against renderAppointment()/downloadAppointedCSV() before locking this to an enum
+  appointment_date DATE,
+  appointment_item_no TEXT,
+  appointment_reference_code TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE application_history (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  application_id UUID NOT NULL REFERENCES applications(id) ON DELETE CASCADE,
+  at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  text TEXT NOT NULL
+);
+
+CREATE TABLE qual_evals (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  application_id UUID NOT NULL REFERENCES applications(id) ON DELETE CASCADE,
+  result TEXT NOT NULL CHECK (result IN ('qualified','disqualified','excluded','pending_qs_review','qualified_suggested','disqualified_suggested')),
+  overall_fit NUMERIC(5,2),
+  degree_score NUMERIC(5,2),
+  experience_score NUMERIC(5,2),
+  training_score NUMERIC(5,2),
+  eligibility_score NUMERIC(5,2),
+  degree_decision qs_decision,
+  experience_decision qs_decision,
+  training_decision qs_decision,
+  eligibility_decision qs_decision,
+  documentary_complete BOOLEAN,
+  remarks TEXT,
+  area_scores JSONB, -- optional v2 category scoring (SCORE_AREAS keys); currently commented out in the UI but the data shape already exists in defaultAreaScores()
+  at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE notifications (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES applicants(id), -- notify() is only ever called with an applicantId today; swap this FK to a real users table once HRMO staff accounts exist
+  title TEXT NOT NULL,
+  message TEXT NOT NULL,
+  at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+```
+
+## 4. Indexes for the filters/sorts the UI already does client-side
+
+Every per-column filter and sort in the Applications/Qualified/Vacancies/Appointment tables becomes a `WHERE`/`ORDER BY` once the backend exists — index those columns so pagination stays fast:
+
+```sql
+CREATE INDEX idx_vacancies_position_id ON vacancies(position_id);
+CREATE INDEX idx_vacancies_status ON vacancies(status);
+CREATE INDEX idx_vacancies_posting_end ON vacancies(posting_end);
+
+CREATE INDEX idx_applications_vacancy_id ON applications(vacancy_id);
+CREATE INDEX idx_applications_applicant_id ON applications(applicant_id);
+CREATE INDEX idx_applications_status ON applications(status);
+CREATE INDEX idx_applications_date_applied ON applications(date_applied);
+
+CREATE INDEX idx_qual_evals_application_id ON qual_evals(application_id);
+CREATE INDEX idx_application_history_application_id ON application_history(application_id);
+CREATE INDEX idx_notifications_user_id ON notifications(user_id);
+```
+
+## 5. Derived values: use a view instead of a stored column
+
+The Home dashboard's "Item Status" filter (Filled/Unfilled) isn't a field stored anywhere in the code — it's computed from whether a vacancy's item has an appointed applicant. Model it as a view rather than a redundant stored column that can drift out of sync:
+
+```sql
+CREATE VIEW vacancy_item_status AS
+SELECT
+  v.id AS vacancy_id,
+  v.item_no,
+  CASE WHEN EXISTS (
+    SELECT 1 FROM applications a
+    WHERE a.vacancy_id = v.id AND a.appointment_status = 'appointed'
+  ) THEN 'filled' ELSE 'unfilled' END AS item_status
+FROM vacancies v;
+```
+
+## 6. Mapping `seed()` mock data into inserts
+
+When porting `seed()` (in `seed.service.js`/`seed.service.ts` from the migration guide) into real inserts, keep the same relationships:
+
+1. Insert all 6 `positions` rows first (the code's `pos_t1`, `pos_mt1`, `pos_ht1`, `pos_ao2`, `pos_guidance`, `pos_nurse` — just drop the hardcoded string ids and let `gen_random_uuid()` generate real ones, keeping a lookup map in the seed script).
+2. Insert the 6 `vacancies` rows, resolving `positionId` → the real generated `position_id`.
+3. Insert the 103 generated `applicants`.
+4. Insert the 103 `applications`, resolving `vacancyId`/`applicantId`, and insert each one's `history[0]` entry into `application_history` instead of a JSON array on the row.
+5. Insert one `qual_evals` row per application, mirroring the `computeFit()`-derived scores exactly as the mock generator does today.
+6. Skip a `mock_version` table for now — that concept only existed to avoid re-seeding `localStorage`; a real environment reseeds via an idempotent migration/seed script instead (e.g. `TRUNCATE ... RESTART IDENTITY CASCADE` before reseeding in dev).
+
+## 7. Verify after building
+
+```sql
+\dt -- lists all tables in the agap database
+\d applications -- inspect one table's columns/constraints/indexes
+SELECT count(*) FROM positions; -- sanity check row counts after seeding
+```
+
+## 8. Open items to confirm against the rest of the codebase
+
+- `appointment_status`'s exact allowed values weren't fully visible in the portion of the code inspected for this guide (the Appointment view's render/export functions) — confirm them before turning that column into an enum.
+- If the review modal's commented-out v2 "Scoring Mechanism" (the `SCORE_AREAS` category scores) gets reactivated, `qual_evals.area_scores` is already modeled here as `JSONB` to receive it without a schema change.

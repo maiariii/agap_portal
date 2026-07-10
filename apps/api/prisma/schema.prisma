@@ -1,0 +1,191 @@
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id                  String       @id @default(uuid())
+  username            String       @unique
+  email               String       @unique
+  fullName            String       @map("full_name")
+  contactNumber       String?      @map("contact_number")
+  office              String?
+  passwordHash        String       @map("password_hash")
+  passcodeHash        String?      @map("passcode_hash")
+  role                String       @default("hr_officer") // hr_officer, approver, admin
+  status              String       @default("active")     // active, disabled, locked
+  failedLoginAttempts Int          @default(0) @map("failed_login_attempts")
+  lockedUntil         DateTime?    @map("locked_until")
+  lastLoginAt         DateTime?    @map("last_login_at")
+  passwordChangedAt   DateTime     @default(now()) @map("password_changed_at")
+  mustChangePassword  Boolean      @default(false) @map("must_change_password")
+  createdAt           DateTime     @default(now()) @map("created_at")
+  updatedAt           DateTime     @default(now()) @updatedAt @map("updated_at")
+  sessions            Session[]
+  storedFiles         StoredFile[]
+
+  @@map("users")
+}
+
+model Session {
+  id        String    @id @default(uuid())
+  userId    String    @map("user_id")
+  tokenHash String    @map("token_hash")
+  ipAddress String?   @map("ip_address")
+  userAgent String?   @map("user_agent")
+  expiresAt DateTime  @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model StoredFile {
+  id               String       @id @default(uuid())
+  container        String
+  blobPath         String       @map("blob_path")
+  originalFilename String       @map("original_filename")
+  contentType      String       @map("content_type")
+  sizeBytes        BigInt       @map("size_bytes")
+  checksum         String?
+  uploadedBy       String?      @map("uploaded_by")
+  applicationId    String?      @map("application_id")
+  vacancyId        String?      @map("vacancy_id")
+  createdAt        DateTime     @default(now()) @map("created_at")
+  user             User?        @relation(fields: [uploadedBy], references: [id], onDelete: SetNull)
+  application      Application? @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  vacancy          Vacancy?     @relation(fields: [vacancyId], references: [id], onDelete: SetNull)
+
+  @@map("stored_files")
+}
+
+model Position {
+  id                     String    @id @default(uuid())
+  title                  String
+  track                  String?
+  requiredBachelorDegree String?   @map("required_bachelor_degree")
+  requiredDegreeKeywords String    @map("required_degree_keywords") // Comma-separated for SQLite
+  minYearsExperience     Int       @default(0) @map("min_years_experience")
+  minTrainingHours       Int       @default(0) @map("min_training_hours")
+  eligibilityRequired    String?   @map("eligibility_required")
+  createdAt              DateTime  @default(now()) @map("created_at")
+  updatedAt              DateTime  @default(now()) @updatedAt @map("updated_at")
+  vacancies              Vacancy[]
+
+  @@map("positions")
+}
+
+model Vacancy {
+  id           String        @id @default(uuid())
+  positionId   String        @map("position_id")
+  itemNo       String        @unique @map("item_no")
+  title        String
+  school       String?
+  location     String?
+  region       String?
+  status       String        @default("open") // open, closed
+  postingStart DateTime?     @map("posting_start")
+  postingEnd   DateTime?     @map("posting_end")
+  salaryGrade  Int?          @map("salary_grade")
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @default(now()) @updatedAt @map("updated_at")
+  position     Position      @relation(fields: [positionId], references: [id])
+  applications Application[]
+  storedFiles  StoredFile[]
+
+  @@map("vacancies")
+}
+
+model Applicant {
+  id             String         @id @default(uuid())
+  name           String
+  code           String         @unique
+  localResident  Boolean        @default(false) @map("local_resident")
+  bachelorDegree String?        @map("bachelor_degree")
+  major          String?
+  yearsExperience Float         @default(0) @map("years_experience")
+  trainingHours   Float         @default(0) @map("training_hours")
+  eligibility    String?
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @default(now()) @updatedAt @map("updated_at")
+  applications   Application[]
+  notifications  Notification[]
+
+  @@map("applicants")
+}
+
+model Application {
+  id                         String                @id @default(uuid())
+  applicationNumber          String                @unique @map("application_number")
+  vacancyId                  String                @map("vacancy_id")
+  applicantId                String                @map("applicant_id")
+  status                     String                @default("pending") // pending, pending_qs_review, qualified, disqualified, excluded, for_comparative_assessment
+  dateApplied                DateTime              @map("date_applied")
+  documents                  String                @default("{}") // Stored as JSON string
+  documentaryComplete        Boolean?              @map("documentary_complete")
+  docChecklist               String?               @map("doc_checklist") // Stored as JSON string
+  reason                     String?
+  assessmentStatus           String?               @map("assessment_status") // marked_qualified, assessment_started, assessment_completed
+  comparativeAssessmentScores String?               @map("comparative_assessment_scores") // Stored as JSON string
+  appointmentStatus          String?               @map("appointment_status")
+  appointmentDate            DateTime?             @map("appointment_date")
+  appointmentItemNo          String?               @map("appointment_item_no")
+  appointmentReferenceCode   String?               @map("appointment_reference_code")
+  createdAt                  DateTime              @default(now()) @map("created_at")
+  updatedAt                  DateTime              @default(now()) @updatedAt @map("updated_at")
+  vacancy                    Vacancy               @relation(fields: [vacancyId], references: [id])
+  applicant                  Applicant             @relation(fields: [applicantId], references: [id])
+  history                    ApplicationHistory[]
+  qualEvals                  QualEval[]
+  storedFiles                StoredFile[]
+
+  @@map("applications")
+}
+
+model ApplicationHistory {
+  id            String      @id @default(uuid())
+  applicationId String      @map("application_id")
+  at            DateTime    @default(now())
+  text          String
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@map("application_history")
+}
+
+model QualEval {
+  id                  String      @id @default(uuid())
+  applicationId       String      @map("application_id")
+  result              String
+  overallFit          Float?      @map("overall_fit")
+  degreeScore         Float?      @map("degree_score")
+  experienceScore     Float?      @map("experience_score")
+  trainingScore       Float?      @map("training_score")
+  eligibilityScore    Float?      @map("eligibility_score")
+  degreeDecision      String?     @map("degree_decision") // pass, fail
+  experienceDecision  String?     @map("experience_decision")
+  trainingDecision    String?     @map("training_decision")
+  eligibilityDecision String?     @map("eligibility_decision")
+  documentaryComplete Boolean?    @map("documentary_complete")
+  remarks             String?
+  areaScores          String?     @map("area_scores") // Stored as JSON string
+  at                  DateTime    @default(now())
+  application         Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@map("qual_evals")
+}
+
+model Notification {
+  id        String    @id @default(uuid())
+  userId    String    @map("user_id")
+  title     String
+  message   String
+  at        DateTime  @default(now())
+  applicant Applicant @relation(fields: [userId], references: [id])
+
+  @@map("notifications")
+}

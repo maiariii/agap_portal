@@ -1,0 +1,16 @@
+{
+  "name": "agap-portal",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npx --yes concurrently \"npm run dev:api\" \"npm run dev:web\"",
+    "dev:api": "npm run dev --workspace=apps/api",
+    "dev:web": "npm run dev --workspace=apps/web",
+    "build:shared": "npm run build --workspace=packages/shared",
+    "build:web": "npm run build --workspace=apps/web",
+    "start:api": "npm run start --workspace=apps/api"
+  }
+}
