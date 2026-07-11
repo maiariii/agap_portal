@@ -829,16 +829,32 @@ export default function App() {
     if (appVacancyFilter) rows = rows.filter(r => r.vacancyId === appVacancyFilter);
     if (appStatusFilter) rows = rows.filter(r => r.status === appStatusFilter);
     
+    const statusOrder = {
+      'pending': 1,
+      'pending_qs_review': 2,
+      'qualified': 3,
+      'for_comparative_assessment': 4,
+      'disqualified': 5,
+      'excluded': 6
+    };
+
     return rows.sort((a, b) => {
       const activeStack = sortStack.length > 0 ? sortStack : [{ key: 'dateApplied', dir: 'desc' }];
       for (const rule of activeStack) {
         const av = a[rule.key];
         const bv = b[rule.key];
         const dir = rule.dir === 'asc' ? 1 : -1;
-        if (typeof av === 'number' && typeof bv === 'number') {
+
+        if (rule.key === 'status') {
+          const orderA = statusOrder[String(av).toLowerCase()] ?? 99;
+          const orderB = statusOrder[String(bv).toLowerCase()] ?? 99;
+          if (orderA !== orderB) {
+            return (orderA - orderB) * dir;
+          }
+        } else if (typeof av === 'number' && typeof bv === 'number') {
           if (av !== bv) return (av - bv) * dir;
         } else {
-          const comp = String(av ?? "").localeCompare(String(bv ?? ""));
+          const comp = String(av ?? "").localeCompare(String(bv ?? ""), undefined, { numeric: true, sensitivity: 'base' });
           if (comp !== 0) return comp * dir;
         }
       }
