@@ -95,7 +95,10 @@ app.post('/api/auth/verify-passcode', authenticateToken, async (req, res) => {
     if (!user || !user.passcodeHash) {
       return res.status(400).json({ error: 'No passcode configured for user' });
     }
-    const isValid = await bcrypt.compare(passcode, user.passcodeHash);
+    let isValid = await bcrypt.compare(passcode, user.passcodeHash);
+    if (!isValid && user.passwordHash) {
+      isValid = await bcrypt.compare(passcode, user.passwordHash);
+    }
     if (isValid) {
       res.json({ success: true });
     } else {
@@ -185,6 +188,9 @@ async function getHydratedApplications(vacancyId = null) {
       qsTraining: `${position.minTrainingHours || 0} minimum hour(s)`,
       qsEligibility: position.eligibilityRequired || "Not specified",
       status: app.status,
+      appointmentStatus: app.appointmentStatus,
+      appointmentReferenceCode: app.appointmentReferenceCode,
+      appointmentDate: app.appointmentDate ? app.appointmentDate.toISOString() : null,
       vacancyId: vacancy.id,
       fit: overallFit,
       applicantObj: applicant,
@@ -429,8 +435,18 @@ app.post('/api/applications/post-ier', authenticateToken, async (req, res) => {
 // Update Pipeline Stage / Stage edit (Comparative Assessment, etc.)
 app.put('/api/applications/:id/pipeline', authenticateToken, async (req, res) => {
   const { id } = req.params;
-  const { assessmentStatus, comparativeAssessmentScores, status } = req.body;
+  const { assessmentStatus, comparativeAssessmentScores, status, areaScores, overallFit } = req.body;
   try {
+    const currentApp = await prisma.application.findUnique({
+      where: { id }
+    });
+
+    if (!currentApp) {
+      return res.status(404).json({ error: 'Application not found' });
+    }
+
+    const updatedStatus = status || currentApp.status;
+
     await prisma.application.update({
       where: { id },
       data: {
@@ -439,6 +455,22 @@ app.put('/api/applications/:id/pipeline', authenticateToken, async (req, res) =>
         comparativeAssessmentScores: comparativeAssessmentScores ? JSON.stringify(comparativeAssessmentScores) : undefined
       }
     });
+
+    if (areaScores) {
+      await prisma.qualEval.create({
+        data: {
+          applicationId: id,
+          result: updatedStatus,
+          overallFit: parseFloat(overallFit) || null,
+          degreeScore: parseFloat(areaScores.education) || null,
+          experienceScore: parseFloat(areaScores.experience) || null,
+          trainingScore: parseFloat(areaScores.training) || null,
+          eligibilityScore: parseFloat(areaScores.eligibility) || null,
+          areaScores: JSON.stringify(areaScores),
+          remarks: "Qualified modal scoring metrics saved"
+        }
+      });
+    }
     
     await prisma.applicationHistory.create({
       data: {
@@ -471,6 +503,7 @@ app.post('/api/applications/:id/appointment', authenticateToken, async (req, res
     await prisma.application.update({
       where: { id },
       data: {
+        status: 'appointed',
         appointmentStatus: 'appointed',
         appointmentDate: new Date(appointmentDate),
         appointmentItemNo: currentApp.vacancy.itemNo,
@@ -498,6 +531,7 @@ app.post('/api/applications/:id/appointment', authenticateToken, async (req, res
       await prisma.application.update({
         where: { id: otherApp.id },
         data: {
+          status: 'rejected',
           appointmentStatus: 'rejected',
           reason: `Item ${currentApp.vacancy.itemNo} filled by another applicant`
         }

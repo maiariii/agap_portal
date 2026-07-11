@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { titleCase, cls, computeOverallAreaScore, scoreTone } from '@agap/shared';
+import { titleCase, cls, computeOverallAreaScore, scoreTone, SCORE_AREAS } from '@agap/shared';
 
 const TOUR_STEPS = [
   { view: "home", sel: ".kpis", title: "Headline metrics", body: "These KPI cards give you an at-a-glance summary of the data module you're currently viewing." },
@@ -31,6 +31,22 @@ const DOC_REQUIREMENTS = [
   { key: "cav", label: "Checklist of Requirements and Omnibus Sworn Statement on the CAV of documents submitted and Data Privacy Consent Form" },
   { key: "other", label: "Other documents as may be required for comparative assessment (e.g. MOVs, or Performance Rating from relevant work experience)" }
 ];
+
+const QUAL_PIPELINE = [
+  { key: "qualified", phase: 1, label: "Qualified — IER pending", badge: "blue", next: "Post the Initial Evaluation Result (IER)" },
+  { key: "ier_posted", phase: 1, label: "IER Posted", badge: "blue", next: "Begin comparative assessment" },
+  { key: "comparative_assessment", phase: 1, label: "For Comparative Assessment", badge: "orange", next: "Start scoring the applicant" },
+  { key: "assessment_ongoing", phase: 1, label: "Assessment Ongoing", badge: "orange", next: "Encode all evaluator scores" },
+  { key: "assessment_completed", phase: 1, label: "Assessment Completed", badge: "orange", next: "HRMPSB deliberation decides if the applicant advances" },
+  { key: "in_registry", phase: 2, label: "Included in CAR / RQA", badge: "orange", next: "Rank and apply the Rule of Five" },
+  { key: "shortlisted", phase: 2, label: "Shortlisted — Rule of Five", badge: "green", next: "Endorse to the Appointing Authority" },
+  { key: "selected_for_appointment", phase: 2, label: "Selected for Appointment", badge: "green", next: "Post the appointment for the protest window" },
+  { key: "appointment_posted", phase: 2, label: "Appointment Posted", badge: "green", next: "Observe the 15-day protest period" },
+  { key: "protest_period", phase: 2, label: "Protest Period", badge: "orange", next: "Resolve any protest, then finalize" },
+  { key: "finalized", phase: 2, label: "Finalized", badge: "green", next: "Appointment finalized — item filled" }
+];
+
+const QUAL_NOT_SELECTED = { key: "not_selected", phase: 2, label: "Not Selected", badge: "red", next: "Did not advance past HRMPSB deliberation" };
 
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem('agap_token') || '');
@@ -78,8 +94,30 @@ export default function App() {
   const [qualSearch, setQualSearch] = useState('');
   const [qualVacancyFilter, setQualVacancyFilter] = useState('');
   const [qualStageFilter, setQualStageFilter] = useState('');
+  const [qualColFilters, setQualColFilters] = useState({});
+  const [qualSortKey, setQualSortKey] = useState('fit');
+  const [qualSortDir, setQualSortDir] = useState('desc');
   const [qualPage, setQualPage] = useState(1);
   const [qualPageSize, setQualPageSize] = useState(10);
+
+  // Qualified Modal state
+  const [showQualModal, setShowQualModal] = useState(false);
+  const [selectedQualApp, setSelectedQualApp] = useState(null);
+  const [modalAreaScores, setModalAreaScores] = useState({});
+  const [modalCompScores, setModalCompScores] = useState({ bei: '', wst: '', we: '' });
+  const [modalRemarks, setModalRemarks] = useState('');
+  const [qualModalDirty, setQualModalDirty] = useState(false);
+  const [showQualDiscardWarning, setShowQualDiscardWarning] = useState(false);
+  const [pipeSelectedKey, setPipeSelectedKey] = useState(null);
+  const [pipeOriginalKey, setPipeOriginalKey] = useState(null);
+
+  // Appoint modals
+  const [showAppointConfirmModal, setShowAppointConfirmModal] = useState(false);
+  const [showSdsReminderModal, setShowSdsReminderModal] = useState(false);
+  const [appointConfirmApp, setAppointConfirmApp] = useState(null);
+  const [appointDate, setAppointDate] = useState('');
+  const [appointRefCode, setAppointRefCode] = useState('');
+  const [showIncompleteAppointModal, setShowIncompleteAppointModal] = useState(false);
 
   // Vacancy View filter state
   const [vacSearch, setVacSearch] = useState('');
@@ -90,6 +128,32 @@ export default function App() {
   const [vColumnFilters, setVColumnFilters] = useState({});
   const [vacPage, setVacPage] = useState(1);
   const [vacPageSize, setVacPageSize] = useState(10);
+
+  // Appointed List state
+  const [apptColFilters, setApptColFilters] = useState({
+    applicant: '',
+    vacancy: '',
+    itemNo: '',
+    fit: { min: '', max: '' },
+    appointmentStatus: '',
+    appointmentDate: ''
+  });
+  const [apptSortKey, setApptSortKey] = useState('itemNo');
+  const [apptSortDir, setApptSortDir] = useState('asc');
+  const [apptPage, setApptPage] = useState(1);
+  const [apptPageSize, setApptPageSize] = useState(10);
+
+  // Unappointed table states
+  const [unapptSortKey, setUnapptSortKey] = useState('applicant');
+  const [unapptSortDir, setUnapptSortDir] = useState('asc');
+  const [unapptColFilters, setUnapptColFilters] = useState({
+    applicant: '',
+    vacancy: '',
+    itemNo: '',
+    fit: { min: '', max: '' }
+  });
+  const [unapptPage, setUnapptPage] = useState(1);
+  const [unapptPageSize, setUnapptPageSize] = useState(10);
 
   // Review Modal State
   const [reviewId, setReviewId] = useState(null);
@@ -468,7 +532,10 @@ export default function App() {
       const isFilled = applications.some(a => a.vacancyId === app.vacancyId && a.appointmentStatus === 'appointed');
       const itemStatusVal = isFilled ? 'filled' : 'unfilled';
       if (homeFilters.itemStatus && itemStatusVal !== homeFilters.itemStatus) return false;
-      if (homeFilters.assessmentStatus && app.appObj.assessmentStatus !== homeFilters.assessmentStatus) return false;
+      if (homeFilters.assessmentStatus) {
+        const statusVal = app.appObj?.assessmentStatus || 'marked_qualified';
+        if (statusVal !== homeFilters.assessmentStatus) return false;
+      }
       if (homeFilters.postingStatus && app.vacancyObj.status !== homeFilters.postingStatus) return false;
       return true;
     });
@@ -572,13 +639,13 @@ export default function App() {
         applicant: app.applicant,
         code: app.code,
         vacancy: app.vacancy,
-        fit: app.appObj.overallFit || app.overallFit || 0,
-        assessmentStatus: app.appObj.assessmentStatus || 'marked_qualified'
+        fit: app.appObj?.overallFit || app.overallFit || 0,
+        assessmentStatus: app.appObj?.assessmentStatus || 'marked_qualified'
       }));
       return {
         rows,
         segments: [
-          { key: 'marked_qualified', label: 'No Assessment', colorClass: 'seg-submitted', color: '#0284C7' },
+          { key: 'marked_qualified', label: 'Assessment Not Started', colorClass: 'seg-submitted', color: '#0284C7' },
           { key: 'assessment_started', label: 'Assessment Started', colorClass: 'seg-docs', color: '#D97706' },
           { key: 'assessment_completed', label: 'Assessment Completed', colorClass: 'seg-qualified', color: '#16A34A' }
         ],
@@ -586,7 +653,7 @@ export default function App() {
         kpiTotalLabel: 'Total Qualified',
         kpiTotalCaption: 'Passed Initial Screening',
         overallTitle: 'Overall Assessment Status Distribution',
-        overallSubtitle: 'No assessment, started, and completed assessments',
+        overallSubtitle: 'Assessment not started, ongoing, and completed assessments',
         tableTitle: 'Assessment Status — Individual Records',
         centerLabel: 'applications',
         tableLabel: 'Assessment Status',
@@ -596,7 +663,7 @@ export default function App() {
           { label: 'Overall Fit', key: 'fit', type: 'numeric', render: row => `${row.fit}%` },
           { label: 'Assessment Status', key: 'assessmentStatus', type: 'categorical', render: row => {
             const map = {
-              marked_qualified: ['No Assessment', 'blue'],
+              marked_qualified: ['Assessment Not Started', 'blue'],
               assessment_started: ['Assessment Started', 'orange'],
               assessment_completed: ['Assessment Completed', 'green']
             };
@@ -829,6 +896,27 @@ export default function App() {
     if (appVacancyFilter) rows = rows.filter(r => r.vacancyId === appVacancyFilter);
     if (appStatusFilter) rows = rows.filter(r => r.status === appStatusFilter);
     
+    // Apply column-wise filters
+    Object.entries(appColFilters).forEach(([key, value]) => {
+      if (value === undefined || value === null || value === '') return;
+
+      const isNumeric = ['yearsExperience', 'trainingHours'].includes(key);
+      const isCategorical = ['vacancy', 'status'].includes(key);
+
+      if (isNumeric) {
+        if (value.min !== undefined && value.min !== '') {
+          rows = rows.filter(r => r[key] !== undefined && r[key] !== null && Number(r[key]) >= Number(value.min));
+        }
+        if (value.max !== undefined && value.max !== '') {
+          rows = rows.filter(r => r[key] !== undefined && r[key] !== null && Number(r[key]) <= Number(value.max));
+        }
+      } else if (isCategorical) {
+        rows = rows.filter(r => String(r[key] ?? '') === String(value));
+      } else {
+        rows = rows.filter(r => String(r[key] ?? '').toLowerCase().includes(String(value).toLowerCase()));
+      }
+    });
+
     const statusOrder = {
       'pending': 1,
       'pending_qs_review': 2,
@@ -860,7 +948,23 @@ export default function App() {
       }
       return 0;
     });
-  }, [applications, appSearch, appVacancyFilter, appStatusFilter, sortStack]);
+  }, [applications, appSearch, appVacancyFilter, appStatusFilter, appColFilters, sortStack]);
+
+  const handleAppColFilterChange = (key, val) => {
+    setAppColFilters(prev => ({ ...prev, [key]: val }));
+    setAppPage(1);
+  };
+
+  const handleAppColRangeChange = (key, bound, val) => {
+    setAppColFilters(prev => {
+      const current = prev[key] && typeof prev[key] === 'object' ? prev[key] : {};
+      return {
+        ...prev,
+        [key]: { ...current, [bound]: val }
+      };
+    });
+    setAppPage(1);
+  };
 
   const handleSortClick = (key) => {
     setSortStack(prev => {
@@ -927,31 +1031,206 @@ export default function App() {
   };
 
   const handlePostIER = async (vacancyId) => {
-    if (!vacancyId) return alert('Select a vacancy to post IER');
+    if (!vacancyId) return setToast({ message: 'Select a vacancy to post IER', type: 'error' });
     if (!window.confirm('Posting the IER moves all qualified applicants for the selected vacancy to comparative assessment. Proceed?')) return;
     try {
       await apiFetch('/api/applications/post-ier', {
         method: 'POST',
         body: JSON.stringify({ vacancyId })
       });
-      alert('IER posted successfully');
+      setToast({ message: 'IER posted successfully', type: 'success' });
       loadAllData();
     } catch (e) {
-      alert(e.message);
+      setToast({ message: e.message, type: 'error' });
     }
   };
 
+  // Qualified column value resolver
+  const getQualifiedColumnValue = (row, key) => {
+    if (key === 'rank') return row.rank || '';
+    if (key === 'applicant') return row.applicant || '';
+    if (key === 'bachelorDegree') return row.bachelorDegree || '';
+    if (key === 'vacancy') return row.vacancy || '';
+    if (key === 'itemNo') return row.itemNo || '';
+    if (['bei', 'wst', 'we'].includes(key)) {
+      const scores = row.appObj?.comparativeAssessmentScores || {};
+      const val = scores[key];
+      return (val !== '' && val !== null && val !== undefined && Number.isFinite(Number(val))) ? Number(val) : '';
+    }
+    if (key === 'fit') { // fit represents Average Score of BEI/WST/WE
+      const scores = row.appObj?.comparativeAssessmentScores || {};
+      const hasAll = ['bei', 'wst', 'we'].every(k => scores[k] !== '' && scores[k] !== null && scores[k] !== undefined && Number.isFinite(Number(scores[k])));
+      if (!hasAll) return '';
+      const vals = ['bei', 'wst', 'we'].map(k => Number(scores[k]));
+      return vals.reduce((sum, v) => sum + v, 0) / vals.length;
+    }
+    if (key === 'assessmentStatus') {
+      const cs = row.appObj?.comparativeAssessmentScores || {};
+      const areaScores = row.latestEval?.areaScores || {};
+      const hasValue = v => v !== "" && v !== null && v !== undefined && Number.isFinite(Number(v));
+      
+      const compChecks = [cs.bei, cs.wst, cs.we].map(hasValue);
+      const compCount = compChecks.filter(Boolean).length;
+      
+      const areaChecks = Object.values(areaScores).map(hasValue);
+      const areaCount = areaChecks.filter(Boolean).length;
+      
+      if (areaCount === 10 && compCount === 3) return "Assessment Completed";
+      if (areaCount > 0 || compCount > 0) return "Assessment Started";
+      return "Assessment Not Started";
+    }
+    if (key === 'appointmentStatus') {
+      return row.appObj?.appointmentStatus || 'Appoint';
+    }
+    return row[key] ?? '';
+  };
+
+  const occupiedItemNos = useMemo(() => {
+    return new Set(
+      applications
+        .filter(a => a.appointmentStatus === 'appointed')
+        .map(a => a.itemNo)
+        .filter(Boolean)
+    );
+  }, [applications]);
+
+  const applicationsKpiStats = useMemo(() => {
+    const total = applications.length;
+    const qualified = applications.filter(a => a.status === 'qualified').length;
+    const disqualified = applications.filter(a => a.status === 'disqualified').length;
+    return { total, qualified, disqualified };
+  }, [applications]);
+
+  const vacanciesKpiStats = useMemo(() => {
+    const total = vacancies.length;
+    const open = vacancies.filter(v => v.status !== 'closed').length;
+    const closed = vacancies.filter(v => v.status === 'closed').length;
+    return { total, open, closed };
+  }, [vacancies]);
+
+  const qualifiedPoolRanked = useMemo(() => {
+    const pool = applications.filter(app => ['qualified', 'for_comparative_assessment'].includes(app.status));
+    const byVac = {};
+    pool.forEach(r => {
+      if (!byVac[r.vacancyId]) byVac[r.vacancyId] = [];
+      byVac[r.vacancyId].push(r);
+    });
+
+    Object.values(byVac).forEach(list => {
+      list.sort((a, b) => b.fit - a.fit);
+      list.forEach((r, i) => {
+        r.rank = i + 1;
+        r.ruleOfFive = i < 5;
+      });
+    });
+
+    return pool;
+  }, [applications]);
+
+  const qualifiedKpiStats = useMemo(() => {
+    const total = qualifiedPoolRanked.length;
+    const counts = { "No Assessment": 0, "Assessment Started": 0, "Assessment Completed": 0 };
+    
+    qualifiedPoolRanked.forEach(row => {
+      const cs = row.appObj?.comparativeAssessmentScores || {};
+      const areaScores = row.latestEval?.areaScores || {};
+      const hasValue = v => v !== "" && v !== null && v !== undefined && Number.isFinite(Number(v));
+      
+      const compChecks = [cs.bei, cs.wst, cs.we].map(hasValue);
+      const compCount = compChecks.filter(Boolean).length;
+      
+      const areaChecks = Object.values(areaScores).map(hasValue);
+      const areaCount = areaChecks.filter(Boolean).length;
+      
+      let label = "No Assessment";
+      if (areaCount === 10 && compCount === 3) {
+        label = "Assessment Completed";
+      } else if (areaCount > 0 || compCount > 0) {
+        label = "Assessment Started";
+      }
+      
+      if (counts.hasOwnProperty(label)) counts[label]++;
+    });
+
+    return {
+      total,
+      noAssessment: counts["No Assessment"],
+      assessmentStarted: counts["Assessment Started"],
+      assessmentCompleted: counts["Assessment Completed"]
+    };
+  }, [qualifiedPoolRanked]);
+
   // Qualified assessments
   const qualifiedApps = useMemo(() => {
-    let rows = applications.filter(app => ['qualified', 'for_comparative_assessment'].includes(app.status));
+    let rows = qualifiedPoolRanked.filter(r => !occupiedItemNos.has(r.itemNo));
+
     if (qualSearch) {
       const q = qualSearch.toLowerCase();
-      rows = rows.filter(r => r.applicant.toLowerCase().includes(q) || r.code.toLowerCase().includes(q) || r.vacancy.toLowerCase().includes(q));
+      rows = rows.filter(r => 
+        [r.applicant, r.code, r.bachelorDegree, r.vacancy, r.itemNo].join(' ').toLowerCase().includes(q)
+      );
     }
-    if (qualVacancyFilter) rows = rows.filter(r => r.vacancyId === qualVacancyFilter);
-    if (qualStageFilter) rows = rows.filter(r => r.appObj.assessmentStatus === qualStageFilter);
-    return rows.sort((a, b) => b.fit - a.fit);
-  }, [applications, qualSearch, qualVacancyFilter, qualStageFilter]);
+
+    if (qualVacancyFilter) {
+      rows = rows.filter(r => r.vacancyId === qualVacancyFilter);
+    }
+
+    if (qualStageFilter) {
+      rows = rows.filter(r => {
+        const stageKey = r.appObj?.pipeline || (r.status === 'for_comparative_assessment' ? 'comparative_assessment' : 'qualified');
+        return stageKey === qualStageFilter;
+      });
+    }
+
+    // Column filters
+    Object.entries(qualColFilters).forEach(([key, value]) => {
+      if (value === undefined || value === null || value === '') return;
+
+      const isNumeric = ['fit', 'bei', 'wst', 'we'].includes(key);
+      const isCategorical = ['vacancy', 'assessmentStatus', 'appointmentStatus'].includes(key);
+
+      if (isNumeric) {
+        if (value.min !== undefined && value.min !== '') {
+          rows = rows.filter(r => {
+            const cellVal = getQualifiedColumnValue(r, key);
+            return cellVal !== '' && cellVal >= Number(value.min);
+          });
+        }
+        if (value.max !== undefined && value.max !== '') {
+          rows = rows.filter(r => {
+            const cellVal = getQualifiedColumnValue(r, key);
+            return cellVal !== '' && cellVal <= Number(value.max);
+          });
+        }
+      } else if (isCategorical) {
+        rows = rows.filter(r => {
+          const cellVal = getQualifiedColumnValue(r, key);
+          return String(cellVal) === String(value);
+        });
+      } else {
+        rows = rows.filter(r => {
+          const cellVal = getQualifiedColumnValue(r, key);
+          return String(cellVal).toLowerCase().includes(String(value).toLowerCase());
+        });
+      }
+    });
+
+    // Sorting
+    if (qualSortKey) {
+      const dir = qualSortDir === 'asc' ? 1 : -1;
+      rows = [...rows].sort((a, b) => {
+        const av = getQualifiedColumnValue(a, qualSortKey);
+        const bv = getQualifiedColumnValue(b, qualSortKey);
+
+        if (typeof av === 'number' && typeof bv === 'number') {
+          return (av - bv) * dir;
+        }
+        return String(av ?? '').localeCompare(String(bv ?? ''), undefined, { numeric: true, sensitivity: 'base' }) * dir;
+      });
+    }
+
+    return rows;
+  }, [qualifiedPoolRanked, occupiedItemNos, qualSearch, qualVacancyFilter, qualStageFilter, qualColFilters, qualSortKey, qualSortDir]);
 
   const paginatedQualified = useMemo(() => {
     const start = (qualPage - 1) * qualPageSize;
@@ -959,27 +1238,203 @@ export default function App() {
   }, [qualifiedApps, qualPage, qualPageSize]);
 
   const handleExportCAR = () => {
-    const headers = ["Rank", "Applicant", "Code", "Vacancy", "Item No", "Average Score", "Stage"];
-    const rows = qualifiedApps.map((r, i) => [
-      i + 1, r.applicant, r.code, r.vacancy, r.itemNo, r.fit.toFixed(2), r.appObj.assessmentStatus || 'Not Started'
-    ]);
+    const headers = ["No.", "Applicant", "Applicant Code", "Bachelor's Degree", "Vacancy", "Item No.", "Average Score", "BEI", "WST", "WE"];
+    const scoreVal = v => (v !== "" && v !== null && v !== undefined && Number.isFinite(Number(v))) ? Number(v).toFixed(2) : "";
+    const rows = qualifiedApps.map((r, i) => {
+      const cs = r.appObj?.comparativeAssessmentScores || {};
+      const avg = getQualifiedColumnValue(r, 'fit');
+      return [
+        i + 1,
+        r.applicant,
+        r.code,
+        r.bachelorDegree || "",
+        r.vacancy,
+        r.itemNo || "",
+        avg !== "" ? scoreVal(avg) : "",
+        scoreVal(cs.bei),
+        scoreVal(cs.wst),
+        scoreVal(cs.we)
+      ];
+    });
     downloadCSV(headers, rows, `CAR-qualified-pool-${new Date().toISOString().slice(0, 10)}.csv`);
   };
 
-  const handleUpdatePipeline = async (appId, stage, scoreData = null) => {
+  const handleUpdatePipeline = async (appId, stage, scoreData = null, areaScores = null, overallFit = null) => {
     try {
       await apiFetch(`/api/applications/${appId}/pipeline`, {
         method: 'PUT',
         body: JSON.stringify({
           assessmentStatus: stage,
           comparativeAssessmentScores: scoreData,
-          status: stage === 'assessment_completed' ? 'for_comparative_assessment' : undefined
+          status: stage === 'assessment_completed' ? 'for_comparative_assessment' : undefined,
+          areaScores,
+          overallFit
         })
       });
       loadAllData();
     } catch (e) {
       alert(e.message);
     }
+  };
+
+  const handleQualColFilterChange = (key, val) => {
+    setQualColFilters(prev => ({ ...prev, [key]: val }));
+    setQualPage(1);
+  };
+
+  const handleQualColRangeChange = (key, bound, val) => {
+    setQualColFilters(prev => {
+      const current = prev[key] && typeof prev[key] === 'object' ? prev[key] : {};
+      return {
+        ...prev,
+        [key]: { ...current, [bound]: val }
+      };
+    });
+    setQualPage(1);
+  };
+
+  const handleQualSort = (key) => {
+    if (qualSortKey === key) {
+      setQualSortDir(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setQualSortKey(key);
+      setQualSortDir('asc');
+    }
+  };
+
+  const handleApptSort = (key) => {
+    if (apptSortKey === key) {
+      setApptSortDir(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setApptSortKey(key);
+      setApptSortDir('asc');
+    }
+  };
+
+  const handleUnapptSort = (key) => {
+    if (unapptSortKey === key) {
+      setUnapptSortDir(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setUnapptSortKey(key);
+      setUnapptSortDir('asc');
+    }
+  };
+
+  const getQualSortIndicator = (key) => {
+    return qualSortKey === key ? (qualSortDir === 'asc' ? ' ▲' : ' ▼') : '';
+  };
+
+  const openQualifiedScoringModal = (appRow) => {
+    setSelectedQualApp(appRow);
+    setModalRemarks(appRow.appObj?.reason || '');
+
+    // Load area scores
+    const savedArea = appRow.latestEval?.areaScores || {};
+    const defaultArea = {
+      education: savedArea.education ?? '',
+      experience: savedArea.experience ?? '',
+      training: savedArea.training ?? '',
+      eligibility: savedArea.eligibility ?? '',
+      outstandingAccomplishment: savedArea.outstandingAccomplishment ?? '',
+      documentCompleteness: savedArea.documentCompleteness ?? '',
+      applicationEducation: savedArea.applicationEducation ?? '',
+      applicationLearning: savedArea.applicationLearning ?? '',
+      performanceRating: savedArea.performanceRating ?? '',
+      potential: savedArea.potential ?? ''
+    };
+    setModalAreaScores(defaultArea);
+
+    // Load comparative scores
+    const compScores = appRow.appObj?.comparativeAssessmentScores || {};
+    const defaultComp = {
+      bei: compScores.bei ?? '',
+      wst: compScores.wst ?? '',
+      we: compScores.we ?? ''
+    };
+    setModalCompScores(defaultComp);
+
+    // Load pipeline keys
+    const currentKey = appRow.appObj?.pipeline || (appRow.status === 'for_comparative_assessment' ? 'comparative_assessment' : 'qualified');
+    setPipeSelectedKey(currentKey);
+    setPipeOriginalKey(currentKey);
+
+    setQualModalDirty(false);
+    setShowQualModal(true);
+  };
+
+  const handleSaveQualifiedScoring = async (appId) => {
+    const overall = computeOverallAreaScore(modalAreaScores);
+
+    const values = Object.values(modalCompScores).filter(v => v !== '' && Number.isFinite(Number(v)));
+    const average = values.length ? Number((values.reduce((sum, v) => sum + Number(v), 0) / values.length).toFixed(2)) : 0;
+
+    const nextStatus = ['qualified', 'ier_posted'].includes(pipeSelectedKey) ? 'qualified' : 'for_comparative_assessment';
+
+    try {
+      await apiFetch(`/api/applications/${appId}/pipeline`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          assessmentStatus: pipeSelectedKey,
+          comparativeAssessmentScores: modalCompScores,
+          status: nextStatus,
+          areaScores: modalAreaScores,
+          overallFit: overall
+        })
+      });
+      setQualModalDirty(false);
+      setPipeOriginalKey(pipeSelectedKey);
+      setShowQualModal(false);
+      setToast({ message: 'Qualified scoring and pipeline stage saved successfully!', type: 'success' });
+      loadAllData();
+    } catch (e) {
+      setToast({ message: e.message, type: 'error' });
+    }
+  };
+
+  const handleCloseQualModal = () => {
+    if (qualModalDirty) {
+      setShowQualDiscardWarning(true);
+    } else {
+      setShowQualModal(false);
+      setSelectedQualApp(null);
+    }
+  };
+
+  const handleAreaScoreChange = (key, val) => {
+    setModalAreaScores(prev => {
+      const updated = { ...prev, [key]: val === '' ? '' : Math.max(0, Math.min(100, Number(val))) };
+      setQualModalDirty(true);
+      return updated;
+    });
+  };
+
+  const handleCompScoreChange = (key, val) => {
+    setModalCompScores(prev => {
+      const updated = { ...prev, [key]: val === '' ? '' : Math.max(0, Math.min(100, Number(val))) };
+      setQualModalDirty(true);
+      return updated;
+    });
+  };
+
+  const qualStageIndex = (key) => QUAL_PIPELINE.findIndex(s => s.key === key);
+  const qualStageInfo = (key) => QUAL_PIPELINE.find(s => s.key === key) || (key === 'not_selected' ? QUAL_NOT_SELECTED : QUAL_PIPELINE[0]);
+  const qualPhase = (key) => (qualStageInfo(key) || {}).phase || 1;
+  const pipeGateState = (key) => key === 'not_selected' ? 'fail' : (qualPhase(key) === 2 ? 'pass' : 'pending');
+
+  const pipeStepNeighbors = (key) => {
+    if (key === 'not_selected') return ['assessment_completed', 'assessment_ongoing'];
+    const idx = qualStageIndex(key);
+    if (idx === -1) return [];
+    const neighbors = [];
+    if (idx > 0) neighbors.push(QUAL_PIPELINE[idx - 1].key);
+    if (idx < QUAL_PIPELINE.length - 1) neighbors.push(QUAL_PIPELINE[idx + 1].key);
+    if (key === 'assessment_completed') neighbors.push('not_selected');
+    return neighbors;
+  };
+
+  const canAdvanceToPipeKey = (key) => {
+    if (!pipeOriginalKey || key === pipeOriginalKey) return true;
+    return pipeStepNeighbors(pipeOriginalKey).includes(key);
   };
 
   const getVacancyCellValue = (v, key) => {
@@ -992,9 +1447,19 @@ export default function App() {
       if (!v.postingStart || !v.postingEnd) return -999999;
       const start = new Date(v.postingStart.slice(0, 10) + "T00:00:00");
       const end = new Date(v.postingEnd.slice(0, 10) + "T00:00:00");
-      return Math.max(0, Math.round((end - start) / 86400000) + 1);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      if (v.status === 'closed' || today < start || today > end) return -999999;
+      return Math.round((end - today) / 86400000);
     }
-    if (key === 'postingStatus') return v.status === 'closed' ? 'Closed' : 'Open for Application';
+    if (key === 'postingStatus') {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const start = v.postingStart ? new Date(v.postingStart.slice(0, 10) + "T00:00:00") : null;
+      const end = v.postingEnd ? new Date(v.postingEnd.slice(0, 10) + "T00:00:00") : null;
+      const isClosed = v.status === 'closed' || (start && today < start) || (end && today > end);
+      return isClosed ? 'Closed' : 'Open for Application';
+    }
     return '';
   };
 
@@ -1010,7 +1475,17 @@ export default function App() {
       );
     }
     if (vacPosFilter) list = list.filter(v => v.positionId === vacPosFilter);
-    if (vacStatusFilter) list = list.filter(v => (v.status === 'closed' ? 'closed' : 'open') === vacStatusFilter);
+    if (vacStatusFilter) {
+      list = list.filter(v => {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const start = v.postingStart ? new Date(v.postingStart.slice(0, 10) + "T00:00:00") : null;
+        const end = v.postingEnd ? new Date(v.postingEnd.slice(0, 10) + "T00:00:00") : null;
+        const isClosed = v.status === 'closed' || (start && today < start) || (end && today > end);
+        const displayStatus = isClosed ? 'closed' : 'open';
+        return displayStatus === vacStatusFilter;
+      });
+    }
 
     Object.entries(vColumnFilters).forEach(([key, val]) => {
       if (val === undefined || val === null || val === '') return;
@@ -1052,7 +1527,13 @@ export default function App() {
   }, [filteredVacancies, vacPage, vacPageSize]);
 
   const handleToggleVacancy = (vac) => {
-    if (vac.status === 'closed') {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const start = vac.postingStart ? new Date(vac.postingStart.slice(0, 10) + "T00:00:00") : null;
+    const end = vac.postingEnd ? new Date(vac.postingEnd.slice(0, 10) + "T00:00:00") : null;
+    const isClosed = vac.status === 'closed' || (start && today < start) || (end && today > end);
+
+    if (isClosed) {
       setCalVacancy(vac);
       const initStart = vac.postingStart ? vac.postingStart.slice(0, 10) : new Date().toISOString().slice(0, 10);
       setCalStart(initStart);
@@ -1063,20 +1544,12 @@ export default function App() {
       setCalMonth(initDate.getMonth());
       setShowCalendar(true);
     } else {
-      const end = vac.postingEnd ? new Date(vac.postingEnd.slice(0, 10) + "T00:00:00") : null;
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const dr = end ? Math.round((end - today) / 86400000) : null;
-      if (dr !== null && !isNaN(dr) && dr <= 0) {
-        doCloseVacancy(vac.id, false);
-      } else {
-        setCloseWarningVac(vac);
-        setShowCloseWarning(true);
-        setCloseReason('');
-        setCloseReasonOther('');
-        setClosePasscode('');
-        setPasscodeError('');
-      }
+      setCloseWarningVac(vac);
+      setShowCloseWarning(true);
+      setCloseReason('');
+      setCloseReasonOther('');
+      setClosePasscode('');
+      setPasscodeError('');
     }
   };
 
@@ -1089,11 +1562,11 @@ export default function App() {
       setShowCloseWarning(false);
       loadAllData();
     } catch (e) {
-      alert(e.message);
+      setToast({ message: e.message, type: 'error' });
     }
   };
 
-  const handleConfirmOverrideClose = () => {
+  const handleConfirmOverrideClose = async () => {
     let finalReason = closeReason;
     if (closeReason === '__other__') {
       finalReason = closeReasonOther.trim();
@@ -1106,23 +1579,43 @@ export default function App() {
       setPasscodeError("Please select a justification for closing this posting abruptly.");
       return;
     }
-    if (closePasscode !== '123456') {
-      setPasscodeError("Incorrect passcode. Closing is still not allowed.");
-      return;
+    try {
+      await apiFetch('/api/auth/verify-passcode', {
+        method: 'POST',
+        body: JSON.stringify({ passcode: closePasscode })
+      });
+      doCloseVacancy(closeWarningVac.id, true, finalReason);
+    } catch (e) {
+      setPasscodeError(e.message || "Incorrect passcode. Closing is still not allowed.");
     }
-    doCloseVacancy(closeWarningVac.id, true, finalReason);
   };
 
   const selectCalDate = (iso) => {
     if (calField === 'start') {
       setCalStart(iso);
-      if (calEnd && iso > calEnd) {
-        setCalEnd('');
+      if (calEnd) {
+        const startD = new Date(iso + "T00:00:00");
+        const endD = new Date(calEnd + "T00:00:00");
+        const diffDays = Math.round((endD - startD) / 86400000);
+        if (diffDays > 10) {
+          setCalEnd('');
+        } else if (iso > calEnd) {
+          setCalEnd('');
+        }
       }
     } else {
       if (calStart && iso < calStart) {
-        alert("Deadline cannot be earlier than the start date.");
+        setToast({ message: "Deadline cannot be earlier than the start date.", type: 'error' });
         return;
+      }
+      if (calStart) {
+        const startD = new Date(calStart + "T00:00:00");
+        const endD = new Date(iso + "T00:00:00");
+        const diffDays = Math.round((endD - startD) / 86400000);
+        if (diffDays > 10) {
+          setToast({ message: "Deadline cannot be more than 10 days after the start date.", type: 'error' });
+          return;
+        }
       }
       setCalEnd(iso);
     }
@@ -1151,7 +1644,13 @@ export default function App() {
   };
 
   const handleConfirmSchedule = async () => {
-    if (!calVacancy || !calStart || !calEnd) return alert('Please input all values');
+    if (!calVacancy || !calStart || !calEnd) return setToast({ message: 'Please input all values', type: 'error' });
+    const startD = new Date(calStart + "T00:00:00");
+    const endD = new Date(calEnd + "T00:00:00");
+    const diffDays = Math.round((endD - startD) / 86400000);
+    if (diffDays > 10) {
+      return setToast({ message: "Deadline cannot be more than 10 days after the start date.", type: 'error' });
+    }
     try {
       await apiFetch(`/api/vacancies/${calVacancy.id}`, {
         method: 'PUT',
@@ -1160,7 +1659,7 @@ export default function App() {
       setShowCalendar(false);
       loadAllData();
     } catch (e) {
-      alert(e.message);
+      setToast({ message: e.message, type: 'error' });
     }
   };
 
@@ -1179,33 +1678,199 @@ export default function App() {
 
   const handleAddNoscaVacancies = async () => {
     const toAdd = detectedItems.filter(it => selectedNoscaItemNos.includes(it.itemNo));
-    if (!toAdd.length) return alert('Please tick at least one item to add');
+    if (!toAdd.length) return setToast({ message: 'Please tick at least one item to add', type: 'error' });
     try {
       await apiFetch('/api/vacancies/import-nosca', { method: 'POST', body: JSON.stringify({ items: toAdd }) });
-      alert('Vacancies added successfully!');
+      setToast({ message: 'Vacancies added successfully!', type: 'success' });
       setShowNosca(false);
       setDetectedItems([]);
       setSelectedNoscaItemNos([]);
       loadAllData();
     } catch (e) {
-      alert(e.message);
+      setToast({ message: e.message, type: 'error' });
     }
   };
 
   // Appointments
+  const getApptColumnValue = (row, key) => {
+    if (key === 'applicant') return row.applicant || '';
+    if (key === 'vacancy') return row.vacancy || '';
+    if (key === 'itemNo') return row.itemNo || '';
+    if (key === 'fit') return row.fit || 0;
+    if (key === 'appointmentStatus') return row.appointmentStatus || '';
+    if (key === 'appointmentDate') return row.appointmentDate ? row.appointmentDate.slice(0, 10) : '';
+    return '';
+  };
+
+  const allAppointments = useMemo(() => {
+    return applications.filter(app => ['appointed', 'rejected'].includes(app.appointmentStatus));
+  }, [applications]);
+
+  const filteredAppointments = useMemo(() => {
+    let list = allAppointments;
+
+    Object.entries(apptColFilters).forEach(([key, val]) => {
+      if (val === undefined || val === null || val === '') return;
+
+      if (key === 'fit') {
+        if (val.min !== undefined && val.min !== '') {
+          list = list.filter(r => r.fit >= Number(val.min));
+        }
+        if (val.max !== undefined && val.max !== '') {
+          list = list.filter(r => r.fit <= Number(val.max));
+        }
+      } else {
+        list = list.filter(r => {
+          const cellVal = getApptColumnValue(r, key);
+          return String(cellVal).toLowerCase().includes(String(val).toLowerCase());
+        });
+      }
+    });
+
+    if (apptSortKey) {
+      const dir = apptSortDir === 'asc' ? 1 : -1;
+      list = [...list].sort((a, b) => {
+        const av = getApptColumnValue(a, apptSortKey);
+        const bv = getApptColumnValue(b, apptSortKey);
+        if (typeof av === 'number' && typeof bv === 'number') {
+          return (av - bv) * dir;
+        }
+        return String(av).localeCompare(String(bv), undefined, { numeric: true, sensitivity: 'base' }) * dir;
+      });
+    }
+
+    return list;
+  }, [allAppointments, apptColFilters, apptSortKey, apptSortDir]);
+
+  const paginatedAppointments = useMemo(() => {
+    const start = (apptPage - 1) * apptPageSize;
+    return filteredAppointments.slice(start, start + apptPageSize);
+  }, [filteredAppointments, apptPage, apptPageSize]);
+
   const appointedApplicants = useMemo(() => applications.filter(app => app.appointmentStatus === 'appointed'), [applications]);
 
+  const unappointedApps = useMemo(() => {
+    let list = applications.filter(app => 
+      ['qualified', 'for_comparative_assessment'].includes(app.status) && 
+      !app.appointmentStatus
+    );
+
+    // Apply column filters
+    if (unapptColFilters.applicant) {
+      const q = unapptColFilters.applicant.toLowerCase();
+      list = list.filter(r => r.applicant?.toLowerCase().includes(q));
+    }
+    if (unapptColFilters.vacancy) {
+      list = list.filter(r => r.vacancy === unapptColFilters.vacancy);
+    }
+    if (unapptColFilters.itemNo) {
+      const q = unapptColFilters.itemNo.toLowerCase();
+      list = list.filter(r => r.itemNo?.toLowerCase().includes(q));
+    }
+    if (unapptColFilters.fit?.min) {
+      list = list.filter(r => r.fit >= Number(unapptColFilters.fit.min));
+    }
+    if (unapptColFilters.fit?.max) {
+      list = list.filter(r => r.fit <= Number(unapptColFilters.fit.max));
+    }
+
+    if (unapptSortKey) {
+      const dir = unapptSortDir === 'asc' ? 1 : -1;
+      list = [...list].sort((a, b) => {
+        let av = a[unapptSortKey];
+        let bv = b[unapptSortKey];
+        if (typeof av === 'number' && typeof bv === 'number') {
+          return (av - bv) * dir;
+        }
+        return String(av).localeCompare(String(bv), undefined, { numeric: true, sensitivity: 'base' }) * dir;
+      });
+    }
+
+    return list;
+  }, [applications, unapptColFilters, unapptSortKey, unapptSortDir]);
+
+  const paginatedUnappointedApps = useMemo(() => {
+    const start = (unapptPage - 1) * unapptPageSize;
+    return unappointedApps.slice(start, start + unapptPageSize);
+  }, [unappointedApps, unapptPage, unapptPageSize]);
+
+  const handleDownloadNoticeOfAppointment = (app) => {
+    const date = app.appointmentDate ? new Date(app.appointmentDate).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }) : new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+    const content = `DEPARTMENT OF EDUCATION
+SDO Manila, Region NCR
+____________________________________________________
+
+NOTICE OF APPOINTMENT
+
+Date: ${date}
+
+MR./MS. ${app.applicant.toUpperCase()}
+Manila, Philippines
+
+Dear Mr./Ms. ${app.applicant}:
+
+You are hereby informed that the Schools Division Superintendent has approved your appointment as ${app.vacancy} under Item No. ${app.itemNo || 'N/A'}, with a Salary Grade of SG-${app.salaryGrade || app.appObj?.salaryGrade || 'N/A'}, effective on your date of assumption to duty.
+
+This appointment is subject to the usual civil service rules and regulations.
+
+Appointment Reference Code: ${app.appointmentReferenceCode || app.appObj?.appointmentReferenceCode || 'N/A'}
+
+Very truly yours,
+
+SCHOOLS DIVISION SUPERINTENDENT
+SDO Manila, Department of Education
+`;
+
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `Notice_of_Appointment_${app.applicant.replace(/\s+/g, '_')}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const appointmentKpiStats = useMemo(() => {
+    const totalItems = vacancies.length;
+    const filledItemNos = new Set(
+      applications
+        .filter(a => a.appointmentStatus === 'appointed')
+        .map(a => a.itemNo)
+        .filter(Boolean)
+    );
+    const totalFilled = filledItemNos.size;
+    const totalVacancies = Math.max(0, totalItems - totalFilled);
+    return { totalItems, totalFilled, totalVacancies };
+  }, [vacancies, applications]);
+
+  const handleExportAppointed = () => {
+    const headers = ["No.", "Applicant", "Applicant Code", "Position", "Item No.", "Average Score", "Appointment Status", "Date"];
+    const rows = filteredAppointments.map((r, i) => [
+      i + 1,
+      r.applicant,
+      r.code,
+      r.vacancy,
+      r.itemNo,
+      r.fit.toFixed(2),
+      r.appointmentStatus === 'appointed' ? 'Appointed' : 'Rejected',
+      r.appointmentDate ? r.appointmentDate.slice(0, 10) : ''
+    ]);
+    downloadCSV(headers, rows, `appointed-applicants-${new Date().toISOString().slice(0, 10)}.csv`);
+  };
+
   const handleConfirmAppointment = async (appId, date, refCode) => {
-    if (!date || !refCode) return alert('Please enter appointment details');
+    if (!date || !refCode) return setToast({ message: 'Please enter appointment details', type: 'error' });
     try {
       await apiFetch(`/api/applications/${appId}/appointment`, {
         method: 'POST',
         body: JSON.stringify({ appointmentDate: date, appointmentReferenceCode: refCode })
       });
-      alert('Appointment confirmed!');
+      setToast({ message: 'Appointment confirmed!', type: 'success' });
       loadAllData();
     } catch (e) {
-      alert(e.message);
+      setToast({ message: e.message, type: 'error' });
     }
   };
 
@@ -1320,6 +1985,14 @@ export default function App() {
     );
   }
 
+  const scoredAreaCount = Object.values(modalAreaScores).filter(v => v !== '' && Number.isFinite(Number(v))).length;
+  const overallScorefit = scoredAreaCount > 0 ? computeOverallAreaScore(modalAreaScores) : 0;
+  const overallTone = scoreTone(overallScorefit);
+  const compValues = Object.values(modalCompScores).filter(v => v !== '' && Number.isFinite(Number(v)));
+  const compAllScored = compValues.length === 3;
+  const compAverage = compAllScored ? Number((compValues.reduce((sum, v) => sum + Number(v), 0) / compValues.length).toFixed(2)) : 0;
+  const compTone = scoreTone(compAverage);
+
   return (
     <div className="app">
       {/* Tour highlight overlay */}
@@ -1379,9 +2052,9 @@ export default function App() {
             <span className="nav-icon">▦</span>
             <span className="nav-label">Applications</span>
           </button>
-          <button className={activeView === 'qualified' ? 'active' : ''} onClick={() => setActiveView('qualified')} title="Assessment">
+          <button className={activeView === 'qualified' ? 'active' : ''} onClick={() => setActiveView('qualified')} title="Comparative Assessment">
             <span className="nav-icon">✔</span>
-            <span className="nav-label">Assessment</span>
+            <span className="nav-label">Comparative Assessment</span>
           </button>
           <button className={activeView === 'appointment' ? 'active' : ''} onClick={() => setActiveView('appointment')} title="Appointment">
             <span className="nav-icon">★</span>
@@ -1462,7 +2135,7 @@ export default function App() {
                       <label>Assessment Status</label>
                       <select value={homeFilters.assessmentStatus} onChange={e => setHomeFilters({ ...homeFilters, assessmentStatus: e.target.value })}>
                         <option value="">All assessment statuses</option>
-                        <option value="marked_qualified">No Assessment</option>
+                        <option value="marked_qualified">Assessment Not Started</option>
                         <option value="assessment_started">Assessment Started</option>
                         <option value="assessment_completed">Assessment Completed</option>
                       </select>
@@ -1718,6 +2391,25 @@ export default function App() {
           {/* VIEW 2: VACANCY POSTINGS */}
           {activeView === 'vacancies' && (
             <section className="view active">
+              {/* KPI cards row */}
+              <div className="kpis">
+                <div className="kpi">
+                  <div className="kpi-label">Total Items</div>
+                  <div className="kpi-number">{vacanciesKpiStats.total}</div>
+                  <div className="kpi-caption">All HRMO postings</div>
+                </div>
+                <div className="kpi">
+                  <div className="kpi-label">Open for Application</div>
+                  <div className="kpi-number">{vacanciesKpiStats.open}</div>
+                  <div className="kpi-caption">Accepting applicants</div>
+                </div>
+                <div className="kpi">
+                  <div className="kpi-label">Closed</div>
+                  <div className="kpi-number">{vacanciesKpiStats.closed}</div>
+                  <div className="kpi-caption">No longer posted</div>
+                </div>
+              </div>
+
               <div className="controls-row">
                 <div className="filterbar">
                   <div className="toolbar">
@@ -1884,24 +2576,21 @@ export default function App() {
                         const appCount = applications.filter(a => a.vacancyId === vac.id).length;
                         const today = new Date();
                         today.setHours(0, 0, 0, 0);
-                        const deadlineDate = vac.postingEnd ? new Date(vac.postingEnd.slice(0, 10) + "T00:00:00") : null;
-                        const deadlinePast = deadlineDate ? deadlineDate < today : false;
+                        const start = vac.postingStart ? new Date(vac.postingStart.slice(0, 10) + "T00:00:00") : null;
+                        const end = vac.postingEnd ? new Date(vac.postingEnd.slice(0, 10) + "T00:00:00") : null;
+                        const isClosed = vac.status === 'closed' || (start && today < start) || (end && today > end);
+                        const deadlinePast = end ? end < today : false;
                         
                         let drText = 'N/A';
                         let drColor = 'var(--muted)';
-                        if (vac.postingStart && vac.postingEnd) {
-                          const start = new Date(vac.postingStart.slice(0, 10) + "T00:00:00");
-                          const end = new Date(vac.postingEnd.slice(0, 10) + "T00:00:00");
-                          const dr = Math.max(0, Math.round((end - start) / 86400000) + 1);
-                          drText = String(dr);
-                          
+                        if (!isClosed && end) {
                           const rem = Math.round((end - today) / 86400000);
-                          drColor = vac.status === 'closed' ? 'var(--muted)' : rem < 0 ? 'var(--red)' : rem <= 7 ? 'var(--amber)' : 'var(--green)';
+                          drText = String(rem);
+                          drColor = rem < 0 ? 'var(--red)' : rem <= 3 ? 'var(--amber)' : 'var(--green)';
                         }
 
                         const appCountColor = appCount === 0 ? 'var(--red)' : 'var(--navy)';
                         const deadlineColor = deadlinePast ? 'var(--red)' : 'var(--text)';
-                        const isClosed = vac.status === 'closed';
 
                         return (
                           <tr key={vac.id}>
@@ -1959,6 +2648,25 @@ export default function App() {
           {/* VIEW 3: APPLICATIONS TABLE */}
           {activeView === 'applications' && (
             <section className="view active">
+              {/* KPI cards row */}
+              <div className="kpis">
+                <div className="kpi">
+                  <div className="kpi-label">Total Applications</div>
+                  <div className="kpi-number">{applicationsKpiStats.total}</div>
+                  <div className="kpi-caption">All records</div>
+                </div>
+                <div className="kpi">
+                  <div className="kpi-label">Qualified</div>
+                  <div className="kpi-number">{applicationsKpiStats.qualified}</div>
+                  <div className="kpi-caption">Passed QS</div>
+                </div>
+                <div className="kpi">
+                  <div className="kpi-label">Disqualified</div>
+                  <div className="kpi-number">{applicationsKpiStats.disqualified}</div>
+                  <div className="kpi-caption">Failed QS</div>
+                </div>
+              </div>
+
               <div className="controls-row">
                 <div className="filterbar">
                   <div className="toolbar" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
@@ -2010,15 +2718,136 @@ export default function App() {
                     <thead>
                       <tr>
                         <th className="row-num">No.</th>
-                        <th onClick={() => handleSortClick('applicant')} style={{ cursor: 'pointer' }}>Applicant{getSortIndicator('applicant')}</th>
-                        <th onClick={() => handleSortClick('dateApplied')} style={{ cursor: 'pointer' }}>Date of Application{getSortIndicator('dateApplied')}</th>
-                        <th onClick={() => handleSortClick('deadline')} style={{ cursor: 'pointer' }}>Deadline of Application{getSortIndicator('deadline')}</th>
-                        <th onClick={() => handleSortClick('bachelorDegree')} style={{ cursor: 'pointer' }}>Bachelor’s Degree{getSortIndicator('bachelorDegree')}</th>
-                        <th onClick={() => handleSortClick('yearsExperience')} style={{ cursor: 'pointer' }}>Years Experience{getSortIndicator('yearsExperience')}</th>
-                        <th onClick={() => handleSortClick('trainingHours')} style={{ cursor: 'pointer' }}>Hours Training{getSortIndicator('trainingHours')}</th>
-                        <th onClick={() => handleSortClick('vacancy')} style={{ cursor: 'pointer' }}>Vacancy{getSortIndicator('vacancy')}</th>
-                        <th onClick={() => handleSortClick('itemNo')} style={{ cursor: 'pointer' }}>Item No.{getSortIndicator('itemNo')}</th>
-                        <th onClick={() => handleSortClick('status')} style={{ cursor: 'pointer' }}>Application Status{getSortIndicator('status')}</th>
+                        <th>
+                          <button className="th-btn" onClick={() => handleSortClick('applicant')}>
+                            Applicant{getSortIndicator('applicant')}
+                          </button>
+                          <input
+                            className="column-filter"
+                            placeholder="Filter..."
+                            value={appColFilters.applicant || ''}
+                            onChange={e => handleAppColFilterChange('applicant', e.target.value)}
+                          />
+                        </th>
+                        <th>
+                          <button className="th-btn" onClick={() => handleSortClick('dateApplied')}>
+                            Date of Application{getSortIndicator('dateApplied')}
+                          </button>
+                          <input
+                            className="column-filter"
+                            placeholder="Filter..."
+                            value={appColFilters.dateApplied || ''}
+                            onChange={e => handleAppColFilterChange('dateApplied', e.target.value)}
+                          />
+                        </th>
+                        <th>
+                          <button className="th-btn" onClick={() => handleSortClick('deadline')}>
+                            Deadline of Application{getSortIndicator('deadline')}
+                          </button>
+                          <input
+                            className="column-filter"
+                            placeholder="Filter..."
+                            value={appColFilters.deadline || ''}
+                            onChange={e => handleAppColFilterChange('deadline', e.target.value)}
+                          />
+                        </th>
+                        <th>
+                          <button className="th-btn" onClick={() => handleSortClick('bachelorDegree')}>
+                            Bachelor's Degree{getSortIndicator('bachelorDegree')}
+                          </button>
+                          <input
+                            className="column-filter"
+                            placeholder="Filter..."
+                            value={appColFilters.bachelorDegree || ''}
+                            onChange={e => handleAppColFilterChange('bachelorDegree', e.target.value)}
+                          />
+                        </th>
+                        <th className="num-col">
+                          <button className="th-btn" onClick={() => handleSortClick('yearsExperience')}>
+                            Years Experience{getSortIndicator('yearsExperience')}
+                          </button>
+                          <div className="column-filter-range">
+                            <input
+                              className="column-filter half"
+                              placeholder="Min"
+                              type="number"
+                              value={appColFilters.yearsExperience?.min || ''}
+                              onChange={e => handleAppColRangeChange('yearsExperience', 'min', e.target.value)}
+                            />
+                            <input
+                              className="column-filter half"
+                              placeholder="Max"
+                              type="number"
+                              value={appColFilters.yearsExperience?.max || ''}
+                              onChange={e => handleAppColRangeChange('yearsExperience', 'max', e.target.value)}
+                            />
+                          </div>
+                        </th>
+                        <th className="num-col">
+                          <button className="th-btn" onClick={() => handleSortClick('trainingHours')}>
+                            Hours Training{getSortIndicator('trainingHours')}
+                          </button>
+                          <div className="column-filter-range">
+                            <input
+                              className="column-filter half"
+                              placeholder="Min"
+                              type="number"
+                              value={appColFilters.trainingHours?.min || ''}
+                              onChange={e => handleAppColRangeChange('trainingHours', 'min', e.target.value)}
+                            />
+                            <input
+                              className="column-filter half"
+                              placeholder="Max"
+                              type="number"
+                              value={appColFilters.trainingHours?.max || ''}
+                              onChange={e => handleAppColRangeChange('trainingHours', 'max', e.target.value)}
+                            />
+                          </div>
+                        </th>
+                        <th>
+                          <button className="th-btn" onClick={() => handleSortClick('vacancy')}>
+                            Vacancy{getSortIndicator('vacancy')}
+                          </button>
+                          <select
+                            className="column-filter-select"
+                            value={appColFilters.vacancy || ''}
+                            onChange={e => handleAppColFilterChange('vacancy', e.target.value)}
+                          >
+                            <option value="">All</option>
+                            {Array.from(new Set(vacancies.map(v => v.title))).sort().map(title => (
+                              <option key={title} value={title}>{title}</option>
+                            ))}
+                          </select>
+                        </th>
+                        <th>
+                          <button className="th-btn" onClick={() => handleSortClick('itemNo')}>
+                            Item No.{getSortIndicator('itemNo')}
+                          </button>
+                          <input
+                            className="column-filter"
+                            placeholder="Filter..."
+                            value={appColFilters.itemNo || ''}
+                            onChange={e => handleAppColFilterChange('itemNo', e.target.value)}
+                          />
+                        </th>
+                        <th>
+                          <button className="th-btn" onClick={() => handleSortClick('status')}>
+                            Application Status{getSortIndicator('status')}
+                          </button>
+                          <select
+                            className="column-filter-select"
+                            value={appColFilters.status || ''}
+                            onChange={e => handleAppColFilterChange('status', e.target.value)}
+                          >
+                            <option value="">All</option>
+                            <option value="pending">Pending</option>
+                            <option value="pending_qs_review">Pending QS Review</option>
+                            <option value="qualified">Qualified</option>
+                            <option value="for_comparative_assessment">For Comparative Assessment</option>
+                            <option value="disqualified">Disqualified</option>
+                            <option value="excluded">Excluded</option>
+                          </select>
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
@@ -2029,21 +2858,55 @@ export default function App() {
                           <td>{r.dateApplied}</td>
                           <td>{r.deadline}</td>
                           <td>{r.bachelorDegree}</td>
-                          <td className="num-col">{r.yearsExperience}</td>
-                          <td className="num-col">{r.trainingHours}</td>
+                          <td className="num-col">
+                            <span className={`qs-number ${r.fitObj?.experienceScore >= 60 ? 'qs-pass' : 'qs-fail'}`}>
+                              {r.yearsExperience}
+                            </span>
+                          </td>
+                          <td className="num-col">
+                            <span className={`qs-number ${r.fitObj?.trainingScore >= 60 ? 'qs-pass' : 'qs-fail'}`}>
+                              {r.trainingHours}
+                            </span>
+                          </td>
                           <td>{r.vacancy}</td>
                           <td>{r.itemNo || '—'}</td>
                           <td><span className={`badge ${cls(r.status)}`}>{titleCase(r.status)}</span></td>
                         </tr>
                       ))}
+                      {paginatedApps.length === 0 && (
+                        <tr>
+                          <td colSpan={10} style={{ textAlign: 'center' }}>No applications match the filters.</td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
                 </div>
 
                 <div className="pager-controls">
-                  <button className="secondary" onClick={() => setAppPage(p => Math.max(1, p - 1))}>Prev</button>
-                  <span className="small">Page {appPage} of {Math.ceil(filteredApps.length / appPageSize)} ({filteredApps.length} records)</span>
-                  <button className="secondary" onClick={() => setAppPage(p => p + 1)}>Next</button>
+                  <div className="pager-group">
+                    <button className="secondary" onClick={() => setAppPage(p => Math.max(1, p - 1))} disabled={appPage === 1}>Prev</button>
+                    <span className="small">Page {appPage} of {Math.max(1, Math.ceil(filteredApps.length / appPageSize))} · {filteredApps.length} records</span>
+                    <button className="secondary" onClick={() => setAppPage(p => Math.min(Math.max(1, Math.ceil(filteredApps.length / appPageSize)), p + 1))} disabled={appPage >= Math.max(1, Math.ceil(filteredApps.length / appPageSize))}>Next</button>
+                  </div>
+                  <div className="pager-group">
+                    <div className="pager-field">
+                      <label>Rows</label>
+                      <select value={appPageSize} onChange={e => { setAppPageSize(Number(e.target.value)); setAppPage(1); }}>
+                        <option value="10">10</option>
+                        <option value="25">25</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                      </select>
+                    </div>
+                    <div className="pager-field">
+                      <label>Go to page</label>
+                      <select value={appPage} onChange={e => setAppPage(Number(e.target.value))}>
+                        {Array.from({ length: Math.max(1, Math.ceil(filteredApps.length / appPageSize)) }, (_, idx) => (
+                          <option key={idx + 1} value={idx + 1}>Page {idx + 1}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
                 </div>
               </div>
             </section>
@@ -2052,6 +2915,30 @@ export default function App() {
           {/* VIEW 4: QUALIFIED POOL / ASSESSMENT */}
           {activeView === 'qualified' && (
             <section className="view active">
+              {/* KPI cards row */}
+              <div className="kpis" style={{ '--qualified-cols': 4 }}>
+                <div className="kpi">
+                  <div className="kpi-label">Total Qualified</div>
+                  <div className="kpi-number">{qualifiedKpiStats.total}</div>
+                  <div className="kpi-caption">Applicants who passed initial screening</div>
+                </div>
+                <div className="kpi">
+                  <div className="kpi-label">No Assessment</div>
+                  <div className="kpi-number">{qualifiedKpiStats.noAssessment}</div>
+                  <div className="kpi-caption">Awaiting comparative assessment scores</div>
+                </div>
+                <div className="kpi">
+                  <div className="kpi-label">Assessment Started</div>
+                  <div className="kpi-number">{qualifiedKpiStats.assessmentStarted}</div>
+                  <div className="kpi-caption">Some assessment scores recorded</div>
+                </div>
+                <div className="kpi">
+                  <div className="kpi-label">Assessment Completed</div>
+                  <div className="kpi-number">{qualifiedKpiStats.assessmentCompleted}</div>
+                  <div className="kpi-caption">All assessment scores recorded</div>
+                </div>
+              </div>
+
               <div className="controls-row">
                 <div className="filterbar">
                   <div className="toolbar" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
@@ -2070,9 +2957,17 @@ export default function App() {
                       <label>Pipeline Stage</label>
                       <select value={qualStageFilter} onChange={e => setQualStageFilter(e.target.value)}>
                         <option value="">All stages</option>
-                        <option value="marked_qualified">No Assessment</option>
-                        <option value="assessment_started">Assessment Started</option>
-                        <option value="assessment_completed">Assessment Completed</option>
+                        <optgroup label="Phase 1 — Evaluation &amp; Assessment">
+                          {QUAL_PIPELINE.filter(s => s.phase === 1).map(s => (
+                            <option key={s.key} value={s.key}>{s.label}</option>
+                          ))}
+                        </optgroup>
+                        <optgroup label="Phase 2 — Registry &amp; Appointment">
+                          {QUAL_PIPELINE.filter(s => s.phase === 2).map(s => (
+                            <option key={s.key} value={s.key}>{s.label}</option>
+                          ))}
+                        </optgroup>
+                        <option value="not_selected">Not Selected</option>
                       </select>
                     </div>
                   </div>
@@ -2089,34 +2984,290 @@ export default function App() {
                   <table>
                     <thead>
                       <tr>
-                        <th>Rank</th>
-                        <th>Applicant</th>
-                        <th>Vacancy Item</th>
-                        <th>QS Fit Score</th>
-                        <th>Assessment Stage</th>
-                        <th style={{ textAlign: 'center' }}>Update Stage</th>
+                        <th className="row-num">No.</th>
+                        <th>
+                          <button className="th-btn" onClick={() => handleQualSort('applicant')}>
+                            Applicant{getQualSortIndicator('applicant')}
+                          </button>
+                          <input
+                            className="column-filter"
+                            placeholder="Filter..."
+                            value={qualColFilters.applicant || ''}
+                            onChange={e => handleQualColFilterChange('applicant', e.target.value)}
+                          />
+                        </th>
+                        <th>
+                          <button className="th-btn" onClick={() => handleQualSort('bachelorDegree')}>
+                            Bachelor's Degree{getQualSortIndicator('bachelorDegree')}
+                          </button>
+                          <input
+                            className="column-filter"
+                            placeholder="Filter..."
+                            value={qualColFilters.bachelorDegree || ''}
+                            onChange={e => handleQualColFilterChange('bachelorDegree', e.target.value)}
+                          />
+                        </th>
+                        <th>
+                          <button className="th-btn" onClick={() => handleQualSort('vacancy')}>
+                            Vacancy{getQualSortIndicator('vacancy')}
+                          </button>
+                          <select
+                            className="column-filter-select"
+                            value={qualColFilters.vacancy || ''}
+                            onChange={e => handleQualColFilterChange('vacancy', e.target.value)}
+                          >
+                            <option value="">All</option>
+                            {Array.from(new Set(vacancies.map(v => v.title))).sort().map(title => (
+                              <option key={title} value={title}>{title}</option>
+                            ))}
+                          </select>
+                        </th>
+                        <th>
+                          <button className="th-btn" onClick={() => handleQualSort('itemNo')}>
+                            Item No.{getQualSortIndicator('itemNo')}
+                          </button>
+                          <input
+                            className="column-filter"
+                            placeholder="Filter..."
+                            value={qualColFilters.itemNo || ''}
+                            onChange={e => handleQualColFilterChange('itemNo', e.target.value)}
+                          />
+                        </th>
+                        <th className="num-col">
+                          <button className="th-btn" onClick={() => handleQualSort('fit')}>
+                            Average Score{getQualSortIndicator('fit')}
+                          </button>
+                          <div className="column-filter-range">
+                            <input
+                              className="column-filter half"
+                              placeholder="Min"
+                              type="number"
+                              value={qualColFilters.fit?.min || ''}
+                              onChange={e => handleQualColRangeChange('fit', 'min', e.target.value)}
+                            />
+                            <input
+                              className="column-filter half"
+                              placeholder="Max"
+                              type="number"
+                              value={qualColFilters.fit?.max || ''}
+                              onChange={e => handleQualColRangeChange('fit', 'max', e.target.value)}
+                            />
+                          </div>
+                        </th>
+                        <th className="num-col">
+                          <button className="th-btn" onClick={() => handleQualSort('bei')}>
+                            BEI{getQualSortIndicator('bei')}
+                          </button>
+                          <div className="column-filter-range">
+                            <input
+                              className="column-filter half"
+                              placeholder="Min"
+                              type="number"
+                              value={qualColFilters.bei?.min || ''}
+                              onChange={e => handleQualColRangeChange('bei', 'min', e.target.value)}
+                            />
+                            <input
+                              className="column-filter half"
+                              placeholder="Max"
+                              type="number"
+                              value={qualColFilters.bei?.max || ''}
+                              onChange={e => handleQualColRangeChange('bei', 'max', e.target.value)}
+                            />
+                          </div>
+                        </th>
+                        <th className="num-col">
+                          <button className="th-btn" onClick={() => handleQualSort('wst')}>
+                            WST{getQualSortIndicator('wst')}
+                          </button>
+                          <div className="column-filter-range">
+                            <input
+                              className="column-filter half"
+                              placeholder="Min"
+                              type="number"
+                              value={qualColFilters.wst?.min || ''}
+                              onChange={e => handleQualColRangeChange('wst', 'min', e.target.value)}
+                            />
+                            <input
+                              className="column-filter half"
+                              placeholder="Max"
+                              type="number"
+                              value={qualColFilters.wst?.max || ''}
+                              onChange={e => handleQualColRangeChange('wst', 'max', e.target.value)}
+                            />
+                          </div>
+                        </th>
+                        <th className="num-col">
+                          <button className="th-btn" onClick={() => handleQualSort('we')}>
+                            WE{getQualSortIndicator('we')}
+                          </button>
+                          <div className="column-filter-range">
+                            <input
+                              className="column-filter half"
+                              placeholder="Min"
+                              type="number"
+                              value={qualColFilters.we?.min || ''}
+                              onChange={e => handleQualColRangeChange('we', 'min', e.target.value)}
+                            />
+                            <input
+                              className="column-filter half"
+                              placeholder="Max"
+                              type="number"
+                              value={qualColFilters.we?.max || ''}
+                              onChange={e => handleQualColRangeChange('we', 'max', e.target.value)}
+                            />
+                          </div>
+                        </th>
+                        <th>
+                          <button className="th-btn" onClick={() => handleQualSort('assessmentStatus')}>
+                            Assessment Status{getQualSortIndicator('assessmentStatus')}
+                          </button>
+                          <select
+                            className="column-filter-select"
+                            value={qualColFilters.assessmentStatus || ''}
+                            onChange={e => handleQualColFilterChange('assessmentStatus', e.target.value)}
+                          >
+                            <option value="">All</option>
+                            <option value="Assessment Not Started">Assessment Not Started</option>
+                            <option value="Assessment Started">Assessment Started</option>
+                            <option value="Assessment Completed">Assessment Completed</option>
+                          </select>
+                        </th>
+                        <th>
+                          <button className="th-btn" onClick={() => handleQualSort('appointmentStatus')}>
+                            Action{getQualSortIndicator('appointmentStatus')}
+                          </button>
+                          <select
+                            className="column-filter-select"
+                            value={qualColFilters.appointmentStatus || ''}
+                            onChange={e => handleQualColFilterChange('appointmentStatus', e.target.value)}
+                          >
+                            <option value="">All</option>
+                            <option value="Appoint">Appoint</option>
+                            <option value="appointed">Appointed</option>
+                            <option value="rejected">Rejected</option>
+                          </select>
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
-                      {paginatedQualified.map((r, i) => (
-                        <tr key={r.id}>
-                          <td style={{ fontWeight: 'bold', color: 'var(--blue)' }}>#{((qualPage - 1) * qualPageSize) + i + 1}</td>
-                          <td><b>{r.applicant}</b><br/><span className="small">{r.code}</span></td>
-                          <td>{r.vacancy} ({r.itemNo})</td>
-                          <td style={{ fontWeight: 'bold' }}>{r.fit.toFixed(2)}%</td>
-                          <td>
-                            <span className={`badge ${r.appObj.assessmentStatus === 'assessment_completed' ? 'green' : 'blue'}`}>
-                              {titleCase(r.appObj.assessmentStatus || 'marked_qualified')}
-                            </span>
-                          </td>
-                          <td style={{ textAlign: 'center' }}>
-                            <button className="secondary" style={{ marginRight: '6px' }} onClick={() => handleUpdatePipeline(r.id, 'assessment_started')}>Start</button>
-                            <button className="good" onClick={() => handleUpdatePipeline(r.id, 'assessment_completed')}>Complete</button>
-                          </td>
+                      {paginatedQualified.map((r, i) => {
+                        const cs = r.appObj?.comparativeAssessmentScores || {};
+                        const hasCompScores = ['bei', 'wst', 'we'].every(k => cs[k] !== '' && cs[k] !== null && cs[k] !== undefined && Number.isFinite(Number(cs[k])));
+                        const compAvgValue = hasCompScores ? (['bei', 'wst', 'we'].reduce((sum, k) => sum + Number(cs[k]), 0) / 3) : null;
+                        const appt = r.appObj?.appointmentStatus;
+                        
+                        const fmtScore = (v) => (v !== '' && v !== null && v !== undefined && Number.isFinite(Number(v))) ? (
+                          <span className={`badge ${Number(v) >= 85 ? 'green' : Number(v) >= 70 ? 'blue' : Number(v) >= 50 ? 'orange' : 'red'}`}>
+                            {Number(v).toFixed(2)}%
+                          </span>
+                        ) : '—';
+
+                        const getAssessmentStatus = (row) => {
+                           const csObj = row.appObj?.comparativeAssessmentScores || {};
+                           const areaScores = row.latestEval?.areaScores || {};
+                           const hasValue = v => v !== "" && v !== null && v !== undefined && Number.isFinite(Number(v));
+                           
+                           const compChecks = [csObj.bei, csObj.wst, csObj.we].map(hasValue);
+                           const compCount = compChecks.filter(Boolean).length;
+                           
+                           const areaChecks = Object.values(areaScores).map(hasValue);
+                           const areaCount = areaChecks.filter(Boolean).length;
+                           
+                           if (areaCount === 10 && compCount === 3) return { label: 'Assessment Completed', badge: 'green' };
+                           if (areaCount > 0 || compCount > 0) return { label: 'Assessment Started', badge: 'orange' };
+                           return { label: 'Assessment Not Started', badge: 'blue' };
+                         };
+
+                        const assessment = getAssessmentStatus(r);
+                        
+                        const actionCell = appt === 'appointed' ? (
+                          <span className="badge green">Appointed</span>
+                        ) : appt === 'rejected' ? (
+                          <span className="badge red">Rejected</span>
+                        ) : hasCompScores ? (
+                          <button
+                            className="good vac-action"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setAppointConfirmApp(r);
+                              setAppointDate(new Date().toISOString().slice(0, 10));
+                              setAppointRefCode(r.code);
+                              setShowSdsReminderModal(true);
+                            }}
+                          >
+                            Appoint
+                          </button>
+                        ) : (
+                          <button
+                            className="secondary vac-action incomplete"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setShowIncompleteAppointModal(true);
+                            }}
+                          >
+                            Appoint
+                          </button>
+                        );
+
+                        return (
+                          <tr key={r.id} className="clickable-row" onClick={() => openQualifiedScoringModal(r)}>
+                            <td className="row-num">{((qualPage - 1) * qualPageSize) + i + 1}</td>
+                            <td><b>{r.applicant}</b><br/><span className="small">{r.code}</span></td>
+                            <td>{r.bachelorDegree || '—'}</td>
+                            <td>{r.vacancy}</td>
+                            <td>{r.itemNo || '—'}</td>
+                            <td className="num-col">
+                              {hasCompScores && compAvgValue !== null ? (
+                                <span className={`badge ${compAvgValue >= 85 ? 'green' : compAvgValue >= 70 ? 'blue' : compAvgValue >= 50 ? 'orange' : 'red'}`}>
+                                  {compAvgValue.toFixed(2)}%
+                                </span>
+                              ) : '—'}
+                            </td>
+                            <td className="num-col">{fmtScore(cs.bei)}</td>
+                            <td className="num-col">{fmtScore(cs.wst)}</td>
+                            <td className="num-col">{fmtScore(cs.we)}</td>
+                            <td>
+                              <span className={`badge ${assessment.badge}`}>{assessment.label}</span>
+                            </td>
+                            <td>{actionCell}</td>
+                          </tr>
+                        );
+                      })}
+                      {paginatedQualified.length === 0 && (
+                        <tr>
+                          <td colSpan={11} style={{ textAlign: 'center' }}>No qualified personnel match the filters.</td>
                         </tr>
-                      ))}
+                      )}
                     </tbody>
                   </table>
+                </div>
+
+                {/* Pagination for Qualified Pool */}
+                <div className="pager-controls">
+                  <div className="pager-group">
+                    <button className="secondary" onClick={() => setQualPage(p => Math.max(1, p - 1))} disabled={qualPage === 1}>Prev</button>
+                    <span className="small">Page {qualPage} of {Math.max(1, Math.ceil(qualifiedApps.length / qualPageSize))} · {qualifiedApps.length} in qualified pool</span>
+                    <button className="secondary" onClick={() => setQualPage(p => Math.min(Math.max(1, Math.ceil(qualifiedApps.length / qualPageSize)), p + 1))} disabled={qualPage === Math.max(1, Math.ceil(qualifiedApps.length / qualPageSize))}>Next</button>
+                  </div>
+                  <div className="pager-group">
+                    <div className="pager-field">
+                      <label>Rows</label>
+                      <select value={qualPageSize} onChange={e => { setQualPageSize(Number(e.target.value)); setQualPage(1); }}>
+                        <option value="10">10</option>
+                        <option value="25">25</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                      </select>
+                    </div>
+                    <div className="pager-field">
+                      <label>Go to page</label>
+                      <select value={qualPage} onChange={e => setQualPage(Number(e.target.value))}>
+                        {Array.from({ length: Math.max(1, Math.ceil(qualifiedApps.length / qualPageSize)) }, (_, i) => (
+                          <option key={i + 1} value={i + 1}>Page {i + 1}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
                 </div>
               </div>
             </section>
@@ -2125,32 +3276,206 @@ export default function App() {
           {/* VIEW 5: APPOINTMENTS */}
           {activeView === 'appointment' && (
             <section className="view active">
+              {/* KPI cards row */}
+              <div className="kpis">
+                <div className="kpi">
+                  <div className="kpi-label">Total Items</div>
+                  <div className="kpi-number">{appointmentKpiStats.totalItems}</div>
+                  <div className="kpi-caption">All plantilla items</div>
+                </div>
+                <div className="kpi">
+                  <div className="kpi-label">Total Filled</div>
+                  <div className="kpi-number">{appointmentKpiStats.totalFilled}</div>
+                  <div className="kpi-caption">Items with appointed applicants</div>
+                </div>
+                <div className="kpi">
+                  <div className="kpi-label">Total Vacancies</div>
+                  <div className="kpi-number">{appointmentKpiStats.totalVacancies}</div>
+                  <div className="kpi-caption">Items still vacant</div>
+                </div>
+              </div>
+
               <div className="card">
-                <h2>Appointed Applicants</h2>
-                <p className="small" style={{ marginBottom: '14px' }}>Confirmed appointments for occupied items.</p>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+                  <div>
+                    <h2 style={{ margin: 0 }}>Appointed Applicants</h2>
+                    <p className="small" style={{ margin: '4px 0 0' }}>Confirmed appointments for occupied items.</p>
+                  </div>
+                  <button className="primary" onClick={handleExportAppointed} style={{ padding: '8px 16px', borderRadius: '8px', fontWeight: 'bold', fontFamily: 'var(--font-heading)' }}>
+                    Download Appointed List
+                  </button>
+                </div>
                 <div className="table-wrap">
-                  <table>
+                  <table className="appointments-table">
                     <thead>
                       <tr>
-                        <th>Applicant</th>
-                        <th>Position Item</th>
-                        <th>Reference Code</th>
-                        <th>Appointment Date</th>
-                        <th>Status</th>
+                        <th className="row-num">No.</th>
+                        <th>
+                          <button className="th-btn" onClick={() => handleApptSort('applicant')}>
+                            Applicant {apptSortKey === 'applicant' ? (apptSortDir === 'asc' ? ' ▲' : ' ▼') : ''}
+                          </button>
+                          <input
+                            className="column-filter"
+                            placeholder="Filter..."
+                            value={apptColFilters.applicant || ''}
+                            onChange={e => { setApptColFilters({ ...apptColFilters, applicant: e.target.value }); setApptPage(1); }}
+                          />
+                        </th>
+                        <th>
+                          <button className="th-btn" onClick={() => handleApptSort('vacancy')}>
+                            Position {apptSortKey === 'vacancy' ? (apptSortDir === 'asc' ? ' ▲' : ' ▼') : ''}
+                          </button>
+                          <select
+                            className="column-filter"
+                            value={apptColFilters.vacancy || ''}
+                            onChange={e => { setApptColFilters({ ...apptColFilters, vacancy: e.target.value }); setApptPage(1); }}
+                          >
+                            <option value="">All</option>
+                            {Array.from(new Set(allAppointments.map(a => a.vacancy))).map(vac => (
+                              <option key={vac} value={vac}>{vac}</option>
+                            ))}
+                          </select>
+                        </th>
+                        <th>
+                          <button className="th-btn" onClick={() => handleApptSort('itemNo')}>
+                            Item No. {apptSortKey === 'itemNo' ? (apptSortDir === 'asc' ? ' ▲' : ' ▼') : ''}
+                          </button>
+                          <input
+                            className="column-filter"
+                            placeholder="Filter..."
+                            value={apptColFilters.itemNo || ''}
+                            onChange={e => { setApptColFilters({ ...apptColFilters, itemNo: e.target.value }); setApptPage(1); }}
+                          />
+                        </th>
+                        <th className="num-col">
+                          <button className="th-btn" onClick={() => handleApptSort('fit')}>
+                            Average Score {apptSortKey === 'fit' ? (apptSortDir === 'asc' ? ' ▲' : ' ▼') : ''}
+                          </button>
+                          <div className="column-filter-range" style={{ display: 'flex', gap: '4px' }}>
+                            <input
+                              className="column-filter"
+                              type="number"
+                              placeholder="Min"
+                              value={apptColFilters.fit?.min || ''}
+                              onChange={e => {
+                                const curr = apptColFilters.fit || {};
+                                setApptColFilters({ ...apptColFilters, fit: { ...curr, min: e.target.value } });
+                                setApptPage(1);
+                              }}
+                              style={{ width: '50%' }}
+                            />
+                            <input
+                              className="column-filter"
+                              type="number"
+                              placeholder="Max"
+                              value={apptColFilters.fit?.max || ''}
+                              onChange={e => {
+                                const curr = apptColFilters.fit || {};
+                                setApptColFilters({ ...apptColFilters, fit: { ...curr, max: e.target.value } });
+                                setApptPage(1);
+                              }}
+                              style={{ width: '50%' }}
+                            />
+                          </div>
+                        </th>
+                        <th>
+                          <button className="th-btn" onClick={() => handleApptSort('appointmentStatus')}>
+                            Appointment Status {apptSortKey === 'appointmentStatus' ? (apptSortDir === 'asc' ? ' ▲' : ' ▼') : ''}
+                          </button>
+                          <select
+                            className="column-filter"
+                            value={apptColFilters.appointmentStatus || ''}
+                            onChange={e => { setApptColFilters({ ...apptColFilters, appointmentStatus: e.target.value }); setApptPage(1); }}
+                          >
+                            <option value="">All</option>
+                            <option value="appointed">Appointed</option>
+                            <option value="rejected">Rejected</option>
+                          </select>
+                        </th>
+                        <th>
+                          <button className="th-btn" onClick={() => handleApptSort('appointmentDate')}>
+                            Date {apptSortKey === 'appointmentDate' ? (apptSortDir === 'asc' ? ' ▲' : ' ▼') : ''}
+                          </button>
+                          <input
+                            className="column-filter"
+                            placeholder="Filter..."
+                            value={apptColFilters.appointmentDate || ''}
+                            onChange={e => { setApptColFilters({ ...apptColFilters, appointmentDate: e.target.value }); setApptPage(1); }}
+                          />
+                        </th>
+                        <th>Action</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {appointedApplicants.map(r => (
-                        <tr key={r.id}>
-                          <td><b>{r.applicant}</b></td>
-                          <td>{r.vacancy} ({r.itemNo})</td>
-                          <td><code>{r.appObj.appointmentReferenceCode}</code></td>
-                          <td>{r.appObj.appointmentDate ? r.appObj.appointmentDate.slice(0, 10) : ''}</td>
-                          <td><span className="badge green">Appointed</span></td>
+                      {paginatedAppointments.map((r, i) => {
+                        const isAppointed = r.appointmentStatus === 'appointed';
+                        const score = r.fit;
+                        return (
+                          <tr key={r.id}>
+                            <td className="row-num">{(apptPage - 1) * apptPageSize + i + 1}</td>
+                            <td><b>{r.applicant}</b><br/><span className="small">{r.code}</span></td>
+                            <td>{r.vacancy}</td>
+                            <td>{r.itemNo}</td>
+                            <td className="num-col">
+                              <span className={`badge ${score >= 85 ? 'green' : score >= 70 ? 'blue' : score >= 50 ? 'orange' : 'red'}`}>
+                                {score.toFixed(2)}%
+                              </span>
+                            </td>
+                            <td>
+                              <span className={`badge ${isAppointed ? 'green' : 'red'}`}>
+                                {isAppointed ? 'Appointed' : 'Rejected'}
+                              </span>
+                            </td>
+                            <td><span className="small">{r.appointmentDate ? r.appointmentDate.slice(0, 10) : ''}</span></td>
+                            <td>
+                              {isAppointed ? (
+                                <button
+                                  className="good"
+                                  onClick={() => handleDownloadNoticeOfAppointment(r)}
+                                  style={{ padding: '6px 12px', fontSize: '12px', borderRadius: '8px', fontWeight: 'bold', fontFamily: 'var(--font-heading)' }}
+                                >
+                                  Notice of Appointment
+                                </button>
+                              ) : '—'}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {paginatedAppointments.length === 0 && (
+                        <tr>
+                          <td colSpan={8} style={{ textAlign: 'center' }}>No records match the filters.</td>
                         </tr>
-                      ))}
+                      )}
                     </tbody>
                   </table>
+                </div>
+
+                {/* Pagination for Appointments Table */}
+                <div className="pager-controls" style={{ marginTop: '16px' }}>
+                  <div className="pager-group">
+                    <button className="secondary" onClick={() => setApptPage(p => Math.max(1, p - 1))} disabled={apptPage === 1}>Prev</button>
+                    <span className="small">Page {apptPage} of {Math.max(1, Math.ceil(filteredAppointments.length / apptPageSize))} · {filteredAppointments.length} record(s)</span>
+                    <button className="secondary" onClick={() => setApptPage(p => Math.min(Math.max(1, Math.ceil(filteredAppointments.length / apptPageSize)), p + 1))} disabled={apptPage === Math.max(1, Math.ceil(filteredAppointments.length / apptPageSize))}>Next</button>
+                  </div>
+                  <div className="pager-group">
+                    <div className="pager-field">
+                      <label>Rows</label>
+                      <select value={apptPageSize} onChange={e => { setApptPageSize(Number(e.target.value)); setApptPage(1); }}>
+                        <option value="10">10</option>
+                        <option value="25">25</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                      </select>
+                    </div>
+                    <div className="pager-field">
+                      <label>Go to page</label>
+                      <select value={apptPage} onChange={e => setApptPage(Number(e.target.value))}>
+                        {Array.from({ length: Math.max(1, Math.ceil(filteredAppointments.length / apptPageSize)) }, (_, idx) => (
+                          <option key={idx + 1} value={idx + 1}>Page {idx + 1}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -2161,37 +3486,521 @@ export default function App() {
                   <table>
                     <thead>
                       <tr>
-                        <th>Applicant</th>
-                        <th>Vacancy Item</th>
-                        <th>Fit Score</th>
+                        <th className="row-num">No.</th>
+                        <th>
+                          <button className="th-btn" onClick={() => handleUnapptSort('applicant')}>
+                            Applicant {unapptSortKey === 'applicant' ? (unapptSortDir === 'asc' ? ' ▲' : ' ▼') : ''}
+                          </button>
+                          <input
+                            className="column-filter"
+                            placeholder="Filter..."
+                            value={unapptColFilters.applicant || ''}
+                            onChange={e => { setUnapptColFilters({ ...unapptColFilters, applicant: e.target.value }); setUnapptPage(1); }}
+                          />
+                        </th>
+                        <th>
+                          <button className="th-btn" onClick={() => handleUnapptSort('vacancy')}>
+                            Position {unapptSortKey === 'vacancy' ? (unapptSortDir === 'asc' ? ' ▲' : ' ▼') : ''}
+                          </button>
+                          <select
+                            className="column-filter"
+                            value={unapptColFilters.vacancy || ''}
+                            onChange={e => { setUnapptColFilters({ ...unapptColFilters, vacancy: e.target.value }); setUnapptPage(1); }}
+                          >
+                            <option value="">All</option>
+                            {Array.from(new Set(applications.filter(a => ['qualified', 'for_comparative_assessment'].includes(a.status) && !a.appointmentStatus).map(a => a.vacancy))).map(vac => (
+                              <option key={vac} value={vac}>{vac}</option>
+                            ))}
+                          </select>
+                        </th>
+                        <th>
+                          <button className="th-btn" onClick={() => handleUnapptSort('itemNo')}>
+                            Item No. {unapptSortKey === 'itemNo' ? (unapptSortDir === 'asc' ? ' ▲' : ' ▼') : ''}
+                          </button>
+                          <input
+                            className="column-filter"
+                            placeholder="Filter..."
+                            value={unapptColFilters.itemNo || ''}
+                            onChange={e => { setUnapptColFilters({ ...unapptColFilters, itemNo: e.target.value }); setUnapptPage(1); }}
+                          />
+                        </th>
+                        <th className="num-col">
+                          <button className="th-btn" onClick={() => handleUnapptSort('fit')}>
+                            Average Score {unapptSortKey === 'fit' ? (unapptSortDir === 'asc' ? ' ▲' : ' ▼') : ''}
+                          </button>
+                          <div className="column-filter-range" style={{ display: 'flex', gap: '4px' }}>
+                            <input
+                              className="column-filter"
+                              type="number"
+                              placeholder="Min"
+                              value={unapptColFilters.fit?.min || ''}
+                              onChange={e => {
+                                const curr = unapptColFilters.fit || {};
+                                setUnapptColFilters({ ...unapptColFilters, fit: { ...curr, min: e.target.value } });
+                                setUnapptPage(1);
+                              }}
+                              style={{ width: '50%' }}
+                            />
+                            <input
+                              className="column-filter"
+                              type="number"
+                              placeholder="Max"
+                              value={unapptColFilters.fit?.max || ''}
+                              onChange={e => {
+                                const curr = unapptColFilters.fit || {};
+                                setUnapptColFilters({ ...unapptColFilters, fit: { ...curr, max: e.target.value } });
+                                setUnapptPage(1);
+                              }}
+                              style={{ width: '50%' }}
+                            />
+                          </div>
+                        </th>
                         <th>Action</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {qualifiedApps.filter(app => !app.appObj.appointmentStatus).map(r => (
-                        <tr key={r.id}>
-                          <td><b>{r.applicant}</b></td>
-                          <td>{r.vacancy} ({r.itemNo})</td>
-                          <td>{r.fit.toFixed(2)}%</td>
-                          <td>
-                            <button className="good" onClick={() => {
-                              const refCode = prompt('Enter Appointment Reference Code:');
-                              const date = new Date().toISOString().slice(0,10);
-                              if (refCode) {
-                                handleConfirmAppointment(r.id, date, refCode);
-                              }
-                            }}>Appoint</button>
-                          </td>
+                      {paginatedUnappointedApps.map((r, i) => {
+                        const cs = r.appObj?.comparativeAssessmentScores || {};
+                        const hasCompScores = ['bei', 'wst', 'we'].every(k => cs[k] !== '' && cs[k] !== null && cs[k] !== undefined && Number.isFinite(Number(cs[k])));
+                        return (
+                          <tr key={r.id}>
+                            <td className="row-num">{(unapptPage - 1) * unapptPageSize + i + 1}</td>
+                            <td><b>{r.applicant}</b></td>
+                            <td>{r.vacancy}</td>
+                            <td>{r.itemNo || '—'}</td>
+                            <td className="num-col">
+                              <span className={`badge ${r.fit >= 85 ? 'green' : r.fit >= 70 ? 'blue' : r.fit >= 50 ? 'orange' : 'red'}`}>
+                                {r.fit.toFixed(2)}%
+                              </span>
+                            </td>
+                            <td>
+                              {hasCompScores ? (
+                                <button className="good vac-action" onClick={() => {
+                                  setAppointConfirmApp(r);
+                                  setAppointDate(new Date().toISOString().slice(0, 10));
+                                  setAppointRefCode(r.code);
+                                  setShowSdsReminderModal(true);
+                                }}>Appoint</button>
+                              ) : (
+                                <button className="secondary vac-action incomplete" onClick={() => setShowIncompleteAppointModal(true)}>
+                                  Appoint
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {paginatedUnappointedApps.length === 0 && (
+                        <tr>
+                          <td colSpan={6} style={{ textAlign: 'center' }}>No unappointed applicants match the filters.</td>
                         </tr>
-                      ))}
+                      )}
                     </tbody>
                   </table>
+                </div>
+
+                {/* Pagination for Unappointed Applicants */}
+                <div className="pager-controls" style={{ marginTop: '14px' }}>
+                  <div className="pager-group">
+                    <button className="secondary" onClick={() => setUnapptPage(p => Math.max(1, p - 1))} disabled={unapptPage === 1}>Prev</button>
+                    <span className="small">Page {unapptPage} of {Math.max(1, Math.ceil(unappointedApps.length / unapptPageSize))} · {unappointedApps.length} records</span>
+                    <button className="secondary" onClick={() => setUnapptPage(p => Math.min(Math.max(1, Math.ceil(unappointedApps.length / unapptPageSize)), p + 1))} disabled={unapptPage >= Math.max(1, Math.ceil(unappointedApps.length / unapptPageSize))}>Next</button>
+                  </div>
+                  <div className="pager-group">
+                    <div className="pager-field">
+                      <label>Rows</label>
+                      <select value={unapptPageSize} onChange={e => { setUnapptPageSize(Number(e.target.value)); setUnapptPage(1); }}>
+                        <option value="10">10</option>
+                        <option value="25">25</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                      </select>
+                    </div>
+                    <div className="pager-field">
+                      <label>Go to page</label>
+                      <select value={unapptPage} onChange={e => setUnapptPage(Number(e.target.value))}>
+                        {Array.from({ length: Math.max(1, Math.ceil(unappointedApps.length / unapptPageSize)) }, (_, i) => (
+                          <option key={i + 1} value={i + 1}>Page {i + 1}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
                 </div>
               </div>
             </section>
           )}
         </main>
       </div>
+
+      {/* MODAL: QUALIFIED ASSESSMENT / SCORING */}
+      {showQualModal && selectedQualApp && (
+        <div className="modal open">
+          <div className="modal-box" style={{ padding: '0 24px 24px', maxHeight: '92vh', overflow: 'auto', width: 'min(1100px, 98vw)' }}>
+            <div className="modal-head" style={{
+              paddingTop: '24px',
+              paddingBottom: '12px',
+              background: 'white',
+              position: 'sticky',
+              top: 0,
+              zIndex: 10,
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              borderBottom: '1px solid var(--line)'
+            }}>
+              <h2>Qualification Standards Matrix — {selectedQualApp.applicant}</h2>
+              <button className="secondary" onClick={handleCloseQualModal}>Close</button>
+            </div>
+
+            <div className="modal-body" style={{ marginTop: '20px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
+              {/* QS Matrix Card */}
+              <div className="qs-matrix-wrap qualified-tab-card">
+                <div className="qualified-card-head" style={{ padding: '24px' }}>
+                  <div className="position-detail-eyebrow">Qualification Standards</div>
+                  <h4>Qualification Standards Matrix</h4>
+                  <p className="small">Matrix view of the applicant against the position's qualification standards.</p>
+                </div>
+                <div className="qualified-card-body" style={{ padding: '0 24px 24px' }}>
+                  <div className="qs-matrix-meta" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '20px', padding: '16px', backgroundColor: 'var(--blue-50)', borderRadius: '12px' }}>
+                    <div className="meta-tile"><b>Applicant</b><br/>{selectedQualApp.applicant}</div>
+                    <div className="meta-tile"><b>Applicant code</b><br/>{selectedQualApp.code}</div>
+                    <div className="meta-tile"><b>Vacancy</b><br/>{selectedQualApp.vacancy}</div>
+                    <div className="meta-tile"><b>Deadline</b><br/>{selectedQualApp.deadline || '—'}</div>
+                  </div>
+                  <div className="qs-matrix-table-wrap">
+                    <table className="qs-matrix-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr style={{ textAlign: 'left', borderBottom: '2.5px solid var(--line)' }}>
+                          <th style={{ padding: '12px 8px' }}>Criterion</th>
+                          <th style={{ padding: '12px 8px' }}>Applicant</th>
+                          <th style={{ padding: '12px 8px' }}>Qualification Standard</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr style={{ borderBottom: '1px solid var(--line)' }}>
+                          <td style={{ padding: '12px 8px' }}>Bachelor's Degree</td>
+                          <td style={{ padding: '12px 8px' }}>
+                            {selectedQualApp.applicantObj?.bachelorDegree || '—'}
+                            {selectedQualApp.applicantObj?.major && (
+                              <div className="small" style={{ color: 'var(--muted)', marginTop: '4px' }}>
+                                {selectedQualApp.applicantObj.major}
+                              </div>
+                            )}
+                          </td>
+                          <td style={{ padding: '12px 8px' }}>{selectedQualApp.positionObj?.requiredBachelorDegree || 'No minimum specified'}</td>
+                        </tr>
+                        <tr style={{ borderBottom: '1px solid var(--line)' }}>
+                          <td style={{ padding: '12px 8px' }}>Years of Experience</td>
+                          <td style={{ padding: '12px 8px' }}>{selectedQualApp.yearsExperience} year(s)</td>
+                          <td style={{ padding: '12px 8px' }}>{selectedQualApp.positionObj?.minYearsExperience || 0} minimum year(s)</td>
+                        </tr>
+                        <tr style={{ borderBottom: '1px solid var(--line)' }}>
+                          <td style={{ padding: '12px 8px' }}>Hours of Training</td>
+                          <td style={{ padding: '12px 8px' }}>{selectedQualApp.trainingHours} hour(s)</td>
+                          <td style={{ padding: '12px 8px' }}>{selectedQualApp.positionObj?.minTrainingHours || 0} minimum hour(s)</td>
+                        </tr>
+                        <tr style={{ borderBottom: '1px solid var(--line)' }}>
+                          <td style={{ padding: '12px 8px' }}>Eligibility</td>
+                          <td style={{ padding: '12px 8px' }}>{selectedQualApp.applicantObj?.eligibility || '—'}</td>
+                          <td style={{ padding: '12px 8px' }}>{selectedQualApp.positionObj?.eligibilityRequired || 'Not specified'}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+
+              {/* Scoring Metrics Card */}
+              <div className="qs-matrix-wrap qualified-tab-card">
+                <div className="qualified-card-head" style={{ padding: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px', borderBottom: '1px solid var(--line)' }}>
+                  <div>
+                    <div className="position-detail-eyebrow">Scoring Mechanism</div>
+                    <h4>Scoring Metrics</h4>
+                    <p className="small">Enter category scores based on the prescribed criteria and submitted MOVs.</p>
+                  </div>
+                  <div className="qs-matrix-summary" style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                    <div className={`qs-score-card ${scoredAreaCount > 0 ? overallTone.color : ''}`} style={{ padding: '12px 20px', border: '2px solid var(--line)', borderRadius: '16px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                      <span className="qs-score-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 800 }}>Overall Scorefit</span>
+                      <span className="qs-score-value" style={{ fontSize: '24px', fontWeight: 900, color: 'var(--navy)' }}>{scoredAreaCount > 0 ? `${overallScorefit.toFixed(2)}%` : '—'}</span>
+                      <span className="qs-score-caption" style={{ fontSize: '11px', color: 'var(--muted)' }}>{scoredAreaCount > 0 ? `${scoredAreaCount} scored area(s)` : `${scoredAreaCount} of ${SCORE_AREAS.length} area(s) scored`}</span>
+                    </div>
+                    <button
+                      className={`good qualified-save-top qualified-score-save-btn ${qualModalDirty ? '' : 'up-to-date'}`}
+                      disabled={!qualModalDirty}
+                      onClick={() => handleSaveQualifiedScoring(selectedQualApp.id)}
+                    >
+                      {qualModalDirty ? 'Save Changes' : 'Up-to-date'}
+                    </button>
+                  </div>
+                </div>
+                <div className="qualified-card-body" style={{ padding: '24px' }}>
+                  <div className="qs-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px' }}>
+                    {SCORE_AREAS.map(area => (
+                      <div className="qs-card" key={area.key} style={{ border: '1px solid var(--line)', borderRadius: '16px', padding: '16px' }}>
+                        <h3 style={{ marginBottom: '6px' }}>{area.label}</h3>
+                        <p className="small" style={{ margin: '0 0 12px', minHeight: '36px' }}>{area.description}</p>
+                        <div style={{ marginTop: 'auto', padding: '14px', border: '2px solid var(--line)', borderRadius: '18px', background: 'linear-gradient(135deg,#FFFFFF,#F8FCFF)' }}>
+                          <label style={{ margin: '0 0 8px', display: 'block', fontWeight: 'bold' }}>Score</label>
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            step="0.01"
+                            value={modalAreaScores[area.key] ?? ''}
+                            onChange={e => handleAreaScoreChange(area.key, e.target.value)}
+                            placeholder="0.00 - 100.00"
+                            style={{ height: '50px', textAlign: 'center', fontFamily: 'var(--font-heading)', fontSize: '24px', fontWeight: 950, border: '2.5px solid var(--blue-600)', background: 'white', boxShadow: '0 8px 18px rgba(2,132,199,.08)', width: '100%', boxSizing: 'border-box', borderRadius: '8px' }}
+                          />
+                          <div className="small" style={{ marginTop: '8px', fontWeight: 800 }}>Enter a score from 0.00 to 100.00</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Comparative Assessment Card */}
+              <div className="qs-matrix-wrap qualified-tab-card">
+                <div className="qualified-card-head" style={{ padding: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px', borderBottom: '1px solid var(--line)' }}>
+                  <div>
+                    <div className="position-detail-eyebrow">Comparative Assessment</div>
+                    <h4>Comparative Assessment Average</h4>
+                    <p className="small">Encode BEI, WST, and WE scores. The system computes the average score automatically.</p>
+                  </div>
+                  <div className="qs-matrix-summary" style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                    <div className={`qs-score-card ${compAllScored ? compTone.color : ''}`} style={{ padding: '12px 20px', border: '2px solid var(--line)', borderRadius: '16px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                      <span className="qs-score-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 800 }}>Average Score</span>
+                      <span className="qs-score-value" style={{ fontSize: '24px', fontWeight: 900, color: 'var(--navy)' }}>{compAllScored ? `${compAverage.toFixed(2)}%` : '—'}</span>
+                      <span className="qs-score-caption" style={{ fontSize: '11px', color: 'var(--muted)' }}>{compAllScored ? `${compValues.length} assessment score(s)` : `${compValues.length} of 3 score(s) entered`}</span>
+                    </div>
+                    <button
+                      className={`good qualified-save-top qualified-score-save-btn ${qualModalDirty ? '' : 'up-to-date'}`}
+                      disabled={!qualModalDirty}
+                      onClick={() => handleSaveQualifiedScoring(selectedQualApp.id)}
+                    >
+                      {qualModalDirty ? 'Save Changes' : 'Up-to-date'}
+                    </button>
+                  </div>
+                </div>
+                <div className="qualified-card-body" style={{ padding: '24px' }}>
+                  <div className="qs-grid comparative-assessment-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
+                    {/* BEI */}
+                    <div className="qs-card" style={{ border: '1px solid var(--line)', borderRadius: '16px', padding: '16px' }}>
+                      <h3 style={{ marginBottom: '6px' }}>Behavioral Events Interview (BEI)</h3>
+                      <p className="small" style={{ margin: '0 0 12px', minHeight: '36px' }}>Average BEI score based on panel interview ratings and competency indicators.</p>
+                      <div style={{ marginTop: 'auto', padding: '14px', border: '2px solid var(--line)', borderRadius: '18px', background: 'linear-gradient(135deg,#FFFFFF,#F8FCFF)' }}>
+                        <label style={{ margin: '0 0 8px', display: 'block', fontWeight: 'bold' }}>Score</label>
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="0.01"
+                          value={modalCompScores.bei ?? ''}
+                          onChange={e => handleCompScoreChange('bei', e.target.value)}
+                          placeholder="0.00 - 100.00"
+                          style={{ height: '50px', textAlign: 'center', fontFamily: 'var(--font-heading)', fontSize: '24px', fontWeight: 950, border: '2.5px solid var(--blue-600)', background: 'white', boxShadow: '0 8px 18px rgba(2,132,199,.08)', width: '100%', boxSizing: 'border-box', borderRadius: '8px' }}
+                        />
+                        <div className="small" style={{ marginTop: '8px', fontWeight: 800 }}>Enter a score from 0.00 to 100.00</div>
+                      </div>
+                    </div>
+                    {/* WST */}
+                    <div className="qs-card" style={{ border: '1px solid var(--line)', borderRadius: '16px', padding: '16px' }}>
+                      <h3 style={{ marginBottom: '6px' }}>Work Sample Test (WST)</h3>
+                      <p className="small" style={{ margin: '0 0 12px', minHeight: '36px' }}>Score for the work sample or technical performance test.</p>
+                      <div style={{ marginTop: 'auto', padding: '14px', border: '2px solid var(--line)', borderRadius: '18px', background: 'linear-gradient(135deg,#FFFFFF,#F8FCFF)' }}>
+                        <label style={{ margin: '0 0 8px', display: 'block', fontWeight: 'bold' }}>Score</label>
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="0.01"
+                          value={modalCompScores.wst ?? ''}
+                          onChange={e => handleCompScoreChange('wst', e.target.value)}
+                          placeholder="0.00 - 100.00"
+                          style={{ height: '50px', textAlign: 'center', fontFamily: 'var(--font-heading)', fontSize: '24px', fontWeight: 950, border: '2.5px solid var(--blue-600)', background: 'white', boxShadow: '0 8px 18px rgba(2,132,199,.08)', width: '100%', boxSizing: 'border-box', borderRadius: '8px' }}
+                        />
+                        <div className="small" style={{ marginTop: '8px', fontWeight: 800 }}>Enter a score from 0.00 to 100.00</div>
+                      </div>
+                    </div>
+                    {/* WE */}
+                    <div className="qs-card" style={{ border: '1px solid var(--line)', borderRadius: '16px', padding: '16px' }}>
+                      <h3 style={{ marginBottom: '6px' }}>Written Examination (WE)</h3>
+                      <p className="small" style={{ margin: '0 0 12px', minHeight: '36px' }}>Score for the written examination component.</p>
+                      <div style={{ marginTop: 'auto', padding: '14px', border: '2px solid var(--line)', borderRadius: '18px', background: 'linear-gradient(135deg,#FFFFFF,#F8FCFF)' }}>
+                        <label style={{ margin: '0 0 8px', display: 'block', fontWeight: 'bold' }}>Score</label>
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="0.01"
+                          value={modalCompScores.we ?? ''}
+                          onChange={e => handleCompScoreChange('we', e.target.value)}
+                          placeholder="0.00 - 100.00"
+                          style={{ height: '50px', textAlign: 'center', fontFamily: 'var(--font-heading)', fontSize: '24px', fontWeight: 950, border: '2.5px solid var(--blue-600)', background: 'white', boxShadow: '0 8px 18px rgba(2,132,199,.08)', width: '100%', boxSizing: 'border-box', borderRadius: '8px' }}
+                        />
+                        <div className="small" style={{ marginTop: '8px', fontWeight: 800 }}>Enter a score from 0.00 to 100.00</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+ 
+            <div className="decision-row" style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '24px', gap: '12px' }}>
+              <button className="secondary" onClick={handleCloseQualModal}>Close</button>
+              <button
+                className="good"
+                disabled={!qualModalDirty}
+                onClick={() => handleSaveQualifiedScoring(selectedQualApp.id)}
+              >
+                Save Changes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: UNSAVED SCORING CHANGES WARNING */}
+      {showQualDiscardWarning && (
+        <div className="modal open" style={{ zIndex: 1000 }}>
+          <div className="modal-box" style={{ width: 'min(500px, 94vw)' }}>
+            <div className="modal-head">
+              <h3>Unsaved Changes</h3>
+              <p className="small">You changed one or more scores but have not saved them yet.</p>
+            </div>
+            <div className="modal-body" style={{ margin: '14px 0' }}>
+              <p className="small">Choose what to do before closing the assessment window.</p>
+            </div>
+            <div className="decision-row" style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button className="secondary" onClick={() => setShowQualDiscardWarning(false)}>Keep Editing</button>
+              <button className="danger" onClick={() => {
+                setShowQualDiscardWarning(false);
+                setShowQualModal(false);
+                setSelectedQualApp(null);
+              }}>Discard Changes</button>
+              <button className="good" onClick={() => {
+                setShowQualDiscardWarning(false);
+                handleSaveQualifiedScoring(selectedQualApp.id);
+              }}>Save Changes</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: SDS SUPERINTENDENT REMINDER */}
+      {showSdsReminderModal && appointConfirmApp && (
+        <div className="modal open" style={{ zIndex: 1001 }}>
+          <div className="modal-box" style={{ width: 'min(520px, 94vw)', borderRadius: '20px', padding: '28px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+              <span style={{ fontSize: '32px' }}>📢</span>
+              <h3 style={{ margin: 0, fontSize: '20px', fontWeight: 900, fontFamily: 'var(--font-heading)' }}>Superintendent Confirmation Required</h3>
+            </div>
+            <p style={{ margin: '0 0 20px', lineHeight: '1.6', fontSize: '14px', color: 'var(--text)', fontFamily: 'var(--font-heading)' }}>
+              Please ensure that the appointment of <b>{appointConfirmApp.applicant}</b> has been officially approved and confirmed first by the <b>Schools Division Superintendent (SDS)</b> before encoding the appointment in the portal.
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+              <button 
+                className="secondary" 
+                onClick={() => {
+                  setShowSdsReminderModal(false);
+                  setAppointConfirmApp(null);
+                }}
+                style={{ padding: '10px 20px', borderRadius: '12px', fontWeight: 'bold', fontFamily: 'var(--font-heading)' }}
+              >
+                Not yet confirmed
+              </button>
+              <button 
+                className="good" 
+                onClick={() => {
+                  setShowSdsReminderModal(false);
+                  setShowAppointConfirmModal(true);
+                }}
+                style={{ padding: '10px 20px', borderRadius: '12px', fontWeight: 'bold', fontFamily: 'var(--font-heading)' }}
+              >
+                Yes, Confirmed with SDS
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: CONFIRM APPOINTMENT */}
+      {showAppointConfirmModal && appointConfirmApp && (
+        <div className="modal open" style={{ zIndex: 1000 }}>
+          <div className="modal-box" style={{ width: 'min(620px, 94vw)' }}>
+            <div className="modal-head">
+              <h3>Confirm Appointment — {appointConfirmApp.applicant}</h3>
+              <p className="small" style={{ marginTop: '8px' }}>
+                You are about to appoint the following applicant to this item. On confirmation, this applicant will be marked <b>Appointed</b>, and every other applicant who applied to the same item number (<b>{appointConfirmApp.itemNo || '—'}</b>) will be marked <b>Rejected</b>. This will be reflected in the Appointment tab.
+              </p>
+            </div>
+            <div className="modal-body" style={{ margin: '16px 0', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div className="qs-matrix-meta" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px', padding: '12px', backgroundColor: 'var(--blue-50)', borderRadius: '12px' }}>
+                <div className="meta-tile"><b>Applicant</b><br/>{appointConfirmApp.applicant}</div>
+                <div className="meta-tile"><b>Applicant code</b><br/>{appointConfirmApp.code}</div>
+                <div className="meta-tile"><b>Position</b><br/>{appointConfirmApp.vacancy}</div>
+                <div className="meta-tile"><b>Item No.</b><br/>{appointConfirmApp.itemNo || '—'}</div>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div>
+                  <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '6px' }}>Appointment Date</label>
+                  <input
+                    type="date"
+                    value={appointDate}
+                    onChange={e => setAppointDate(e.target.value)}
+                    style={{ width: '100%', height: '40px', padding: '0 8px', borderRadius: '8px', border: '1px solid var(--line)', boxSizing: 'border-box' }}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '6px' }}>Appointment Reference Code</label>
+                  <input
+                    type="text"
+                    value={appointRefCode}
+                    onChange={e => setAppointRefCode(e.target.value)}
+                    placeholder="Enter Reference Code"
+                    style={{ width: '100%', height: '40px', padding: '0 8px', borderRadius: '8px', border: '1px solid var(--line)', boxSizing: 'border-box' }}
+                  />
+                </div>
+              </div>
+            </div>
+            <div className="decision-row" style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button className="secondary" onClick={() => { setShowAppointConfirmModal(false); setAppointConfirmApp(null); }}>Cancel</button>
+              <button className="good" onClick={() => {
+                handleConfirmAppointment(appointConfirmApp.id, appointDate, appointRefCode);
+                setShowAppointConfirmModal(false);
+                setAppointConfirmApp(null);
+              }}>Confirm Appointment</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: CANNOT APPOINT YET */}
+      {showIncompleteAppointModal && (
+        <div className="modal open" style={{ zIndex: 1000 }}>
+          <div className="modal-box" style={{ width: 'min(500px, 94vw)' }}>
+            <div className="modal-head">
+              <h3>Cannot Appoint Yet</h3>
+              <p className="small">Complete scoring before appointment</p>
+            </div>
+            <div className="modal-body" style={{ margin: '14px 0' }}>
+              <p className="small" style={{ marginBottom: '12px' }}>The applicant cannot be appointed until all required scores are available.</p>
+              <p className="small" style={{ marginBottom: '12px' }}>Please complete and save the following scores first:</p>
+              <ul className="small" style={{ fontWeight: 900, lineHeight: 1.8, marginTop: 0, paddingLeft: '20px' }}>
+                <li>Average Score</li>
+                <li>Behavioral Events Interview (BEI)</li>
+                <li>Work Sample Test (WST)</li>
+                <li>Written Examination (WE)</li>
+              </ul>
+            </div>
+            <div className="decision-row" style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button className="secondary" onClick={() => setShowIncompleteAppointModal(false)}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* MODAL: INITIAL EVALUATION REVIEW */}
       {reviewId && reviewApp && (
@@ -2866,6 +4675,11 @@ export default function App() {
                   placeholder="Enter passcode"
                   value={closePasscode}
                   onChange={e => setClosePasscode(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      handleConfirmOverrideClose();
+                    }
+                  }}
                   style={{
                     background: 'white',
                     border: '1.5px solid #D7EEF8',
