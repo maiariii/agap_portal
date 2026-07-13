@@ -194,6 +194,7 @@ export default function App() {
   const [detectedItems, setDetectedItems] = useState([]);
   const [noscaScanning, setNoscaScanning] = useState(false);
   const [selectedNoscaItemNos, setSelectedNoscaItemNos] = useState([]);
+  const [showNoscaConfirm, setShowNoscaConfirm] = useState(false);
   const [showCloseWarning, setShowCloseWarning] = useState(false);
   const [closeWarningVac, setCloseWarningVac] = useState(null);
   const [closeReason, setCloseReason] = useState('');
@@ -206,9 +207,7 @@ export default function App() {
   const [apPageSize, setApPageSize] = useState(10);
 
   // Onboarding Guided Tutorial state
-  const [showWelcome, setShowWelcome] = useState(() => {
-    return !window.agap_tutorial_dismissed;
-  });
+  const [showWelcome, setShowWelcome] = useState(false);
   const [welcomeOpen, setWelcomeOpen] = useState(false);
   const [tourActive, setTourActive] = useState(false);
   const tourStepRef = useRef(0);
@@ -216,10 +215,21 @@ export default function App() {
   const highlightRef = useRef(null);
   const tooltipRef = useRef(null);
 
+  // Trigger showWelcome only after user logs in (token becomes available)
+  useEffect(() => {
+    if (token) {
+      const tourSeen = localStorage.getItem("deped_tour_seen") === "1";
+      if (!tourSeen && !window.agap_tutorial_dismissed) {
+        setShowWelcome(true);
+      }
+    } else {
+      setShowWelcome(false);
+    }
+  }, [token]);
+
   useEffect(() => {
     if (showWelcome) {
-      const t = setTimeout(() => setWelcomeOpen(true), 300);
-      return () => clearTimeout(t);
+      setWelcomeOpen(true);
     } else {
       setWelcomeOpen(false);
     }
@@ -299,6 +309,8 @@ export default function App() {
   const handleLogout = () => {
     localStorage.removeItem('agap_token');
     localStorage.removeItem('agap_user');
+    localStorage.removeItem('deped_tour_seen');
+    window.agap_tutorial_dismissed = false;
     setToken('');
     setUser(null);
     setTourActive(false);
@@ -630,7 +642,7 @@ export default function App() {
           { label: 'Applicant', key: 'applicant', type: 'text', render: row => <span><b>{row.applicant}</b><br/><span className="small">{row.code}</span></span> },
           { label: 'Vacancy', key: 'vacancy', type: 'categorical' },
           { label: 'Date Applied', key: 'dateApplied', type: 'text' },
-          { label: 'Application Status', key: 'status', type: 'categorical', render: row => <span className={`badge ${cls(row.status)}`}>{titleCase(row.status)}</span> }
+          { label: 'Application Status', key: 'status', type: 'categorical', render: row => <span className={`badge ${cls(row.status)}`}>{row.status === 'Application Submitted' ? 'Application Submitted' : titleCase(row.status)}</span> }
         ]
       };
     } else if (homeDistributionBy === 'assessment_status') {
@@ -920,7 +932,7 @@ export default function App() {
     });
 
     const statusOrder = {
-      'pending': 1,
+      'Application Submitted': 1,
       'pending_qs_review': 2,
       'qualified': 3,
       'for_comparative_assessment': 4,
@@ -1025,7 +1037,7 @@ export default function App() {
 
   const handleExportIER = () => {
     const qualRows = filteredApps.filter(app => app.status === 'qualified');
-    const headers = ["No.", "Applicant", "Applicant Code", "Date of Application", "Deadline", "Bachelor's Degree", "Years Experience", "Hours Training", "Vacancy", "Status"];
+    const headers = ["No.", "Applicant", "Applicant Number", "Date of Application", "Deadline", "Bachelor's Degree", "Years Experience", "Hours Training", "Vacancy", "Status"];
     const rows = qualRows.map((r, i) => [
       i + 1, r.applicant, r.code, r.dateApplied, r.deadline, r.bachelorDegree, r.yearsExperience, r.trainingHours, r.vacancy, titleCase(r.status)
     ]);
@@ -1240,7 +1252,7 @@ export default function App() {
   }, [qualifiedApps, qualPage, qualPageSize]);
 
   const handleExportCAR = () => {
-    const headers = ["No.", "Applicant", "Applicant Code", "Bachelor's Degree", "Vacancy", "Item No.", "Average Score", "BEI", "WST", "WE"];
+    const headers = ["No.", "Applicant", "Applicant Number", "Bachelor's Degree", "Vacancy", "Item No.", "Average Score", "BEI", "WST", "WE"];
     const scoreVal = v => (v !== "" && v !== null && v !== undefined && Number.isFinite(Number(v))) ? Number(v).toFixed(2) : "";
     const rows = qualifiedApps.map((r, i) => {
       const cs = r.appObj?.comparativeAssessmentScores || {};
@@ -1666,16 +1678,53 @@ export default function App() {
   };
 
   const handleScanNOSCA = () => {
+    document.getElementById('nosca-file-input')?.click();
+  };
+
+  const handleFileChange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
     setNoscaScanning(true);
-    setTimeout(() => {
+    setToast({ message: 'Uploading and scanning NOSCA PDF...', type: 'info' });
+
+    try {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        try {
+          const base64Data = reader.result.split(',')[1];
+          const response = await apiFetch('/api/vacancies/scan-nosca', {
+            method: 'POST',
+            body: JSON.stringify({ fileData: base64Data, fileName: file.name })
+          });
+
+          const positionName = response.position || "SCA I";
+          const positionId = positions.find(p => p.title.toLowerCase() === positionName.toLowerCase())?.id;
+
+          const items = response.items.map(itemNo => ({
+            itemNo,
+            title: positionName,
+            positionId: positionId || ''
+          }));
+
+          setDetectedItems(items);
+          setSelectedNoscaItemNos(items.map(it => it.itemNo));
+          setToast({ message: `Successfully scanned ${items.length} items from NOSCA!`, type: 'success' });
+        } catch (err) {
+          setToast({ message: err.message || 'Failed to scan file', type: 'error' });
+        } finally {
+          setNoscaScanning(false);
+        }
+      };
+      reader.onerror = () => {
+        setToast({ message: 'Failed to read file', type: 'error' });
+        setNoscaScanning(false);
+      };
+      reader.readAsDataURL(file);
+    } catch (err) {
+      setToast({ message: err.message, type: 'error' });
       setNoscaScanning(false);
-      const items = [
-        { itemNo: "OSEC-DECSB-TCH1-2026-101", title: "Teacher I", positionId: positions.find(p => p.title === "Teacher I")?.id },
-        { itemNo: "OSEC-DECSB-MT1-2026-055", title: "Master Teacher I", positionId: positions.find(p => p.title === "Master Teacher I")?.id }
-      ].filter(x => x.positionId);
-      setDetectedItems(items);
-      setSelectedNoscaItemNos(items.map(it => it.itemNo));
-    }, 1200);
+    }
   };
 
   const handleAddNoscaVacancies = async () => {
@@ -1872,7 +1921,7 @@ SDO Manila, Department of Education
   }, [vacancies, applications]);
 
   const handleExportAppointed = () => {
-    const headers = ["No.", "Applicant", "Applicant Code", "Position", "Item No.", "Average Score", "Appointment Status", "Date"];
+    const headers = ["No.", "Applicant", "Applicant Number", "Position", "Item No.", "Average Score", "Appointment Status", "Date"];
     const rows = filteredAppointments.map((r, i) => [
       i + 1,
       r.applicant,
@@ -1919,7 +1968,7 @@ SDO Manila, Department of Education
     });
     setReviewDocs(checklistState);
 
-    const isPending = appRow.status === 'pending';
+    const isPending = appRow.status === 'Application Submitted';
     const latest = isPending ? {} : (appRow.latestEval || {});
     setReviewDecisions({
       crit_degree: latest.degreeDecision || null,
@@ -2002,17 +2051,180 @@ SDO Manila, Department of Education
 
   if (!token) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', background: 'var(--blue-50)' }}>
-        <div className="card" style={{ width: '400px', padding: '30px', borderRadius: '24px' }}>
-          <h2 style={{ textAlign: 'center', color: 'var(--navy)', marginBottom: '8px' }}>InsightED HRMO Portal</h2>
-          <p className="small" style={{ textAlign: 'center', marginBottom: '24px' }}>Please log in to manage qualifications & appointments.</p>
-          {loginError && <div style={{ color: 'var(--red)', background: '#FEE2E2', padding: '10px', borderRadius: '12px', marginBottom: '14px', fontSize: '13px', fontWeight: 'bold', textAlign: 'center' }}>{loginError}</div>}
-          <form onSubmit={handleLogin}>
-            <label>Username</label>
-            <input type="text" value={username} onChange={e => setUsername(e.target.value)} required style={{ marginBottom: '14px' }} />
-            <label>Password</label>
-            <input type="password" value={password} onChange={e => setPassword(e.target.value)} required style={{ marginBottom: '20px' }} />
-            <button type="submit" style={{ width: '100%', minHeight: '48px', fontSize: '15px' }}>Log In</button>
+      <div style={{ 
+        display: 'flex', 
+        justifyContent: 'center', 
+        alignItems: 'center', 
+        height: '100vh', 
+        padding: '20px',
+        position: 'relative',
+        overflow: 'hidden'
+      }}>
+        {/* Background Decorative Blobs */}
+        <div style={{
+          position: 'absolute',
+          width: '500px',
+          height: '500px',
+          background: 'radial-gradient(circle, rgba(2,132,199,0.15) 0%, transparent 70%)',
+          top: '-10%',
+          left: '-10%',
+          zIndex: 0
+        }} />
+        <div style={{
+          position: 'absolute',
+          width: '600px',
+          height: '600px',
+          background: 'radial-gradient(circle, rgba(251,191,36,0.12) 0%, transparent 70%)',
+          bottom: '-20%',
+          right: '-10%',
+          zIndex: 0
+        }} />
+
+        <div className="card" style={{ 
+          width: '100%',
+          maxWidth: '440px', 
+          padding: '40px 36px', 
+          borderRadius: '28px',
+          boxShadow: '0 20px 50px rgba(8, 49, 95, 0.12), 0 0 0 1px rgba(8, 49, 95, 0.05)',
+          background: 'rgba(255, 255, 255, 0.95)',
+          backdropFilter: 'blur(20px)',
+          zIndex: 1,
+          position: 'relative',
+          transition: 'all 0.3s ease'
+        }}>
+          {/* Top Logo / Header Area */}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: '28px' }}>
+            <div style={{ 
+              width: '64px', 
+              height: '64px', 
+              borderRadius: '20px', 
+              background: 'linear-gradient(135deg, var(--navy), var(--blue-600))', 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center',
+              marginBottom: '16px',
+              boxShadow: '0 10px 20px rgba(8, 49, 95, 0.2)'
+            }}>
+              <svg style={{ width: '32px', height: '32px', color: 'white' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+              </svg>
+            </div>
+            <h2 style={{ 
+              fontFamily: 'var(--font-heading)',
+              fontSize: '24px',
+              fontWeight: 800,
+              textAlign: 'center', 
+              color: 'var(--navy)', 
+              margin: '0 0 6px 0',
+              letterSpacing: '-0.02em'
+            }}>
+              AGAP <span style={{ color: 'var(--blue-600)' }}>Portal</span>
+            </h2>
+            <p className="small" style={{ 
+              textAlign: 'center', 
+              margin: 0,
+              color: 'var(--muted)',
+              fontSize: '13px',
+              fontWeight: 600
+            }}>
+              Agile Gateway for Application and Placement
+            </p>
+          </div>
+
+          {loginError && (
+            <div style={{ 
+              color: 'var(--red)', 
+              background: '#FEE2E2', 
+              border: '1px solid #FCA5A5',
+              padding: '12px 16px', 
+              borderRadius: '16px', 
+              marginBottom: '20px', 
+              fontSize: '13px', 
+              fontWeight: '700', 
+              textAlign: 'center',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '8px'
+            }}>
+              <svg style={{ width: '16px', height: '16px', flexShrink: 0 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+              </svg>
+              {loginError}
+            </div>
+          )}
+
+          <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <label style={{ margin: 0, fontSize: '11px', fontWeight: 800, color: 'var(--navy)', letterSpacing: '0.05em' }}>USERNAME</label>
+              <div style={{ position: 'relative' }}>
+                <input 
+                  type="text" 
+                  value={username} 
+                  onChange={e => setUsername(e.target.value)} 
+                  placeholder="Enter your username"
+                  required 
+                  style={{ 
+                    padding: '12px 14px 12px 42px',
+                    fontSize: '14px',
+                    borderRadius: '16px',
+                    border: '2px solid var(--line)',
+                    outline: 'none',
+                    transition: 'border-color 0.2s ease, box-shadow 0.2s ease'
+                  }} 
+                />
+                <span style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: 'var(--muted)', display: 'flex', alignItems: 'center' }}>
+                  <svg style={{ width: '18px', height: '18px' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                  </svg>
+                </span>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <label style={{ margin: 0, fontSize: '11px', fontWeight: 800, color: 'var(--navy)', letterSpacing: '0.05em' }}>PASSWORD</label>
+              <div style={{ position: 'relative' }}>
+                <input 
+                  type="password" 
+                  value={password} 
+                  onChange={e => setPassword(e.target.value)} 
+                  placeholder="••••••••"
+                  required 
+                  style={{ 
+                    padding: '12px 14px 12px 42px',
+                    fontSize: '14px',
+                    borderRadius: '16px',
+                    border: '2px solid var(--line)',
+                    outline: 'none',
+                    transition: 'border-color 0.2s ease, box-shadow 0.2s ease'
+                  }} 
+                />
+                <span style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: 'var(--muted)', display: 'flex', alignItems: 'center' }}>
+                  <svg style={{ width: '18px', height: '18px' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                  </svg>
+                </span>
+              </div>
+            </div>
+
+            <button 
+              type="submit" 
+              style={{ 
+                width: '100%', 
+                minHeight: '48px', 
+                fontSize: '15px', 
+                fontWeight: 900,
+                borderRadius: '16px',
+                background: 'linear-gradient(135deg, var(--blue-600), var(--navy))',
+                border: 'none',
+                boxShadow: '0 4px 12px rgba(8, 49, 95, 0.15)',
+                cursor: 'pointer',
+                transition: 'transform 0.1s ease, box-shadow 0.2s ease',
+                marginTop: '6px'
+              }}
+            >
+              Sign In
+            </button>
           </form>
         </div>
       </div>
@@ -2068,7 +2280,7 @@ SDO Manila, Department of Education
       </div>
 
       <aside className="sidebar">
-        <div className="brand" aria-label="InsightED">
+        <div className="brand" aria-label="AGAP Portal">
           <span style={{ fontSize: '24px', fontWeight: 'bold' }}>AGAP</span>
         </div>
         <nav className="nav">
@@ -2719,7 +2931,7 @@ SDO Manila, Department of Education
                       <label>Status</label>
                       <select value={appStatusFilter} onChange={e => setAppStatusFilter(e.target.value)}>
                         <option value="">All statuses</option>
-                        <option value="pending">Pending</option>
+                        <option value="Application Submitted">Application Submitted</option>
                         <option value="pending_qs_review">Pending QS Review</option>
                         <option value="qualified">Qualified</option>
                         <option value="disqualified">Disqualified</option>
@@ -2874,7 +3086,7 @@ SDO Manila, Department of Education
                             onChange={e => handleAppColFilterChange('status', e.target.value)}
                           >
                             <option value="">All</option>
-                            <option value="pending">Pending</option>
+                            <option value="pending">Application Submitted</option>
                             <option value="pending_qs_review">Pending QS Review</option>
                             <option value="qualified">Qualified</option>
                             <option value="for_comparative_assessment">For Comparative Assessment</option>
@@ -2904,7 +3116,7 @@ SDO Manila, Department of Education
                           </td>
                           <td>{r.vacancy}</td>
                           <td>{r.itemNo || '—'}</td>
-                          <td><span className={`badge ${cls(r.status)}`}>{titleCase(r.status)}</span></td>
+                          <td><span className={`badge ${cls(r.status)}`}>{r.status === 'Application Submitted' ? 'Application Submitted' : titleCase(r.status)}</span></td>
                         </tr>
                       ))}
                       {paginatedApps.length === 0 && (
@@ -3717,7 +3929,7 @@ SDO Manila, Department of Education
                 <div className="qualified-card-body" style={{ padding: '0 24px 24px' }}>
                   <div className="qs-matrix-meta" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '20px', padding: '16px', backgroundColor: 'var(--blue-50)', borderRadius: '12px' }}>
                     <div className="meta-tile"><b>Applicant</b><br/>{selectedQualApp.applicant}</div>
-                    <div className="meta-tile"><b>Applicant code</b><br/>{selectedQualApp.code}</div>
+                    <div className="meta-tile"><b>Applicant number</b><br/>{selectedQualApp.code}</div>
                     <div className="meta-tile"><b>Vacancy</b><br/>{selectedQualApp.vacancy}</div>
                     <div className="meta-tile"><b>Deadline</b><br/>{selectedQualApp.deadline || '—'}</div>
                   </div>
@@ -3992,7 +4204,7 @@ SDO Manila, Department of Education
             <div className="modal-body" style={{ margin: '16px 0', display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div className="qs-matrix-meta" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px', padding: '12px', backgroundColor: 'var(--blue-50)', borderRadius: '12px' }}>
                 <div className="meta-tile"><b>Applicant</b><br/>{appointConfirmApp.applicant}</div>
-                <div className="meta-tile"><b>Applicant code</b><br/>{appointConfirmApp.code}</div>
+                <div className="meta-tile"><b>Applicant number</b><br/>{appointConfirmApp.code}</div>
                 <div className="meta-tile"><b>Position</b><br/>{appointConfirmApp.vacancy}</div>
                 <div className="meta-tile"><b>Item No.</b><br/>{appointConfirmApp.itemNo || '—'}</div>
               </div>
@@ -4090,7 +4302,7 @@ SDO Manila, Department of Education
               </div>
               <div className="qs-matrix-meta">
                 <div className="meta-tile"><b>Applicant</b>{reviewApp.applicant}</div>
-                <div className="meta-tile"><b>Applicant code</b>{reviewApp.code}</div>
+                <div className="meta-tile"><b>Applicant number</b>{reviewApp.code}</div>
                 <div className="meta-tile"><b>Vacancy</b>{reviewApp.vacancy}</div>
                 <div className="meta-tile"><b>Deadline</b>{reviewApp.deadline || '—'}</div>
               </div>
@@ -4566,6 +4778,13 @@ SDO Manila, Department of Education
                   <button className="gold" onClick={handleScanNOSCA} disabled={noscaScanning} style={{ marginTop: '8px' }}>
                     {noscaScanning ? 'Scanning...' : '↑ Upload NOSCA'}
                   </button>
+                  <input
+                    id="nosca-file-input"
+                    type="file"
+                    accept=".pdf"
+                    style={{ display: 'none' }}
+                    onChange={handleFileChange}
+                  />
                 </div>
 
                 {/* Right Column: Scan results checklist */}
@@ -4575,13 +4794,21 @@ SDO Manila, Department of Education
                       <p>Scanning document metadata...</p>
                     </div>
                   ) : detectedItems.length > 0 ? (
-                    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', justifyContent: 'space-between', flex: 1 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', flex: 1 }}>
                       <div>
                         <div className="scan-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', gap: '10px' }}>
-                          <h3 style={{ fontFamily: 'var(--font-heading)', color: 'var(--navy)', margin: 0, fontSize: '15px' }}>Detected Items</h3>
-                          <span className="scan-badge" style={{ fontSize: '11px', fontWeight: '900', color: 'var(--green)' }}>{detectedItems.length} items detected</span>
+                          <div>
+                            <h3 style={{ fontFamily: 'var(--font-heading)', color: 'var(--navy)', margin: 0, fontSize: '15px' }}>Detected Items</h3>
+                            <span className="scan-badge" style={{ fontSize: '11px', fontWeight: '900', color: 'var(--blue-600)' }}>
+                              {selectedNoscaItemNos.length} of {detectedItems.length} selected
+                            </span>
+                          </div>
+                          <div style={{ display: 'flex', gap: '6px' }}>
+                            <button className="secondary" style={{ padding: '4px 8px', fontSize: '11px', minHeight: 'auto', borderRadius: '8px' }} onClick={() => setSelectedNoscaItemNos(detectedItems.map(it => it.itemNo))}>Select All</button>
+                            <button className="secondary" style={{ padding: '4px 8px', fontSize: '11px', minHeight: 'auto', borderRadius: '8px' }} onClick={() => setSelectedNoscaItemNos([])}>Deselect All</button>
+                          </div>
                         </div>
-                        <div style={{ background: '#fff', border: '1px solid var(--line)', borderRadius: '12px', overflow: 'hidden' }}>
+                        <div style={{ background: '#fff', border: '1px solid var(--line)', borderRadius: '12px', maxHeight: '220px', overflowY: 'auto' }}>
                           {detectedItems.map((it, idx) => {
                             const isChecked = selectedNoscaItemNos.includes(it.itemNo);
                             return (
@@ -4595,6 +4822,7 @@ SDO Manila, Department of Education
                                     );
                                   }}
                                   style={{ width: '18px', height: '18px', marginTop: '2px', cursor: 'pointer' }}
+                                  id={`nosca-checkbox-${idx}`}
                                 />
                                 <div>
                                   <span className="si-item" style={{ fontFamily: 'var(--font-heading)', fontWeight: '900', color: 'var(--navy)', fontSize: '12px' }}>{it.itemNo}</span>
@@ -4607,7 +4835,10 @@ SDO Manila, Department of Education
                       </div>
                       <div className="nosca-actions" style={{ marginTop: '14px', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '10px' }}>
                         <button className="secondary" onClick={() => { setDetectedItems([]); setSelectedNoscaItemNos([]); }}>Clear</button>
-                        <button className="good" onClick={handleAddNoscaVacancies}>Add Selected Items</button>
+                        <button className="good" onClick={() => {
+                          if (!selectedNoscaItemNos.length) return setToast({ message: 'Please tick at least one item to add', type: 'error' });
+                          setShowNoscaConfirm(true);
+                        }}>Add Selected Items</button>
                       </div>
                     </div>
                   ) : (
@@ -4618,6 +4849,28 @@ SDO Manila, Department of Education
                   )}
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: CONFIRM NOSCA ITEMS REFLECTED */}
+      {showNoscaConfirm && (
+        <div className="modal open" style={{ zIndex: 120 }}>
+          <div className="modal-box" style={{ width: 'min(500px, 92vw)' }}>
+            <div className="modal-head">
+              <h2>Confirm NOSCA Items</h2>
+              <button className="secondary" onClick={() => setShowNoscaConfirm(false)}>Cancel</button>
+            </div>
+            <p className="small" style={{ fontSize: '14px', fontWeight: '800', color: 'var(--navy)', lineHeight: '1.5', margin: '10px 0 20px' }}>
+              Do you confirm that all the items in the NOSCA reflected correctly?
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button className="secondary" onClick={() => setShowNoscaConfirm(false)}>Cancel</button>
+              <button className="good" onClick={() => {
+                setShowNoscaConfirm(false);
+                handleAddNoscaVacancies();
+              }}>Yes, Confirm</button>
             </div>
           </div>
         </div>

@@ -325,7 +325,7 @@ tbody tr.clickable-row:hover td{background:#E0F2FE}
 .action-title{font-family:var(--font-heading);font-weight:900;color:var(--navy);font-size:16px}
 .action-buttons{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:4px}
 .action-card button{width:100%;min-height:44px}
-.toolbar{display:grid;grid-template-columns:minmax(260px,1fr) 240px 180px;gap:10px;align-items:end}
+.toolbar{display:grid;grid-template-columns:minmax(180px, 2fr) minmax(150px, 1.5fr) minmax(130px, 1.2fr);gap:10px;align-items:end}
 .pager-controls{display:flex;align-items:end;justify-content:center;gap:18px;flex-wrap:wrap;margin-top:14px;text-align:center}
 .pager-group{display:flex;align-items:end;justify-content:center;gap:10px;flex-wrap:wrap}
 .pager-field{min-width:130px;text-align:center}
