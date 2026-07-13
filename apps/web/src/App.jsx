@@ -1068,17 +1068,13 @@ export default function App() {
     }
     if (key === 'assessmentStatus') {
       const cs = row.appObj?.comparativeAssessmentScores || {};
-      const areaScores = row.latestEval?.areaScores || {};
       const hasValue = v => v !== "" && v !== null && v !== undefined && Number.isFinite(Number(v));
       
       const compChecks = [cs.bei, cs.wst, cs.we].map(hasValue);
       const compCount = compChecks.filter(Boolean).length;
       
-      const areaChecks = Object.values(areaScores).map(hasValue);
-      const areaCount = areaChecks.filter(Boolean).length;
-      
-      if (areaCount === 10 && compCount === 3) return "Assessment Completed";
-      if (areaCount > 0 || compCount > 0) return "Assessment Started";
+      if (compCount === 3) return "Assessment Completed";
+      if (compCount > 0) return "Assessment Started";
       return "Assessment Not Started";
     }
     if (key === 'appointmentStatus') {
@@ -3199,17 +3195,13 @@ SDO Manila, Department of Education
 
                         const getAssessmentStatus = (row) => {
                            const csObj = row.appObj?.comparativeAssessmentScores || {};
-                           const areaScores = row.latestEval?.areaScores || {};
                            const hasValue = v => v !== "" && v !== null && v !== undefined && Number.isFinite(Number(v));
                            
                            const compChecks = [csObj.bei, csObj.wst, csObj.we].map(hasValue);
                            const compCount = compChecks.filter(Boolean).length;
                            
-                           const areaChecks = Object.values(areaScores).map(hasValue);
-                           const areaCount = areaChecks.filter(Boolean).length;
-                           
-                           if (areaCount === 10 && compCount === 3) return { label: 'Assessment Completed', badge: 'green' };
-                           if (areaCount > 0 || compCount > 0) return { label: 'Assessment Started', badge: 'orange' };
+                           if (compCount === 3) return { label: 'Assessment Completed', badge: 'green' };
+                           if (compCount > 0) return { label: 'Assessment Started', badge: 'orange' };
                            return { label: 'Assessment Not Started', badge: 'blue' };
                          };
 
