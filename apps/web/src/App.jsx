@@ -2106,8 +2106,8 @@ SDO Manila, Department of Education
         <section className="topbar">
           <div className="page-title">
             <div className="eyebrow">DEPARTMENT OF EDUCATION | HUMAN RESOURCE AND ORGANIZATIONAL DEVELOPMENT AND INFRASTRUCTURE</div>
-            <h1>Agile Gateway For Application and Placement</h1>
-            <p>Monitor openings, screening stages, and qualification-fit decisions across DepEd hiring positions.</p>
+            <h1>AGAP Portal</h1>
+            <p>Agile Gateway For Application and Placement</p>
           </div>
         </section>
 
