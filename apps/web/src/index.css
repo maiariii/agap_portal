@@ -638,4 +638,38 @@ tbody tr.clickable-row:hover td{background:#E0F2FE}
   color: white;
   border: 1.5px solid #1E40AF;
 }
+.toast-card.warning {
+  background: linear-gradient(135deg, #D97706, #F59E0B);
+  color: white;
+  border: 1.5px solid #B45309;
+}
+
+/* Sticky Columns in Appointments and Unappointed Tables */
+.appointments-table th:nth-child(1),
+.appointments-table td:nth-child(1),
+.unappointed-table th:nth-child(1),
+.unappointed-table td:nth-child(1) {
+  position: sticky;
+  left: 0;
+  z-index: 10;
+  background: white;
+}
+.appointments-table th:nth-child(1),
+.unappointed-table th:nth-child(1) {
+  background: #F8FCFF;
+}
+.appointments-table th:nth-child(2),
+.appointments-table td:nth-child(2),
+.unappointed-table th:nth-child(2),
+.unappointed-table td:nth-child(2) {
+  position: sticky;
+  left: 44px;
+  z-index: 10;
+  background: white;
+  box-shadow: 2px 0 5px -2px rgba(0, 0, 0, 0.1) !important;
+}
+.appointments-table th:nth-child(2),
+.unappointed-table th:nth-child(2) {
+  background: #F8FCFF;
+}
 

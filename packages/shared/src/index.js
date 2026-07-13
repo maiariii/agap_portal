@@ -109,7 +109,7 @@ export function computeOverallAreaScore(scores) {
 }
 
 export function cls(s) {
-  return { open: "green", pending: "blue", pending_qs_review: "blue", qualified: "green", disqualified: "red", excluded: "gray", for_comparative_assessment: "blue" }[s] || "gray";
+  return { open: "green", pending: "blue", pending_qs_review: "blue", qualified: "green", disqualified: "red", excluded: "gray", for_comparative_assessment: "blue", appointed: "green", rejected: "red", not_appointed: "orange" }[s] || "gray";
 }
 
 export function titleCase(s) {

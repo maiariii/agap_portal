@@ -150,7 +150,9 @@ export default function App() {
     applicant: '',
     vacancy: '',
     itemNo: '',
-    fit: { min: '', max: '' }
+    fit: { min: '', max: '' },
+    appointmentStatus: '',
+    appointmentDate: ''
   });
   const [unapptPage, setUnapptPage] = useState(1);
   const [unapptPageSize, setUnapptPageSize] = useState(10);
@@ -1109,7 +1111,7 @@ export default function App() {
   }, [vacancies]);
 
   const qualifiedPoolRanked = useMemo(() => {
-    const pool = applications.filter(app => ['qualified', 'for_comparative_assessment'].includes(app.status));
+    const pool = applications.filter(app => ['qualified', 'for_comparative_assessment', 'not_appointed'].includes(app.status));
     const byVac = {};
     pool.forEach(r => {
       if (!byVac[r.vacancyId]) byVac[r.vacancyId] = [];
@@ -1703,7 +1705,12 @@ export default function App() {
   };
 
   const allAppointments = useMemo(() => {
-    return applications.filter(app => ['appointed', 'rejected'].includes(app.appointmentStatus));
+    return applications.filter(app => {
+      if (app.appointmentStatus !== 'appointed') return false;
+      const cs = app.appObj?.comparativeAssessmentScores || {};
+      const hasCompScores = ['bei', 'wst', 'we'].every(k => cs[k] !== '' && cs[k] !== null && cs[k] !== undefined && Number.isFinite(Number(cs[k])));
+      return hasCompScores;
+    });
   }, [applications]);
 
   const filteredAppointments = useMemo(() => {
@@ -1747,13 +1754,24 @@ export default function App() {
     return filteredAppointments.slice(start, start + apptPageSize);
   }, [filteredAppointments, apptPage, apptPageSize]);
 
-  const appointedApplicants = useMemo(() => applications.filter(app => app.appointmentStatus === 'appointed'), [applications]);
+  const appointedApplicants = useMemo(() => {
+    return applications.filter(app => {
+      if (app.appointmentStatus !== 'appointed') return false;
+      const cs = app.appObj?.comparativeAssessmentScores || {};
+      const hasCompScores = ['bei', 'wst', 'we'].every(k => cs[k] !== '' && cs[k] !== null && cs[k] !== undefined && Number.isFinite(Number(cs[k])));
+      return hasCompScores;
+    });
+  }, [applications]);
 
   const unappointedApps = useMemo(() => {
-    let list = applications.filter(app => 
-      ['qualified', 'for_comparative_assessment'].includes(app.status) && 
-      !app.appointmentStatus
-    );
+    let list = applications.filter(app => {
+      if (app.appointmentStatus === 'appointed') return false;
+      if (!['qualified', 'for_comparative_assessment', 'not_appointed'].includes(app.status)) return false;
+      if (!app.itemNo || !occupiedItemNos.has(app.itemNo)) return false;
+      const cs = app.appObj?.comparativeAssessmentScores || {};
+      const hasCompScores = ['bei', 'wst', 'we'].every(k => cs[k] !== '' && cs[k] !== null && cs[k] !== undefined && Number.isFinite(Number(cs[k])));
+      return hasCompScores;
+    });
 
     // Apply column filters
     if (unapptColFilters.applicant) {
@@ -1773,12 +1791,20 @@ export default function App() {
     if (unapptColFilters.fit?.max) {
       list = list.filter(r => r.fit <= Number(unapptColFilters.fit.max));
     }
+    if (unapptColFilters.appointmentStatus) {
+      const q = unapptColFilters.appointmentStatus.toLowerCase();
+      list = list.filter(r => (r.appointmentStatus || '').toLowerCase().includes(q));
+    }
+    if (unapptColFilters.appointmentDate) {
+      const q = unapptColFilters.appointmentDate.toLowerCase();
+      list = list.filter(r => (r.appointmentDate ? r.appointmentDate.slice(0, 10) : '').toLowerCase().includes(q));
+    }
 
     if (unapptSortKey) {
       const dir = unapptSortDir === 'asc' ? 1 : -1;
       list = [...list].sort((a, b) => {
-        let av = a[unapptSortKey];
-        let bv = b[unapptSortKey];
+        let av = a[unapptSortKey] ?? '';
+        let bv = b[unapptSortKey] ?? '';
         if (typeof av === 'number' && typeof bv === 'number') {
           return (av - bv) * dir;
         }
@@ -1787,7 +1813,7 @@ export default function App() {
     }
 
     return list;
-  }, [applications, unapptColFilters, unapptSortKey, unapptSortDir]);
+  }, [applications, occupiedItemNos, unapptColFilters, unapptSortKey, unapptSortDir]);
 
   const paginatedUnappointedApps = useMemo(() => {
     const start = (unapptPage - 1) * unapptPageSize;
@@ -1863,11 +1889,15 @@ SDO Manila, Department of Education
   const handleConfirmAppointment = async (appId, date, refCode) => {
     if (!date || !refCode) return setToast({ message: 'Please enter appointment details', type: 'error' });
     try {
-      await apiFetch(`/api/applications/${appId}/appointment`, {
+      const res = await apiFetch(`/api/applications/${appId}/appointment`, {
         method: 'POST',
         body: JSON.stringify({ appointmentDate: date, appointmentReferenceCode: refCode })
       });
-      setToast({ message: 'Appointment confirmed!', type: 'success' });
+      if (res && res.occupied) {
+        setToast({ message: 'Item No. is occupied. Applicant marked as Not Appointed.', type: 'warning' });
+      } else {
+        setToast({ message: 'Appointment confirmed!', type: 'success' });
+      }
       loadAllData();
     } catch (e) {
       setToast({ message: e.message, type: 'error' });
@@ -1909,6 +1939,10 @@ SDO Manila, Department of Education
   };
 
   const docsComplete = Object.values(reviewDocs).every(Boolean);
+
+  const isAlreadyQualified = useMemo(() => {
+    return reviewApp ? ['qualified', 'for_comparative_assessment', 'not_appointed', 'appointed'].includes(reviewApp.status) : false;
+  }, [reviewApp]);
 
   const calculatedResult = useMemo(() => {
     if (!docsComplete) return 'excluded';
@@ -3145,6 +3179,7 @@ SDO Manila, Department of Education
                             <option value="Appoint">Appoint</option>
                             <option value="appointed">Appointed</option>
                             <option value="rejected">Rejected</option>
+                            <option value="not_appointed">Not Appointed</option>
                           </select>
                         </th>
                       </tr>
@@ -3483,7 +3518,7 @@ SDO Manila, Department of Education
                 <h2>Unappointed Qualified Applicants</h2>
                 <p className="small" style={{ marginBottom: '14px' }}>Confirm appointments or view status of other qualified candidates.</p>
                 <div className="table-wrap">
-                  <table>
+                  <table className="unappointed-table">
                     <thead>
                       <tr>
                         <th className="row-num">No.</th>
@@ -3508,7 +3543,11 @@ SDO Manila, Department of Education
                             onChange={e => { setUnapptColFilters({ ...unapptColFilters, vacancy: e.target.value }); setUnapptPage(1); }}
                           >
                             <option value="">All</option>
-                            {Array.from(new Set(applications.filter(a => ['qualified', 'for_comparative_assessment'].includes(a.status) && !a.appointmentStatus).map(a => a.vacancy))).map(vac => (
+                            {Array.from(new Set(applications.filter(a => {
+                              if (a.status !== 'not_appointed' && a.appointmentStatus !== 'not_appointed') return false;
+                              const cs = a.appObj?.comparativeAssessmentScores || {};
+                              return ['bei', 'wst', 'we'].every(k => cs[k] !== '' && cs[k] !== null && cs[k] !== undefined && Number.isFinite(Number(cs[k])));
+                            }).map(a => a.vacancy))).map(vac => (
                               <option key={vac} value={vac}>{vac}</option>
                             ))}
                           </select>
@@ -3555,7 +3594,30 @@ SDO Manila, Department of Education
                             />
                           </div>
                         </th>
-                        <th>Action</th>
+                        <th>
+                          <button className="th-btn" onClick={() => handleUnapptSort('appointmentStatus')}>
+                            Appointment Status {unapptSortKey === 'appointmentStatus' ? (unapptSortDir === 'asc' ? ' ▲' : ' ▼') : ''}
+                          </button>
+                          <select
+                            className="column-filter"
+                            value={unapptColFilters.appointmentStatus || ''}
+                            onChange={e => { setUnapptColFilters({ ...unapptColFilters, appointmentStatus: e.target.value }); setUnapptPage(1); }}
+                          >
+                            <option value="">All</option>
+                            <option value="not_appointed">Not Appointed</option>
+                          </select>
+                        </th>
+                        <th>
+                          <button className="th-btn" onClick={() => handleUnapptSort('appointmentDate')}>
+                            Date {unapptSortKey === 'appointmentDate' ? (unapptSortDir === 'asc' ? ' ▲' : ' ▼') : ''}
+                          </button>
+                          <input
+                            className="column-filter"
+                            placeholder="Filter..."
+                            value={unapptColFilters.appointmentDate || ''}
+                            onChange={e => { setUnapptColFilters({ ...unapptColFilters, appointmentDate: e.target.value }); setUnapptPage(1); }}
+                          />
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
@@ -3574,25 +3636,17 @@ SDO Manila, Department of Education
                               </span>
                             </td>
                             <td>
-                              {hasCompScores ? (
-                                <button className="good vac-action" onClick={() => {
-                                  setAppointConfirmApp(r);
-                                  setAppointDate(new Date().toISOString().slice(0, 10));
-                                  setAppointRefCode(r.code);
-                                  setShowSdsReminderModal(true);
-                                }}>Appoint</button>
-                              ) : (
-                                <button className="secondary vac-action incomplete" onClick={() => setShowIncompleteAppointModal(true)}>
-                                  Appoint
-                                </button>
-                              )}
+                              <span className="badge orange">Not Appointed</span>
+                            </td>
+                            <td>
+                              <span className="small">{r.appointmentDate ? r.appointmentDate.slice(0, 10) : '—'}</span>
                             </td>
                           </tr>
                         );
                       })}
                       {paginatedUnappointedApps.length === 0 && (
                         <tr>
-                          <td colSpan={6} style={{ textAlign: 'center' }}>No unappointed applicants match the filters.</td>
+                          <td colSpan={7} style={{ textAlign: 'center' }}>No unappointed applicants match the filters.</td>
                         </tr>
                       )}
                     </tbody>
@@ -3932,7 +3986,7 @@ SDO Manila, Department of Education
             <div className="modal-head">
               <h3>Confirm Appointment — {appointConfirmApp.applicant}</h3>
               <p className="small" style={{ marginTop: '8px' }}>
-                You are about to appoint the following applicant to this item. On confirmation, this applicant will be marked <b>Appointed</b>, and every other applicant who applied to the same item number (<b>{appointConfirmApp.itemNo || '—'}</b>) will be marked <b>Rejected</b>. This will be reflected in the Appointment tab.
+                You are about to appoint the following applicant to this item. On confirmation, this applicant will be marked <b>Appointed</b>, and every other applicant who applied to the same item number (<b>{appointConfirmApp.itemNo || '—'}</b>) will be marked <b>Not Appointed</b>. This will be reflected in the Appointment tab.
               </p>
             </div>
             <div className="modal-body" style={{ margin: '16px 0', display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -4095,7 +4149,7 @@ SDO Manila, Department of Education
               <div className="doc-checklist">
                 {DOC_REQUIREMENTS.map((req) => (
                   <label className="doc-check-item" key={req.key}>
-                    <input type="checkbox" checked={!!reviewDocs[req.key]} onChange={() => handleToggleDocCheck(req.key)} />
+                    <input type="checkbox" checked={!!reviewDocs[req.key]} onChange={() => handleToggleDocCheck(req.key)} disabled={isAlreadyQualified} />
                     <span className="doc-req-text">{req.label}</span>
                   </label>
                 ))}
@@ -4120,7 +4174,7 @@ SDO Manila, Department of Education
                   <div>
                     <div className="position-detail-eyebrow">QS Evaluation</div>
                     <h3>QS Evaluation</h3>
-                    <p className="small">Review the applicant's details against each qualification standard, then mark whether each was Met or Did Not Meet the Requirements.</p>
+                    <p className="small">Review the applicant's details against each qualification standard, then mark whether each was Meet the QS or Did not Meet the QS.</p>
                   </div>
                 </div>
                 <div className="qs-grid">
@@ -4136,9 +4190,9 @@ SDO Manila, Department of Education
                         <div className="compare-box"><b>Applicant</b><br/>{c.appVal}</div>
                         <div className="compare-box"><b>Qualification Standard</b><br/>{c.reqVal}</div>
                       </div>
-                      <div className="toggle-group">
-                        <button className={`secondary ${reviewDecisions[c.key] === 'pass' ? 'good' : ''}`} onClick={() => { setReviewDecisions({ ...reviewDecisions, [c.key]: reviewDecisions[c.key] === 'pass' ? null : 'pass' }); setReviewDirty(true); }}>Met the Requirements</button>
-                        <button className={`secondary ${reviewDecisions[c.key] === 'fail' ? 'danger' : ''}`} onClick={() => { setReviewDecisions({ ...reviewDecisions, [c.key]: reviewDecisions[c.key] === 'fail' ? null : 'fail' }); setReviewDirty(true); }}>Did Not Meet the Requirements</button>
+                       <div className="toggle-group">
+                        <button className={`secondary ${reviewDecisions[c.key] === 'pass' ? 'good' : ''}`} onClick={() => { if (isAlreadyQualified) return; setReviewDecisions({ ...reviewDecisions, [c.key]: reviewDecisions[c.key] === 'pass' ? null : 'pass' }); setReviewDirty(true); }} style={isAlreadyQualified ? { cursor: 'not-allowed', opacity: 0.8 } : {}}>Meet the QS</button>
+                        <button className={`secondary ${reviewDecisions[c.key] === 'fail' ? 'danger' : ''}`} onClick={() => { if (isAlreadyQualified) return; setReviewDecisions({ ...reviewDecisions, [c.key]: reviewDecisions[c.key] === 'fail' ? null : 'fail' }); setReviewDirty(true); }} style={isAlreadyQualified ? { cursor: 'not-allowed', opacity: 0.8 } : {}}>Did not Meet the QS</button>
                       </div>
                     </div>
                   ))}
@@ -4150,7 +4204,7 @@ SDO Manila, Department of Education
             <div className="status-command">
               <h3>Evaluation Result</h3>
               <p className="small" style={{ marginBottom: '12px', lineHeight: 1.4 }}>
-                The status is set automatically: incomplete documentary requirements result in Excluded; otherwise any criterion marked "Did Not Meet the Requirements" results in Disqualified and all criteria marked "Met the Requirements" result in Qualified.
+                The status is set automatically: incomplete documentary requirements result in Excluded; otherwise any criterion marked "Did not Meet the QS" results in Disqualified and all criteria marked "Meet the QS" result in Qualified.
               </p>
               
               <div className={`result-banner ${calculatedResult}`}>
@@ -4167,17 +4221,17 @@ SDO Manila, Department of Education
                   )}
                   {calculatedResult === 'pending_qs_review' && (
                     <>
-                      <b>Pending QS Review:</b> Select Met the Requirements or Did Not Meet the Requirements for every qualification standard.
+                      <b>Pending QS Review:</b> Select Meet the QS or Did not Meet the QS for every qualification standard.
                     </>
                   )}
                   {calculatedResult === 'disqualified' && (
                     <>
-                      <b>Disqualified:</b> Documents are complete, but at least one qualification standard is marked Did Not Meet the Requirements.
+                      <b>Disqualified:</b> Documents are complete, but at least one qualification standard is marked Did not Meet the QS.
                     </>
                   )}
                   {calculatedResult === 'qualified' && (
                     <>
-                      <b>Qualified:</b> Documents are complete and all qualification standards are marked Met the Requirements.
+                      <b>Qualified:</b> Documents are complete and all qualification standards are marked Meet the QS.
                     </>
                   )}
                 </span>
@@ -4185,7 +4239,7 @@ SDO Manila, Department of Education
               
               <div style={{ marginTop: '12px' }}>
                 <label>Remarks / Notes</label>
-                <textarea value={remarks} onChange={e => { setRemarks(e.target.value); setReviewDirty(true); }} placeholder="Enter evaluation remarks..."></textarea>
+                <textarea value={remarks} onChange={e => { setRemarks(e.target.value); setReviewDirty(true); }} placeholder="Enter evaluation remarks..." disabled={isAlreadyQualified}></textarea>
               </div>
               
               <div className="decision-row" style={{ justifyContent: 'flex-end', marginTop: '12px' }}>
@@ -4205,11 +4259,11 @@ SDO Manila, Department of Education
                   
                   return (
                     <button
-                      className={isSaveDisabled ? "good" : "gold"}
+                      className={isSaveDisabled || isAlreadyQualified ? "good" : "gold"}
                       onClick={handleSaveReview}
-                      disabled={isSaveDisabled}
+                      disabled={isSaveDisabled || isAlreadyQualified}
                     >
-                      {saveBtnText}
+                      {isAlreadyQualified ? 'Evaluation Locked' : saveBtnText}
                     </button>
                   );
                 })()}

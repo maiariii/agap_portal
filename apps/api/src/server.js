@@ -499,6 +499,42 @@ app.post('/api/applications/:id/appointment', authenticateToken, async (req, res
       return res.status(404).json({ error: 'Application not found' });
     }
 
+    // Check if the selected Item No. is already occupied by another appointed applicant
+    const occupiedApp = await prisma.application.findFirst({
+      where: {
+        vacancy: {
+          itemNo: currentApp.vacancy.itemNo
+        },
+        appointmentStatus: 'appointed',
+        id: { not: id }
+      }
+    });
+
+    if (occupiedApp) {
+      // If occupied, the newly confirmed applicant should not be added to the Appointed Applicant table.
+      // Instead, the applicant should be moved to the Unappointed Qualified Applicant table.
+      // The applicant's status should be updated to "Not Appointed", not "Rejected".
+      await prisma.application.update({
+        where: { id },
+        data: {
+          status: 'not_appointed',
+          appointmentStatus: 'not_appointed',
+          appointmentDate: appointmentDate ? new Date(appointmentDate) : null,
+          appointmentItemNo: currentApp.vacancy.itemNo,
+          appointmentReferenceCode: appointmentReferenceCode || null
+        }
+      });
+
+      await prisma.applicationHistory.create({
+        data: {
+          applicationId: id,
+          text: `Not Appointed: Item ${currentApp.vacancy.itemNo} is already occupied by another appointed applicant.`
+        }
+      });
+
+      return res.json({ success: true, occupied: true });
+    }
+
     // Update appointed applicant
     await prisma.application.update({
       where: { id },
@@ -518,12 +554,12 @@ app.post('/api/applications/:id/appointment', authenticateToken, async (req, res
       }
     });
 
-    // Automatically reject other applicants for the same vacancy item
+    // Automatically mark other applicants for the same vacancy item as "Not Appointed" (instead of "Rejected")
     const otherApps = await prisma.application.findMany({
       where: {
         vacancyId: currentApp.vacancyId,
         id: { not: id },
-        status: { not: 'disqualified' }
+        status: { in: ['qualified', 'for_comparative_assessment', 'not_appointed'] }
       }
     });
 
@@ -531,20 +567,20 @@ app.post('/api/applications/:id/appointment', authenticateToken, async (req, res
       await prisma.application.update({
         where: { id: otherApp.id },
         data: {
-          status: 'rejected',
-          appointmentStatus: 'rejected',
+          status: 'not_appointed',
+          appointmentStatus: 'not_appointed',
           reason: `Item ${currentApp.vacancy.itemNo} filled by another applicant`
         }
       });
       await prisma.applicationHistory.create({
         data: {
           applicationId: otherApp.id,
-          text: `Rejected: Item ${currentApp.vacancy.itemNo} filled by another applicant`
+          text: `Not Appointed: Item ${currentApp.vacancy.itemNo} filled by another applicant`
         }
       });
     }
 
-    res.json({ success: true });
+    res.json({ success: true, occupied: false });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
