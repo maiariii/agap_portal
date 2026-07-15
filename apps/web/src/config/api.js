@@ -5,7 +5,8 @@ export const apiFetch = async (path, options = {}) => {
     ...(token ? { 'Authorization': `Bearer ${token}` } : {})
   };
   try {
-    const res = await fetch(path, { ...options, headers });
+    const apiPath = (import.meta.env.VITE_API_URL || '') + path;
+    const res = await fetch(apiPath, { ...options, headers });
     if (!res.ok) {
       if ((res.status === 401 || res.status === 403) && path !== '/api/auth/login') {
         window.dispatchEvent(new Event('agap-session-expired'));
