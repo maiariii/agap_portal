@@ -144,10 +144,11 @@ export default function AssessmentPage() {
       return scores[key] !== '' && scores[key] !== null && scores[key] !== undefined ? Number(scores[key]) : '';
     }
     if (key === 'fit') {
-      const cs = row.comparativeAssessmentScores || row.appObj?.comparativeAssessmentScores || {};
-      const hasCompScores = ['bei', 'wst', 'we'].every(k => cs[k] !== '' && cs[k] !== null && cs[k] !== undefined && Number.isFinite(Number(cs[k])));
-      if (hasCompScores) {
-        return (['bei', 'wst', 'we'].reduce((sum, k) => sum + Number(cs[k]), 0) / 3);
+      const areaScores = row.latestEval?.areaScores || {};
+      const hasValue = v => v !== "" && v !== null && v !== undefined && Number.isFinite(Number(v));
+      const areaCount = Object.values(areaScores).map(hasValue).filter(Boolean).length;
+      if (areaCount === 10) {
+        return row.fit !== null && row.fit !== undefined ? Number(row.fit) : '';
       }
       return '';
     }
@@ -689,6 +690,11 @@ export default function AssessmentPage() {
                 const compAvgValue = hasCompScores ? (['bei', 'wst', 'we'].reduce((sum, k) => sum + Number(cs[k]), 0) / 3) : null;
                 const appt = r.appointmentStatus || r.appObj?.appointmentStatus;
                 
+                const areaScores = r.latestEval?.areaScores || {};
+                const hasValue = v => v !== "" && v !== null && v !== undefined && Number.isFinite(Number(v));
+                const areaCount = Object.values(areaScores).map(hasValue).filter(Boolean).length;
+                const allAreasScored = areaCount === 10;
+
                 const fmtScore = (v) => (v !== '' && v !== null && v !== undefined && Number.isFinite(Number(v))) ? (
                   <span className={`badge ${Number(v) >= 85 ? 'green' : Number(v) >= 70 ? 'blue' : Number(v) >= 50 ? 'orange' : 'red'}`}>
                     {Number(v).toFixed(2)}%
@@ -734,9 +740,9 @@ export default function AssessmentPage() {
                     <td>{r.vacancy}</td>
                     <td>{r.itemNo || '—'}</td>
                     <td className="num-col">
-                      {hasCompScores && compAvgValue !== null ? (
-                        <span className={`badge ${compAvgValue >= 85 ? 'green' : compAvgValue >= 70 ? 'blue' : compAvgValue >= 50 ? 'orange' : 'red'}`}>
-                          {compAvgValue.toFixed(2)}%
+                      {allAreasScored && r.fit !== null && r.fit !== undefined ? (
+                        <span className={`badge ${r.fit >= 85 ? 'green' : r.fit >= 70 ? 'blue' : r.fit >= 50 ? 'orange' : 'red'}`}>
+                          {Number(r.fit).toFixed(2)}%
                         </span>
                       ) : '—'}
                     </td>
