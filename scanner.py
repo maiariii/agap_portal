@@ -5,8 +5,8 @@ import os
 import pdfplumber
 
 def detect_position_from_items(items):
-    # For now, every item number should result in the fixed position "SCA I"
-    return "SCA I"
+    # For now, every item number should result in the fixed position "School Counselor Associate I"
+    return "School Counselor Associate I"
 
 def scan_nosca(pdf_path):
     # Base fallback results
@@ -15,7 +15,7 @@ def scan_nosca(pdf_path):
         "division": "",
         "school_name": "",
         "items": [],
-        "position": "SCA I",
+        "position": "School Counselor Associate I",
         "category": "ELEMENTARY",
         "count": 0,
         "category_breakdown": {

@@ -5,6 +5,7 @@ import { useToast } from './middleware/ToastProvider.jsx';
 import { useAppData } from './middleware/DataProvider.jsx';
 import { apiFetch } from './config/api.js';
 import { routes } from './config/routes.jsx';
+import agadLogo from './agadlogo.png';
 
 const TOUR_STEPS = [
   { view: "home", sel: ".kpis", title: "Headline metrics", body: "These KPI cards give you an at-a-glance summary of the data module you're currently viewing." },
@@ -352,11 +353,12 @@ export default function App() {
             <div className="brand-glow-orb-1"></div>
             <div className="brand-glow-orb-2"></div>
             <div className="brand-panel-content">
-              <div className="deped-seal-container">
+              <div className="deped-seal-container" style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                <img src={agadLogo} alt="AGAP Logo" style={{ width: '48px', height: '48px', objectFit: 'contain' }} />
                 <div className="deped-eyebrow">DEPARTMENT OF EDUCATION</div>
               </div>
               <h1><span style={{ color: 'var(--blue-600)' }}>AGAP</span> Portal</h1>
-              <p className="subtitle">Agile Gateway for Application and Placement</p>
+              <p className="subtitle">Agile Gateway for Appointments and Placements</p>
               <div className="brand-stats-grid">
                 <div className="brand-stat-card">
                   <span className="stat-icon">📈</span>
@@ -656,8 +658,8 @@ export default function App() {
       </div>
 
       <aside className="sidebar">
-        <div className="brand" aria-label="AGAP Portal">
-          <span style={{ fontSize: '24px', fontWeight: 'bold' }}>AGAP</span>
+        <div className="brand" aria-label="AGAP Portal" style={{ display: 'flex', justifyContent: 'center', padding: '15px 0', height: 'auto' }}>
+          <img src={agadLogo} alt="AGAP Logo" style={{ width: '180px', height: 'auto', objectFit: 'contain', filter: 'drop-shadow(0 0 6px rgba(255, 255, 255, 0.75)) drop-shadow(0 0 2px rgba(255, 255, 255, 0.9))' }} />
         </div>
         <nav className="nav">
           <button className={location.pathname === '/dashboard' ? 'active' : ''} onClick={() => navigate('/dashboard')} title="Home">
@@ -695,7 +697,7 @@ export default function App() {
           <div className="page-title">
             <div className="eyebrow">DEPARTMENT OF EDUCATION | HUMAN RESOURCE AND ORGANIZATIONAL DEVELOPMENT AND INFRASTRUCTURE</div>
             <h1>AGAP Portal</h1>
-            <p>Agile Gateway For Application and Placement</p>
+            <p>Agile Gateway for Appointments and Placements</p>
           </div>
         </section>
 

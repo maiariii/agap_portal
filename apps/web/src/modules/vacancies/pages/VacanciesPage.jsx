@@ -100,6 +100,16 @@ function NOSCAItemEditor({ itemIndex, value, onChange }) {
     }
   };
 
+  const handleChangePrefixToSca = () => {
+    if (value.includes('-')) {
+      const parts = value.split('-');
+      parts[0] = 'SCAI';
+      onChange(parts.join('-'));
+    } else {
+      onChange('SCAI-' + value);
+    }
+  };
+
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px', alignItems: 'center', marginTop: '6px' }}>
        {chars.map((char, charIdx) => {
@@ -174,6 +184,25 @@ function NOSCAItemEditor({ itemIndex, value, onChange }) {
             -
           </button>
         )}
+        <button
+          type="button"
+          onClick={handleChangePrefixToSca}
+          title="Convert prefix to SCAI"
+          style={{
+            padding: '2px 8px',
+            fontSize: '11px',
+            minHeight: '22px',
+            borderRadius: '4px',
+            border: '1px solid var(--blue)',
+            background: 'var(--blue-50)',
+            color: 'var(--blue-600)',
+            cursor: 'pointer',
+            fontWeight: 'bold',
+            marginLeft: '4px'
+          }}
+        >
+          Use SCAI Prefix
+        </button>
       </div>
     </div>
   );
@@ -429,7 +458,7 @@ export default function VacanciesPage() {
             body: JSON.stringify({ fileData: base64Data, fileName: file.name })
           });
 
-          const positionName = response.position || "SCA I";
+          const positionName = response.position || "School Counselor Associate I";
           const positionId = positions.find(p => p.title.toLowerCase() === positionName.toLowerCase())?.id;
 
           const items = response.items.map(itemNo => ({
