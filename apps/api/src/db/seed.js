@@ -173,6 +173,7 @@ async function main() {
         vacancy_id TEXT NOT NULL REFERENCES vacancies(id) ON DELETE CASCADE,
         applicant_id INTEGER NOT NULL REFERENCES applicants(id) ON DELETE CASCADE,
         status TEXT NOT NULL DEFAULT 'Application Submitted',
+        application_status TEXT NOT NULL DEFAULT 'Application Submitted',
         date_applied TIMESTAMP NOT NULL,
         documents TEXT NOT NULL DEFAULT '{}',
         documentary_complete BOOLEAN,

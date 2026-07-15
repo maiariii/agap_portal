@@ -1,0 +1,65 @@
+# Status Progression Rules (application_status → assessment_status → appointment_status)
+
+## Core Principle
+All statuses move **FORWARD ONLY**. Never revert a status to an earlier value. Once a stage advances, prior stages are locked against automatic or backward change.
+
+---
+
+## 1. application_status
+Allowed values (ordered):
+1. `Application Submitted`
+2. `Pending QS review`
+3. `Qualified`
+4. `Disqualified`
+5. `Excluded`
+
+Rules:
+- Progresses forward only.
+- `Qualified` is the only value that triggers an automatic downstream change (see below).
+- `Disqualified` and `Excluded` are terminal — no assessment or appointment stage follows.
+
+---
+
+## 2. assessment_status
+Allowed values (ordered):
+1. `Assessment Not Started`
+2. `Assessment Started`
+3. `Assessment Completed`
+
+Rules:
+- **Automatic trigger:** When `application_status` becomes `Qualified`, the system automatically sets `assessment_status = 'Assessment Not Started'`.
+- This is the **only** automatic status change in the system (application_status → assessment_status).
+- From `Assessment Not Started`, a user may advance manually to `Assessment Started`, then to `Assessment Completed`.
+- Progresses forward only. Never revert to an earlier assessment value.
+
+---
+
+## 3. appointment_status
+Allowed values:
+- `Appointed`
+- `Not Appointed`
+
+Rules:
+- Pressing Appoint sets `appointment_status` to either `Appointed` or `Not Appointed`.
+- This transition is **manual**, not automatic.
+
+---
+
+## 4. Locking Rule (Critical)
+Once `appointment_status` is `Appointed` OR `Not Appointed`:
+- **DO NOT** change `assessment_status`.
+- **DO NOT** change `application_status`.
+- These upstream values are frozen once an appointment decision is recorded.
+
+---
+
+## Summary
+| Transition | Type | Condition |
+|---|---|---|
+| application_status → `Qualified` | manual | forward only |
+| application_status `Qualified` → assessment_status `Assessment Not Started` | **automatic** | only auto-change in system |
+| assessment_status → `Assessment Started` → `Assessment Completed` | manual | forward only |
+| assessment_status `Assessment Completed` → appointment_status | manual | via Appoint button (UI unlocked) |
+| appointment_status set | manual | locks assessment_status + application_status |
+
+**Never move any status backward. The only automatic transition is application_status → assessment_status.**
