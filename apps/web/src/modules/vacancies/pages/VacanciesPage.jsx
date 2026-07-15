@@ -246,6 +246,9 @@ export default function VacanciesPage() {
       const isClosed = v.status === 'closed' || (start && today < start) || (end && today > end);
       return isClosed ? 'Closed' : 'Open for Application';
     }
+    if (key === 'fillingUpStatus') {
+      return v.fillingUpStatus || 'UNFILLED';
+    }
     return '';
   };
 
@@ -274,7 +277,7 @@ export default function VacanciesPage() {
 
     Object.entries(vColumnFilters).forEach(([key, val]) => {
       if (val === undefined || val === null || val === '') return;
-      const type = ['applications', 'daysRemaining'].includes(key) ? 'numeric' : ['position', 'postingStatus'].includes(key) ? 'categorical' : 'text';
+      const type = ['applications', 'daysRemaining'].includes(key) ? 'numeric' : ['position', 'postingStatus', 'fillingUpStatus'].includes(key) ? 'categorical' : 'text';
       if (type === 'numeric') {
         if (val.min !== undefined && val.min !== '') {
           list = list.filter(v => getVacancyCellValue(v, key) >= Number(val.min));
@@ -398,6 +401,7 @@ export default function VacanciesPage() {
         body: JSON.stringify({ status: 'open', postingStart: calStart, postingEnd: calEnd })
       });
       setShowCalendar(false);
+      setToast({ message: 'Vacancy posting opened successfully!', type: 'success' });
       loadAllData();
     } catch (e) {
       setToast({ message: e.message, type: 'error' });
@@ -700,6 +704,21 @@ export default function VacanciesPage() {
                     <option value="Closed">Closed</option>
                   </select>
                 </th>
+                <th>
+                  <button className="th-btn" onClick={() => handleVSortClick('fillingUpStatus')}>Filling Status {vSortKey === 'fillingUpStatus' ? (vSortDir === 'asc' ? '▲' : '▼') : ''}</button>
+                  <select
+                    className="column-filter"
+                    value={vColumnFilters.fillingUpStatus || ''}
+                    onChange={e => {
+                      setVColumnFilters({ ...vColumnFilters, fillingUpStatus: e.target.value });
+                      setVacPage(1);
+                    }}
+                  >
+                    <option value="">All</option>
+                    <option value="UNFILLED">UNFILLED</option>
+                    <option value="FILLED">FILLED</option>
+                  </select>
+                </th>
                 <th>ACTION</th>
               </tr>
             </thead>
@@ -735,7 +754,17 @@ export default function VacanciesPage() {
                     <td className="num-col"><span className="qs-number" style={{ color: drColor }}>{drText}</span></td>
                     <td><span className={`badge ${isClosed ? 'gray' : 'green'}`}>{isClosed ? 'Closed' : 'Open for Application'}</span></td>
                     <td>
-                      <button className={`vac-action ${isClosed ? 'good' : 'danger'}`} onClick={() => handleToggleVacancy(vac)}>
+                      <span className={`badge ${vac.fillingUpStatus === 'FILLED' ? 'filled-status' : 'unfilled-status'}`}>
+                        {vac.fillingUpStatus || 'UNFILLED'}
+                      </span>
+                    </td>
+                    <td>
+                      <button 
+                        className={`vac-action ${vac.fillingUpStatus === 'FILLED' ? 'incomplete' : (isClosed ? 'good' : 'danger')}`} 
+                        onClick={() => handleToggleVacancy(vac)}
+                        disabled={vac.fillingUpStatus === 'FILLED'}
+                        style={vac.fillingUpStatus === 'FILLED' ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
+                      >
                         {isClosed ? 'Open' : 'Close'}
                       </button>
                     </td>

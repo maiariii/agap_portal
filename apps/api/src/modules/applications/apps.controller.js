@@ -277,10 +277,10 @@ export async function confirmAppointment(req, res) {
       ]
     );
 
-    // Update vacancy status to closed
+    // Update vacancy status to closed and filling_up_status to FILLED
     await pool.query(
       `UPDATE vacancies 
-       SET status = 'closed', updated_at = NOW() 
+       SET status = 'closed', filling_up_status = 'FILLED', updated_at = NOW() 
        WHERE id = $1`,
       [currentApp.vacancy_id]
     );

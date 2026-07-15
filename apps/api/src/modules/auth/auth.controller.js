@@ -69,29 +69,36 @@ export async function login(req, res) {
 }
 
 export async function register(req, res) {
-  const { username, email, full_name, password, role, contact_number, office } = req.body;
-  if (!username || !email || !full_name || !password) {
-    return res.status(400).json({ error: 'Username, email, full name, and password are required.' });
+  const { firstName, lastName, region, division, email, password, passcode } = req.body;
+  if (!firstName || !lastName || !region || !division || !email || !password || !passcode) {
+    return res.status(400).json({ error: 'All fields are required (First Name, Last Name, Region, Division, DepEd Email, Password, and Passcode).' });
   }
   if (password.length < 6) {
     return res.status(400).json({ error: 'Password must be at least 6 characters.' });
+  }
+  if (passcode.length < 4) {
+    return res.status(400).json({ error: 'Passcode must be at least 4 characters.' });
   }
   try {
     // Check if username or email already exists
     const existing = await pool.query(
       'SELECT id FROM users WHERE username = $1 OR email = $2',
-      [username, email]
+      [email, email]
     );
     if (existing.rows.length > 0) {
-      return res.status(409).json({ error: 'Username or email already in use.' });
+      return res.status(409).json({ error: 'DepEd Email already in use.' });
     }
     const id = randomUUID();
     const password_hash = await bcrypt.hash(password, 10);
-    const userRole = role || 'hr_officer';
+    const passcode_hash = await bcrypt.hash(passcode, 10);
+    const fullName = `${firstName} ${lastName}`;
+    const officeStr = `Region: ${region}, Division: ${division}`;
+    const userRole = 'hr_officer'; // Hardcoded position
+
     await pool.query(
-      `INSERT INTO users (id, username, email, full_name, contact_number, office, password_hash, role, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active')`,
-      [id, username, email, full_name, contact_number || null, office || null, password_hash, userRole]
+      `INSERT INTO users (id, username, email, full_name, first_name, last_name, region, division, office, password_hash, passcode_hash, role, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'active')`,
+      [id, email, email, fullName, firstName, lastName, region, division, officeStr, password_hash, passcode_hash, userRole]
     );
     res.status(201).json({ message: 'Account created successfully.' });
   } catch (error) {
