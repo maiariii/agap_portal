@@ -26,8 +26,36 @@ function isCharInvalidAtIndex(char, index, fullString) {
   return false;
 }
 
-function NOSCAItemEditor({ itemIndex, value, onChange }) {
+function NOSCAItemEditor({
+  itemIndex,
+  value,
+  onChange,
+  schoolLevel,
+  onSchoolLevelChange,
+  schoolSearchQuery,
+  onSchoolSearchQueryChange,
+  onSchoolSelect
+}) {
   const chars = value.split('');
+  
+  const [searchResults, setSearchResults] = React.useState([]);
+  const [showDropdown, setShowDropdown] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!schoolSearchQuery || !schoolSearchQuery.trim()) {
+      setSearchResults([]);
+      return;
+    }
+    const delayDebounce = setTimeout(async () => {
+      try {
+        const data = await apiFetch(`/api/vacancies/schools/autocomplete?q=${encodeURIComponent(schoolSearchQuery)}`);
+        setSearchResults(data || []);
+      } catch (err) {
+        console.error('Error fetching schools:', err);
+      }
+    }, 300);
+    return () => clearTimeout(delayDebounce);
+  }, [schoolSearchQuery]);
 
   const handleCharChange = (charIdx, newVal) => {
     const char = newVal.slice(-1).toUpperCase();
@@ -145,7 +173,7 @@ function NOSCAItemEditor({ itemIndex, value, onChange }) {
         );
       })}
       
-      <div style={{ display: 'flex', gap: '2px', marginLeft: '4px' }}>
+      <div style={{ display: 'flex', gap: '2px', marginLeft: '4px', alignItems: 'center' }}>
         <button
           type="button"
           onClick={handleAddChar}
@@ -189,21 +217,117 @@ function NOSCAItemEditor({ itemIndex, value, onChange }) {
           onClick={handleChangePrefixToSca}
           title="Convert prefix to SCAI"
           style={{
-            padding: '2px 8px',
+            padding: '0 8px',
             fontSize: '11px',
-            minHeight: '22px',
+            height: '26px',
             borderRadius: '4px',
             border: '1px solid var(--blue)',
             background: 'var(--blue-50)',
             color: 'var(--blue-600)',
             cursor: 'pointer',
             fontWeight: 'bold',
-            marginLeft: '4px'
+            marginLeft: '4px',
+            whiteSpace: 'nowrap',
+            boxSizing: 'border-box',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center'
           }}
         >
           Use SCAI Prefix
         </button>
+
+        <select
+          value={schoolLevel || ''}
+          onChange={(e) => onSchoolLevelChange(e.target.value)}
+          style={{
+            padding: '0 8px',
+            fontSize: '11px',
+            height: '26px',
+            borderRadius: '4px',
+            border: '1.5px solid var(--blue)',
+            background: 'var(--blue-50)',
+            color: 'var(--blue-600)',
+            fontWeight: 'bold',
+            marginLeft: '8px',
+            cursor: 'pointer',
+            outline: 'none',
+            whiteSpace: 'nowrap',
+            boxSizing: 'border-box',
+            display: 'inline-flex',
+            alignItems: 'center'
+          }}
+        >
+          <option value="">Select School Level</option>
+          <option value="ES">ES</option>
+          <option value="JHS">JHS</option>
+          <option value="SHS">SHS</option>
+        </select>
       </div>
+
+      {schoolLevel === 'JHS' && (
+        <div style={{ width: '100%', marginTop: '6px', position: 'relative' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ fontSize: '10.5px', fontWeight: 'bold', color: 'var(--navy)' }}>School ID:</span>
+            <div style={{ position: 'relative', flex: 1 }}>
+              <input
+                type="text"
+                value={schoolSearchQuery || ''}
+                onChange={(e) => {
+                  onSchoolSearchQueryChange(e.target.value);
+                  setShowDropdown(true);
+                }}
+                onFocus={() => setShowDropdown(true)}
+                placeholder="Type School ID or Name..."
+                style={{
+                  width: '100%',
+                  padding: '4px 8px',
+                  borderRadius: '6px',
+                  border: '1px solid var(--line)',
+                  fontSize: '11.5px',
+                  height: '24px'
+                }}
+              />
+              {showDropdown && searchResults.length > 0 && (
+                <div style={{
+                  position: 'absolute',
+                  top: '100%',
+                  left: 0,
+                  right: 0,
+                  background: 'white',
+                  border: '1px solid var(--line)',
+                  borderRadius: '6px',
+                  boxShadow: '0 4px 8px rgba(0, 0, 0, 0.1)',
+                  zIndex: 999,
+                  maxHeight: '120px',
+                  overflowY: 'auto',
+                  marginTop: '2px'
+                }}>
+                  {searchResults.map((sch) => (
+                    <div
+                      key={sch.schoolId}
+                      onClick={() => {
+                        onSchoolSelect(sch);
+                        setShowDropdown(false);
+                      }}
+                      style={{
+                        padding: '6px 8px',
+                        fontSize: '11px',
+                        cursor: 'pointer',
+                        borderBottom: '1px solid #F1F5F9'
+                      }}
+                      onMouseEnter={(e) => e.target.style.background = '#F8FAFC'}
+                      onMouseLeave={(e) => e.target.style.background = 'transparent'}
+                    >
+                      <b>{sch.schoolId}</b> - {sch.schoolName}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -236,6 +360,7 @@ export default function VacanciesPage() {
   const [noscaScanning, setNoscaScanning] = useState(false);
   const [detectedItems, setDetectedItems] = useState([]);
   const [selectedNoscaItemNos, setSelectedNoscaItemNos] = useState([]);
+
 
   React.useEffect(() => {
     const handleTourUpdate = () => {
@@ -479,7 +604,11 @@ export default function VacanciesPage() {
           const items = response.items.map(itemNo => ({
             itemNo,
             title: positionName,
-            positionId: positionId || ''
+            positionId: positionId || '',
+            schoolLevel: '',
+            schoolId: null,
+            schoolName: '',
+            schoolSearchQuery: ''
           }));
 
           setDetectedItems(items);
@@ -505,8 +634,31 @@ export default function VacanciesPage() {
   const handleAddNoscaVacancies = async () => {
     const toAdd = detectedItems.filter(it => selectedNoscaItemNos.includes(it.itemNo));
     if (!toAdd.length) return setToast({ message: 'Please tick at least one item to add', type: 'error' });
+    
+    // Check validation per item
+    for (const it of toAdd) {
+      if (!it.schoolLevel) {
+        return setToast({ message: `Please select a School Level for item ${it.itemNo}.`, type: 'error' });
+      }
+      if (it.schoolLevel === 'JHS' && !it.schoolId) {
+        return setToast({ message: `Please select a valid JHS school ID for item ${it.itemNo}.`, type: 'error' });
+      }
+    }
+
+    const payloadItems = toAdd.map(item => ({
+      itemNo: item.itemNo,
+      title: item.title,
+      positionId: item.positionId,
+      schoolLevel: item.schoolLevel,
+      schoolId: item.schoolLevel === 'JHS' ? item.schoolId : null,
+      schoolName: item.schoolLevel === 'JHS' ? item.schoolName : ''
+    }));
+
     try {
-      await apiFetch('/api/vacancies/import-nosca', { method: 'POST', body: JSON.stringify({ items: toAdd }) });
+      await apiFetch('/api/vacancies/import-nosca', { 
+        method: 'POST', 
+        body: JSON.stringify({ items: payloadItems }) 
+      });
       setToast({ message: 'Vacancies added successfully!', type: 'success' });
       setShowNosca(false);
       setDetectedItems([]);
@@ -1193,6 +1345,22 @@ export default function VacanciesPage() {
                                         return prev;
                                       });
                                     }}
+                                    schoolLevel={it.schoolLevel || 'ES'}
+                                    onSchoolLevelChange={(level) => {
+                                      setDetectedItems(prev => prev.map((item, i) => i === idx ? { ...item, schoolLevel: level, schoolId: null, schoolName: '', schoolSearchQuery: '' } : item));
+                                    }}
+                                    schoolSearchQuery={it.schoolSearchQuery || ''}
+                                    onSchoolSearchQueryChange={(query) => {
+                                      setDetectedItems(prev => prev.map((item, i) => i === idx ? { ...item, schoolSearchQuery: query } : item));
+                                    }}
+                                    onSchoolSelect={(school) => {
+                                      setDetectedItems(prev => prev.map((item, i) => i === idx ? {
+                                        ...item,
+                                        schoolId: school.schoolId,
+                                        schoolName: school.schoolName,
+                                        schoolSearchQuery: `${school.schoolId} - ${school.schoolName}`
+                                      } : item));
+                                    }}
                                   />
                                 </div>
                               </div>
@@ -1200,10 +1368,22 @@ export default function VacanciesPage() {
                           })}
                         </div>
                       </div>
+
                       <div className="nosca-actions" style={{ marginTop: '14px', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '10px' }}>
                         <button className="secondary" onClick={() => { setDetectedItems([]); setSelectedNoscaItemNos([]); }}>Clear</button>
                         <button className="good" onClick={() => {
                           if (!selectedNoscaItemNos.length) return setToast({ message: 'Please tick at least one item to add', type: 'error' });
+                          
+                          const toAdd = detectedItems.filter(it => selectedNoscaItemNos.includes(it.itemNo));
+                          for (const it of toAdd) {
+                            if (!it.schoolLevel) {
+                              return setToast({ message: `Please select a School Level for item ${it.itemNo}.`, type: 'error' });
+                            }
+                            if (it.schoolLevel === 'JHS' && !it.schoolId) {
+                              return setToast({ message: `Please select a valid JHS school ID for item ${it.itemNo}.`, type: 'error' });
+                            }
+                          }
+                          
                           setShowNoscaConfirm(true);
                         }}>Add Selected Items</button>
                       </div>

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useAppData } from '../../../middleware/DataProvider.jsx';
 import { useToast } from '../../../middleware/ToastProvider.jsx';
 import { apiFetch } from '../../../config/api.js';
@@ -47,6 +47,102 @@ export default function AssessmentPage() {
   // View Documents state
   const [showDocsModal, setShowDocsModal] = useState(false);
   const [selectedDocKey, setSelectedDocKey] = useState('pds');
+  const [availableDocs, setAvailableDocs] = useState([]);
+
+  useEffect(() => {
+    if (showDocsModal && selectedQualApp?.id) {
+      setAvailableDocs([]);
+      console.log(`[Azure Storage] Requesting documents for applicant ID "${selectedQualApp.applicantId || 'AGAP-0001'}" in folder "staging-agap"...`);
+      apiFetch(`/api/applications/${selectedQualApp.id}/documents`)
+        .then(data => {
+          console.log(`%c[Azure Storage Fetch SUCCESS]`, 'color: green; font-weight: bold; font-size: 14px;');
+          console.log('Azure Folder Name:', data.azureFolder);
+          console.log('Sample Hash Reference:', data.sampleHash);
+          console.log('Retrieved Documents Checklist:', data.documents);
+          setAvailableDocs(data.documents || []);
+        })
+        .catch(err => {
+          console.error('[Azure Storage Fetch ERROR] Failed to fetch documents:', err);
+          setAvailableDocs([]);
+        });
+    }
+  }, [showDocsModal, selectedQualApp]);
+
+  // CSV viewer state & auto-fetcher
+  const [csvData, setCsvData] = useState(null);
+  const [csvLoading, setCsvLoading] = useState(false);
+  const [csvError, setCsvError] = useState(null);
+
+  useEffect(() => {
+    const selectedDocInfo = availableDocs.find(d => d.key === selectedDocKey);
+    const existsInAzure = !!selectedDocInfo?.existsInAzure;
+    const isPdf = !!selectedDocInfo?.filename?.toLowerCase().endsWith('.pdf');
+
+    if (existsInAzure && !isPdf && selectedQualApp?.id) {
+      setCsvLoading(true);
+      setCsvError(null);
+      setCsvData(null);
+
+      const downloadUrl = `${window.location.hostname === 'localhost' ? 'http://localhost:5000' : window.location.origin}/api/applications/${selectedQualApp.id}/documents/${selectedDocKey}/download?token=${localStorage.getItem('agap_token')}`;
+      
+      fetch(downloadUrl)
+        .then(res => {
+          if (!res.ok) throw new Error(`Status ${res.status}`);
+          return res.text();
+        })
+        .then(text => {
+          const rows = [];
+          let currentRow = [];
+          let currentField = '';
+          let insideQuotes = false;
+
+          for (let i = 0; i < text.length; i++) {
+            const char = text[i];
+            const nextChar = text[i+1];
+
+            if (char === '"') {
+              if (insideQuotes && nextChar === '"') {
+                currentField += '"';
+                i++;
+              } else {
+                insideQuotes = !insideQuotes;
+              }
+            } else if (char === ',' && !insideQuotes) {
+              currentRow.push(currentField.trim());
+              currentField = '';
+            } else if ((char === '\r' || char === '\n') && !insideQuotes) {
+              if (char === '\r' && nextChar === '\n') {
+                i++;
+              }
+              currentRow.push(currentField.trim());
+              if (currentRow.some(cell => cell !== '')) {
+                rows.push(currentRow);
+              }
+              currentRow = [];
+              currentField = '';
+            } else {
+              currentField += char;
+            }
+          }
+          if (currentField || currentRow.length > 0) {
+            currentRow.push(currentField.trim());
+            rows.push(currentRow);
+          }
+
+          setCsvData(rows);
+          setCsvLoading(false);
+        })
+        .catch(err => {
+          console.error('[CSV Load Error]', err);
+          setCsvError(err.message);
+          setCsvLoading(false);
+        });
+    } else {
+      setCsvData(null);
+      setCsvLoading(false);
+      setCsvError(null);
+    }
+  }, [selectedDocKey, availableDocs, selectedQualApp, showDocsModal]);
 
   // Appointment confirmation state
   const [showAppointConfirmModal, setShowAppointConfirmModal] = useState(false);
@@ -1210,56 +1306,47 @@ export default function AssessmentPage() {
               <button className="secondary" onClick={() => setShowDocsModal(false)}>Close Vault</button>
             </div>
 
-            <div className="modal-body" style={{ marginTop: '20px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
-              {/* Document Cards Grid */}
-              <div>
-                <p className="small" style={{ marginBottom: '12px' }}>
-                  Select a document to preview the verified submission.
-                </p>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', gap: '12px' }}>
+            <div className="modal-body" style={{ marginTop: '20px', display: 'grid', gridTemplateColumns: '320px 1fr', gap: '20px', alignItems: 'start' }}>
+              {/* Document Checklist Sidebar */}
+              <div style={{ border: '1px solid var(--line)', borderRadius: '12px', overflow: 'hidden', background: '#F8FAFC' }}>
+                <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)', background: 'white' }}>
+                  <h4 style={{ margin: 0, color: 'var(--navy)', fontSize: '14px' }}>Document Checklist</h4>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', background: 'white' }}>
                   {[
-                    { key: 'pds', label: 'Personal Data Sheet (PDS)', icon: '👤', desc: 'CS Form 212 (Revised)' },
-                    { key: 'loi', label: 'Letter of Intent (LOI)', icon: '✉️', desc: 'Addressed to SDS' },
-                    { key: 'tor', label: 'Transcript of Records (TOR)', icon: '🎓', desc: 'Academic Grades' },
-                    { key: 'eligibility', label: 'Certificate of Eligibility', icon: '🎖️', desc: 'Civil Service/PRC Board' },
-                    { key: 'training', label: 'Certificates of Training', icon: '📜', desc: 'Completed Programs' },
-                    { key: 'employment', label: 'Employment Record', icon: '💼', desc: 'Service Record/COE' },
+                    { key: 'pds', label: 'Personal Data Sheet', required: true },
+                    { key: 'work_experience', label: 'Work Experience Sheet', required: true },
+                    { key: 'eligibility', label: 'Certificate of Eligibility', required: true },
+                    { key: 'tor', label: 'Transcript of Records', required: true },
+                    { key: 'prc', label: 'Updated PRC License/ID', required: true },
+                    { key: 'diploma', label: 'Diploma (optional)', required: false },
+                    { key: 'resume', label: 'Resume', required: true },
                   ].map((doc) => {
-                    const isSubmitted = selectedQualApp.documents?.[doc.key] !== false; // default true/exist in mock
                     const isSelected = selectedDocKey === doc.key;
                     return (
                       <div
                         key={doc.key}
                         onClick={() => setSelectedDocKey(doc.key)}
                         style={{
-                          border: isSelected ? '2.5px solid var(--blue-600)' : '1px solid var(--line)',
-                          borderRadius: '12px',
-                          padding: '12px',
+                          padding: '12px 16px',
                           cursor: 'pointer',
                           backgroundColor: isSelected ? 'var(--blue-50)' : 'white',
-                          boxShadow: isSelected ? '0 4px 12px rgba(2,132,199,0.15)' : '0 2px 4px rgba(0,0,0,0.02)',
-                          transition: 'all 0.2s ease',
+                          borderLeft: isSelected ? '4px solid var(--blue-600)' : '4px solid transparent',
+                          borderBottom: '1px solid #F1F5F9',
+                          transition: 'all 0.15s ease',
                           display: 'flex',
                           flexDirection: 'column',
-                          gap: '6px',
-                          position: 'relative'
+                          gap: '2px'
                         }}
                       >
-                        <div style={{ fontSize: '24px' }}>{doc.icon}</div>
-                        <div style={{ fontWeight: 'bold', fontSize: '13px', color: 'var(--foreground)' }}>{doc.label}</div>
-                        <div style={{ fontSize: '11px', color: 'var(--muted)' }}>{doc.desc}</div>
-                        <div style={{ marginTop: 'auto', paddingTop: '6px' }}>
-                          <span style={{
-                            fontSize: '10px',
-                            fontWeight: 'bold',
-                            padding: '2px 6px',
-                            borderRadius: '4px',
-                            backgroundColor: isSubmitted ? 'var(--green-100)' : 'var(--red-100)',
-                            color: isSubmitted ? 'var(--green-800)' : 'var(--red-800)'
-                          }}>
-                            {isSubmitted ? '✓ Verified' : '✗ Missing'}
-                          </span>
+                        <div style={{ fontWeight: 'bold', fontSize: '13px', color: isSelected ? 'var(--blue-800)' : 'var(--navy)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          {doc.label} {doc.required && <span style={{ color: '#EF4444' }}>*</span>}
                         </div>
+                        {doc.required && (
+                          <div style={{ fontSize: '11px', color: isSelected ? 'var(--blue-600)' : '#64748B' }}>
+                            View Uploaded Document
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -1286,270 +1373,388 @@ export default function AssessmentPage() {
                     </svg>
                     Document Viewer: {
                       selectedDocKey === 'pds' ? 'Personal Data Sheet (PDS)' :
-                      selectedDocKey === 'loi' ? 'Letter of Intent (LOI)' :
-                      selectedDocKey === 'tor' ? 'Transcript of Records (TOR)' :
+                      selectedDocKey === 'work_experience' ? 'Work Experience Sheet' :
                       selectedDocKey === 'eligibility' ? 'Certificate of Eligibility' :
-                      selectedDocKey === 'training' ? 'Certificates of Training' : 'Certificate of Employment / Service Record'
+                      selectedDocKey === 'tor' ? 'Transcript of Records (TOR)' :
+                      selectedDocKey === 'prc' ? 'Updated PRC License/ID' :
+                      selectedDocKey === 'diploma' ? 'Diploma' : 'Resume'
                     }
                   </b>
                   <span style={{ fontSize: '12px', color: 'var(--muted)' }}>Page 1 of 1</span>
                 </div>
-                <div style={{ padding: '24px', backgroundColor: '#f8fafc', minHeight: '400px', maxHeight: '550px', overflowY: 'auto', display: 'flex', justifyContent: 'center' }}>
-                  <div style={{
-                    backgroundColor: 'white',
-                    width: '100%',
-                    maxWidth: '800px',
-                    boxShadow: '0 4px 20px rgba(0,0,0,0.06)',
-                    borderRadius: '8px',
-                    border: '1px solid #e2e8f0',
-                    padding: '40px',
-                    boxSizing: 'border-box',
-                    fontFamily: 'monospace',
-                    fontSize: '13px',
-                    lineHeight: '1.6',
-                    color: '#334155'
-                  }}>
-                    {selectedDocKey === 'loi' && (
-                      <div>
-                        <div style={{ textAlign: 'right', marginBottom: '24px' }}>
-                          July 16, 2026<br />
-                          {selectedQualApp.applicantObj?.name || selectedQualApp.applicant}
-                        </div>
-                        <div style={{ marginBottom: '24px' }}>
-                          <b>To:</b><br />
-                          <b>The Schools Division Superintendent</b><br />
-                          Department of Education<br />
-                          {selectedQualApp.vacancyObj?.division || 'Schools Division Office'}
-                        </div>
-                        <div style={{ marginBottom: '20px' }}>
-                          <b>Subject: Letter of Intent for Vacancy: {selectedQualApp.vacancy} ({selectedQualApp.itemNo || 'N/A'})</b>
-                        </div>
-                        <p>Dear Sir/Madam,</p>
-                        <p>
-                          Please accept this letter as formal expression of my intent to apply for the position of <b>{selectedQualApp.vacancy}</b> under Item No. <b>{selectedQualApp.itemNo || 'N/A'}</b> in the Department of Education.
-                        </p>
-                        <p>
-                          I believe that my qualifications, educational background in <b>{selectedQualApp.applicantObj?.bachelorDegree || 'N/A'} (Major in {selectedQualApp.applicantObj?.major || 'N/A'})</b>, and my <b>{selectedQualApp.applicantObj?.yearsExperience || 0} years</b> of relevant experience make me an excellent fit for the role.
-                        </p>
-                        <p>
-                          I have attached my Personal Data Sheet (PDS), Transcript of Records, and certificate copies for your evaluation. I look forward to the opportunity to discuss my application further.
-                        </p>
-                        <p style={{ marginTop: '40px' }}>
-                          Sincerely yours,<br /><br />
-                          <u><b>{selectedQualApp.applicantObj?.name || selectedQualApp.applicant}</b></u><br />
-                          Applicant
-                        </p>
-                      </div>
-                    )}
-
-                    {selectedDocKey === 'pds' && (
-                      <div>
-                        <div style={{ borderBottom: '3px solid #1e3a8a', paddingBottom: '8px', marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <h3 style={{ margin: 0, color: '#1e3a8a' }}>PERSONAL DATA SHEET</h3>
-                          <span style={{ fontSize: '11px', padding: '2px 6px', background: '#e2e8f0', borderRadius: '4px' }}>CS Form 212 (Revised 2017)</span>
-                        </div>
-                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-                          <tbody>
-                            <tr style={{ backgroundColor: '#f1f5f9' }}>
-                              <td colSpan="4" style={{ padding: '6px', border: '1px solid #cbd5e1', fontWeight: 'bold', color: '#1e3a8a' }}>I. PERSONAL INFORMATION</td>
-                            </tr>
-                            <tr>
-                              <td style={{ padding: '6px', border: '1px solid #cbd5e1', width: '20%', fontWeight: 'bold' }}>SURNAME</td>
-                              <td style={{ padding: '6px', border: '1px solid #cbd5e1', width: '30%' }}>{(selectedQualApp.applicantObj?.name || '').split(' ')[1] || selectedQualApp.applicant}</td>
-                              <td style={{ padding: '6px', border: '1px solid #cbd5e1', width: '20%', fontWeight: 'bold' }}>FIRST NAME</td>
-                              <td style={{ padding: '6px', border: '1px solid #cbd5e1', width: '30%' }}>{(selectedQualApp.applicantObj?.name || '').split(' ')[0] || ''}</td>
-                            </tr>
-                            <tr>
-                              <td style={{ padding: '6px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>DATE OF BIRTH</td>
-                              <td style={{ padding: '6px', border: '1px solid #cbd5e1' }}>10/12/1992</td>
-                              <td style={{ padding: '6px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>PLACE OF BIRTH</td>
-                              <td style={{ padding: '6px', border: '1px solid #cbd5e1' }}>Metro Manila</td>
-                            </tr>
-                            <tr>
-                              <td style={{ padding: '6px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>CITIZENSHIP</td>
-                              <td style={{ padding: '6px', border: '1px solid #cbd5e1' }}>Filipino</td>
-                              <td style={{ padding: '6px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>RESIDENTIAL ADDRESS</td>
-                              <td style={{ padding: '6px', border: '1px solid #cbd5e1' }}>{selectedQualApp.applicantObj?.localResident ? 'Local District Resident' : 'External Municipality'}</td>
-                            </tr>
-                            <tr style={{ backgroundColor: '#f1f5f9' }}>
-                              <td colSpan="4" style={{ padding: '6px', border: '1px solid #cbd5e1', fontWeight: 'bold', color: '#1e3a8a' }}>II. EDUCATIONAL BACKGROUND</td>
-                            </tr>
-                            <tr>
-                              <td style={{ padding: '6px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>DEGREE</td>
-                              <td style={{ padding: '6px', border: '1px solid #cbd5e1' }}>{selectedQualApp.applicantObj?.bachelorDegree || 'N/A'}</td>
-                              <td style={{ padding: '6px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>MAJOR</td>
-                              <td style={{ padding: '6px', border: '1px solid #cbd5e1' }}>{selectedQualApp.applicantObj?.major || 'N/A'}</td>
-                            </tr>
-                            <tr>
-                              <td style={{ padding: '6px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>GRADUATED AT</td>
-                              <td colSpan="3" style={{ padding: '6px', border: '1px solid #cbd5e1' }}>State University (Class of 2013)</td>
-                            </tr>
-                            <tr style={{ backgroundColor: '#f1f5f9' }}>
-                              <td colSpan="4" style={{ padding: '6px', border: '1px solid #cbd5e1', fontWeight: 'bold', color: '#1e3a8a' }}>III. CIVIL SERVICE ELIGIBILITY</td>
-                            </tr>
-                            <tr>
-                              <td style={{ padding: '6px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>ELIGIBILITY</td>
-                              <td colSpan="3" style={{ padding: '6px', border: '1px solid #cbd5e1' }}>{selectedQualApp.applicantObj?.eligibility || 'None specified'}</td>
-                            </tr>
-                            <tr style={{ backgroundColor: '#f1f5f9' }}>
-                              <td colSpan="4" style={{ padding: '6px', border: '1px solid #cbd5e1', fontWeight: 'bold', color: '#1e3a8a' }}>IV. WORK EXPERIENCE</td>
-                            </tr>
-                            <tr>
-                              <td style={{ padding: '6px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>TOTAL YEARS</td>
-                              <td style={{ padding: '6px', border: '1px solid #cbd5e1' }}>{selectedQualApp.applicantObj?.yearsExperience || 0} Year(s)</td>
-                              <td style={{ padding: '6px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>TRAINING HOURS</td>
-                              <td style={{ padding: '6px', border: '1px solid #cbd5e1' }}>{selectedQualApp.applicantObj?.trainingHours || 0} Hour(s)</td>
-                            </tr>
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-
-                    {selectedDocKey === 'tor' && (
-                      <div>
-                        <div style={{ textAlign: 'center', marginBottom: '20px' }}>
-                          <h3 style={{ margin: 0, color: '#1e3a8a' }}>OFFICIAL TRANSCRIPT OF RECORDS</h3>
-                          <span style={{ fontSize: '11px', fontStyle: 'italic' }}>STATE UNIVERSITY — OFFICE OF THE REGISTRAR</span>
-                        </div>
-                        <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between' }}>
-                          <div>
-                            <b>Name:</b> {selectedQualApp.applicantObj?.name || selectedQualApp.applicant}<br />
-                            <b>Degree:</b> {selectedQualApp.applicantObj?.bachelorDegree || 'N/A'}
+                {(() => {
+                  const selectedDocInfo = availableDocs.find(d => d.key === selectedDocKey);
+                  const existsInAzure = !!selectedDocInfo?.existsInAzure;
+                  const isPdf = !!selectedDocInfo?.filename?.toLowerCase().endsWith('.pdf');
+                  return (
+                    <div style={{
+                      padding: (existsInAzure && isPdf) ? '0' : '24px',
+                      backgroundColor: '#f8fafc',
+                      minHeight: '400px',
+                      maxHeight: '550px',
+                      overflowY: (existsInAzure && isPdf) ? 'hidden' : 'auto',
+                      display: 'flex',
+                      justifyContent: 'center',
+                      width: '100%',
+                      alignItems: 'stretch'
+                    }}>
+                      {existsInAzure ? (
+                        isPdf ? (
+                          <iframe
+                            src={`${window.location.hostname === 'localhost' ? 'http://localhost:5000' : window.location.origin}/api/applications/${selectedQualApp.id}/documents/${selectedDocKey}/download?token=${localStorage.getItem('agap_token')}&dpi=98`}
+                            style={{ width: '100%', height: '550px', border: 'none', borderRadius: '0 0 12px 12px' }}
+                            title="Azure Document Viewer"
+                          />
+                        ) : (
+                          <div style={{ width: '100%', display: 'flex', flexDirection: 'column', backgroundColor: 'white', border: '1px solid var(--line)', borderRadius: '12px', overflow: 'hidden' }}>
+                            <div style={{ padding: '12px 16px', borderBottom: '1px solid #e2e8f0', background: '#f8fafc', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <span style={{ fontSize: '12px', color: '#64748B', fontWeight: 'bold' }}>
+                                Previewing Spreadsheet: {selectedDocInfo?.filename}
+                              </span>
+                              <a
+                                href={`${window.location.hostname === 'localhost' ? 'http://localhost:5000' : window.location.origin}/api/applications/${selectedQualApp.id}/documents/${selectedDocKey}/download?token=${localStorage.getItem('agap_token')}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                style={{ fontSize: '12px', color: 'var(--blue-600)', textDecoration: 'underline', fontWeight: 'bold' }}
+                              >
+                                Download Original
+                              </a>
+                            </div>
+                            <div style={{ overflow: 'auto', padding: '16px', boxSizing: 'border-box', maxHeight: '480px' }}>
+                              {csvLoading ? (
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '200px', gap: '8px', color: '#64748B' }}>
+                                  <span style={{ fontSize: '13px' }}>Loading sheet data...</span>
+                                </div>
+                              ) : csvError ? (
+                                <div style={{ color: '#EF4444', padding: '16px', textAlign: 'center', fontSize: '13px' }}>
+                                  Failed to load data: {csvError}
+                                </div>
+                              ) : csvData ? (
+                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', textAlign: 'left', fontFamily: 'sans-serif' }}>
+                                  <thead>
+                                    <tr style={{ backgroundColor: '#f1f5f9', borderBottom: '2px solid #cbd5e1' }}>
+                                      {csvData[0]?.map((cell, idx) => (
+                                        <th key={idx} style={{ padding: '8px 10px', border: '1px solid #e2e8f0', color: '#1e293b', fontWeight: 'bold', whiteSpace: 'nowrap' }}>
+                                          {cell}
+                                        </th>
+                                      ))}
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {csvData.slice(1).map((row, rowIdx) => (
+                                      <tr key={rowIdx} style={{ borderBottom: '1px solid #e2e8f0', backgroundColor: rowIdx % 2 === 0 ? 'white' : '#f8fafc' }}>
+                                        {row.map((cell, cellIdx) => (
+                                          <td key={cellIdx} style={{ padding: '6px 10px', border: '1px solid #e2e8f0', color: '#334155', whiteSpace: 'nowrap' }}>
+                                            {cell}
+                                          </td>
+                                        ))}
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              ) : (
+                                <div style={{ color: '#64748B', textAlign: 'center', padding: '20px' }}>No data to display.</div>
+                              )}
+                            </div>
                           </div>
-                          <div style={{ textAlign: 'right' }}>
-                            <b>Date Issued:</b> June 20, 2013<br />
-                            <b>Major:</b> {selectedQualApp.applicantObj?.major || 'N/A'}
-                          </div>
-                        </div>
-                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
-                          <thead>
-                            <tr style={{ backgroundColor: '#f1f5f9', borderTop: '2px solid #334155', borderBottom: '2px solid #334155' }}>
-                              <th style={{ padding: '6px', textAlign: 'left', border: '1px solid #cbd5e1' }}>Course Code</th>
-                              <th style={{ padding: '6px', textAlign: 'left', border: '1px solid #cbd5e1' }}>Course Description</th>
-                              <th style={{ padding: '6px', textAlign: 'center', border: '1px solid #cbd5e1' }}>Grade</th>
-                              <th style={{ padding: '6px', textAlign: 'center', border: '1px solid #cbd5e1' }}>Units</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            <tr>
-                              <td style={{ padding: '6px', border: '1px solid #cbd5e1' }}>EDUC 101</td>
-                              <td style={{ padding: '6px', border: '1px solid #cbd5e1' }}>Introduction to Education Studies</td>
-                              <td style={{ padding: '6px', textAlign: 'center', border: '1px solid #cbd5e1' }}>1.25</td>
-                              <td style={{ padding: '6px', textAlign: 'center', border: '1px solid #cbd5e1' }}>3.0</td>
-                            </tr>
-                            <tr>
-                              <td style={{ padding: '6px', border: '1px solid #cbd5e1' }}>EDUC 202</td>
-                              <td style={{ padding: '6px', border: '1px solid #cbd5e1' }}>Curriculum Development & Pedagogy</td>
-                              <td style={{ padding: '6px', textAlign: 'center', border: '1px solid #cbd5e1' }}>1.50</td>
-                              <td style={{ padding: '6px', textAlign: 'center', border: '1px solid #cbd5e1' }}>3.0</td>
-                            </tr>
-                            <tr>
-                              <td style={{ padding: '6px', border: '1px solid #cbd5e1' }}>EDUC 305</td>
-                              <td style={{ padding: '6px', border: '1px solid #cbd5e1' }}>Educational Technology & Applications</td>
-                              <td style={{ padding: '6px', textAlign: 'center', border: '1px solid #cbd5e1' }}>1.00</td>
-                              <td style={{ padding: '6px', textAlign: 'center', border: '1px solid #cbd5e1' }}>3.0</td>
-                            </tr>
-                            <tr>
-                              <td style={{ padding: '6px', border: '1px solid #cbd5e1' }}>COMP 110</td>
-                              <td style={{ padding: '6px', border: '1px solid #cbd5e1' }}>Advanced Computer Applications</td>
-                              <td style={{ padding: '6px', textAlign: 'center', border: '1px solid #cbd5e1' }}>1.25</td>
-                              <td style={{ padding: '6px', textAlign: 'center', border: '1px solid #cbd5e1' }}>3.0</td>
-                            </tr>
-                            <tr style={{ fontWeight: 'bold', borderTop: '2px solid #334155' }}>
-                              <td colSpan="2" style={{ padding: '6px', textAlign: 'right' }}>Cumulative GPA:</td>
-                              <td style={{ padding: '6px', textAlign: 'center' }}>1.25</td>
-                              <td style={{ padding: '6px', textAlign: 'center' }}>12.0</td>
-                            </tr>
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-
-                    {selectedDocKey === 'eligibility' && (
-                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                        )
+                      ) : (
                         <div style={{
-                          border: '2px solid #1e3a8a',
+                          backgroundColor: 'white',
+                          width: '100%',
+                          maxWidth: '800px',
+                          boxShadow: '0 4px 20px rgba(0,0,0,0.06)',
                           borderRadius: '8px',
-                          width: '450px',
-                          padding: '16px',
-                          backgroundColor: '#f8fafc',
-                          boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)'
+                          border: '1px solid #e2e8f0',
+                          padding: '40px',
+                          boxSizing: 'border-box',
+                          fontFamily: 'monospace',
+                          fontSize: '13px',
+                          lineHeight: '1.6',
+                          color: '#334155'
                         }}>
-                          <div style={{ textAlign: 'center', borderBottom: '1px solid #1e3a8a', paddingBottom: '8px', marginBottom: '12px' }}>
-                            <small>REPUBLIC OF THE PHILIPPINES</small>
-                            <h4 style={{ margin: '2px 0 0', color: '#1e3a8a' }}>PROFESSIONAL REGULATION COMMISSION</h4>
-                            <span style={{ fontSize: '10px' }}>PROFESSIONAL IDENTIFICATION CARD</span>
-                          </div>
-                          <div style={{ display: 'flex', gap: '16px' }}>
-                            <div style={{ width: '100px', height: '100px', border: '1px solid #cbd5e1', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '32px', backgroundColor: '#e2e8f0' }}>
-                              👤
+                          {selectedDocKey === 'pds' && (
+                            <div>
+                              <div style={{ borderBottom: '3px solid #1e3a8a', paddingBottom: '8px', marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <h3 style={{ margin: 0, color: '#1e3a8a' }}>PERSONAL DATA SHEET</h3>
+                                <span style={{ fontSize: '11px', padding: '2px 6px', background: '#e2e8f0', borderRadius: '4px' }}>CS Form 212 (Revised 2017)</span>
+                              </div>
+                              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                                <tbody>
+                                  <tr style={{ backgroundColor: '#f1f5f9' }}>
+                                    <td colSpan="4" style={{ padding: '6px', border: '1px solid #cbd5e1', fontWeight: 'bold', color: '#1e3a8a' }}>I. PERSONAL INFORMATION</td>
+                                  </tr>
+                                  <tr>
+                                    <td style={{ padding: '6px', border: '1px solid #cbd5e1', width: '20%', fontWeight: 'bold' }}>SURNAME</td>
+                                    <td style={{ padding: '6px', border: '1px solid #cbd5e1', width: '30%' }}>{(selectedQualApp.applicantObj?.name || '').split(' ')[1] || selectedQualApp.applicant}</td>
+                                    <td style={{ padding: '6px', border: '1px solid #cbd5e1', width: '20%', fontWeight: 'bold' }}>FIRST NAME</td>
+                                    <td style={{ padding: '6px', border: '1px solid #cbd5e1', width: '30%' }}>{(selectedQualApp.applicantObj?.name || '').split(' ')[0] || ''}</td>
+                                  </tr>
+                                  <tr>
+                                    <td style={{ padding: '6px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>DATE OF BIRTH</td>
+                                    <td style={{ padding: '6px', border: '1px solid #cbd5e1' }}>10/12/1992</td>
+                                    <td style={{ padding: '6px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>PLACE OF BIRTH</td>
+                                    <td style={{ padding: '6px', border: '1px solid #cbd5e1' }}>Metro Manila</td>
+                                  </tr>
+                                  <tr>
+                                    <td style={{ padding: '6px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>CITIZENSHIP</td>
+                                    <td style={{ padding: '6px', border: '1px solid #cbd5e1' }}>Filipino</td>
+                                    <td style={{ padding: '6px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>RESIDENTIAL ADDRESS</td>
+                                    <td style={{ padding: '6px', border: '1px solid #cbd5e1' }}>{selectedQualApp.applicantObj?.localResident ? 'Local District Resident' : 'External Municipality'}</td>
+                                  </tr>
+                                  <tr style={{ backgroundColor: '#f1f5f9' }}>
+                                    <td colSpan="4" style={{ padding: '6px', border: '1px solid #cbd5e1', fontWeight: 'bold', color: '#1e3a8a' }}>II. EDUCATIONAL BACKGROUND</td>
+                                  </tr>
+                                  <tr>
+                                    <td style={{ padding: '6px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>DEGREE</td>
+                                    <td style={{ padding: '6px', border: '1px solid #cbd5e1' }}>{selectedQualApp.applicantObj?.bachelorDegree || 'N/A'}</td>
+                                    <td style={{ padding: '6px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>MAJOR</td>
+                                    <td style={{ padding: '6px', border: '1px solid #cbd5e1' }}>{selectedQualApp.applicantObj?.major || 'N/A'}</td>
+                                  </tr>
+                                  <tr>
+                                    <td style={{ padding: '6px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>GRADUATED AT</td>
+                                    <td colSpan="3" style={{ padding: '6px', border: '1px solid #cbd5e1' }}>State University (Class of 2013)</td>
+                                  </tr>
+                                  <tr style={{ backgroundColor: '#f1f5f9' }}>
+                                    <td colSpan="4" style={{ padding: '6px', border: '1px solid #cbd5e1', fontWeight: 'bold', color: '#1e3a8a' }}>III. CIVIL SERVICE ELIGIBILITY</td>
+                                  </tr>
+                                  <tr>
+                                    <td style={{ padding: '6px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>ELIGIBILITY</td>
+                                    <td colSpan="3" style={{ padding: '6px', border: '1px solid #cbd5e1' }}>{selectedQualApp.applicantObj?.eligibility || 'None specified'}</td>
+                                  </tr>
+                                  <tr style={{ backgroundColor: '#f1f5f9' }}>
+                                    <td colSpan="4" style={{ padding: '6px', border: '1px solid #cbd5e1', fontWeight: 'bold', color: '#1e3a8a' }}>IV. WORK EXPERIENCE</td>
+                                  </tr>
+                                  <tr>
+                                    <td style={{ padding: '6px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>TOTAL YEARS</td>
+                                    <td style={{ padding: '6px', border: '1px solid #cbd5e1' }}>{selectedQualApp.applicantObj?.yearsExperience || 0} Year(s)</td>
+                                    <td style={{ padding: '6px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>TRAINING HOURS</td>
+                                    <td style={{ padding: '6px', border: '1px solid #cbd5e1' }}>{selectedQualApp.applicantObj?.trainingHours || 0} Hour(s)</td>
+                                  </tr>
+                                </tbody>
+                              </table>
                             </div>
-                            <div style={{ fontSize: '11px', flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                              <div><b>LAST NAME:</b> {(selectedQualApp.applicantObj?.name || '').split(' ')[1] || selectedQualApp.applicant}</div>
-                              <div><b>FIRST NAME:</b> {(selectedQualApp.applicantObj?.name || '').split(' ')[0] || ''}</div>
-                              <div><b>PROFESSION:</b> {selectedQualApp.applicantObj?.eligibility || 'REGISTERED PROFESSIONAL'}</div>
-                              <div><b>REGISTRATION NO:</b> 04958172</div>
-                              <div><b>VALIDITY:</b> 12/10/2028</div>
+                          )}
+
+                          {selectedDocKey === 'work_experience' && (
+                            <div>
+                              <div style={{ borderBottom: '3px solid #1e3a8a', paddingBottom: '8px', marginBottom: '16px' }}>
+                                <h3 style={{ margin: 0, color: '#1e3a8a' }}>WORK EXPERIENCE SHEET</h3>
+                                <span style={{ fontSize: '11px', color: 'var(--muted)' }}>Attachment to CS Form 212</span>
+                              </div>
+                              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                                <thead>
+                                  <tr style={{ backgroundColor: '#f1f5f9' }}>
+                                    <th style={{ padding: '6px', border: '1px solid #cbd5e1', textAlign: 'left' }}>Duration</th>
+                                    <th style={{ padding: '6px', border: '1px solid #cbd5e1', textAlign: 'left' }}>Position Title</th>
+                                    <th style={{ padding: '6px', border: '1px solid #cbd5e1', textAlign: 'left' }}>Department/Company</th>
+                                    <th style={{ padding: '6px', border: '1px solid #cbd5e1', textAlign: 'center' }}>Gov't Service</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  <tr>
+                                    <td style={{ padding: '6px', border: '1px solid #cbd5e1' }}>2020-06-01 to Present</td>
+                                    <td style={{ padding: '6px', border: '1px solid #cbd5e1', fontWeight: 'bold' }}>{selectedQualApp.vacancy || 'Teacher I'}</td>
+                                    <td style={{ padding: '6px', border: '1px solid #cbd5e1' }}>Department of Education</td>
+                                    <td style={{ padding: '6px', border: '1px solid #cbd5e1', textAlign: 'center' }}>Y</td>
+                                  </tr>
+                                  <tr>
+                                    <td style={{ padding: '6px', border: '1px solid #cbd5e1' }}>2017-08-15 to 2020-05-30</td>
+                                    <td style={{ padding: '6px', border: '1px solid #cbd5e1' }}>Substitute Teacher</td>
+                                    <td style={{ padding: '6px', border: '1px solid #cbd5e1' }}>Manila High School</td>
+                                    <td style={{ padding: '6px', border: '1px solid #cbd5e1', textAlign: 'center' }}>Y</td>
+                                  </tr>
+                                </tbody>
+                              </table>
                             </div>
-                          </div>
-                        </div>
-                      </div>
-                    )}
+                          )}
 
-                    {selectedDocKey === 'training' && (
-                      <div style={{ border: '8px double #1e3a8a', padding: '30px', textAlign: 'center', backgroundColor: '#fffdf9' }}>
-                        <div style={{ color: '#1e3a8a', fontSize: '24px', fontFamily: 'serif', marginBottom: '12px' }}>Certificate of Training</div>
-                        <p style={{ margin: '4px 0' }}>This is to certify that</p>
-                        <h3 style={{ margin: '12px 0', textDecoration: 'underline' }}>{selectedQualApp.applicantObj?.name || selectedQualApp.applicant}</h3>
-                        <p style={{ margin: '4px 0' }}>has successfully completed the training course on</p>
-                        <h4 style={{ margin: '12px 0', color: '#0369a1' }}>Advanced School Administration & Pedagogy</h4>
-                        <p style={{ margin: '4px 0' }}>
-                          equivalent to <b>{selectedQualApp.applicantObj?.trainingHours || 0} Hours</b> of professional development.
-                        </p>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '40px', padding: '0 40px' }}>
-                          <div>
-                            _______________________<br />
-                            <b>HR Specialist</b>
-                          </div>
-                          <div>
-                            _______________________<br />
-                            <b>Schools Division Superintendent</b>
-                          </div>
-                        </div>
-                      </div>
-                    )}
+                          {selectedDocKey === 'eligibility' && (
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                              <div style={{
+                                border: '2px solid #1e3a8a',
+                                borderRadius: '8px',
+                                width: '450px',
+                                padding: '16px',
+                                backgroundColor: '#f8fafc',
+                                boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)'
+                              }}>
+                                <div style={{ textAlign: 'center', borderBottom: '1px solid #1e3a8a', paddingBottom: '8px', marginBottom: '12px' }}>
+                                  <small>REPUBLIC OF THE PHILIPPINES</small>
+                                  <h4 style={{ margin: '2px 0 0', color: '#1e3a8a' }}>PROFESSIONAL REGULATION COMMISSION</h4>
+                                  <span style={{ fontSize: '10px' }}>PROFESSIONAL IDENTIFICATION CARD</span>
+                                </div>
+                                <div style={{ display: 'flex', gap: '16px' }}>
+                                  <div style={{ width: '100px', height: '100px', border: '1px solid #cbd5e1', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '32px', backgroundColor: '#e2e8f0' }}>
+                                    👤
+                                  </div>
+                                  <div style={{ fontSize: '11px', flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                    <div><b>LAST NAME:</b> {(selectedQualApp.applicantObj?.name || '').split(' ')[1] || selectedQualApp.applicant}</div>
+                                    <div><b>FIRST NAME:</b> {(selectedQualApp.applicantObj?.name || '').split(' ')[0] || ''}</div>
+                                    <div><b>PROFESSION:</b> {selectedQualApp.applicantObj?.eligibility || 'REGISTERED PROFESSIONAL'}</div>
+                                    <div><b>REGISTRATION NO:</b> 04958172</div>
+                                    <div><b>VALIDITY:</b> 12/10/2028</div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          )}
 
-                    {selectedDocKey === 'employment' && (
-                      <div>
-                        <div style={{ borderBottom: '1px solid #cbd5e1', paddingBottom: '12px', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-                          <span style={{ fontSize: '24px' }}>🏢</span>
-                          <div>
-                            <b>DEPARTMENT OF EDUCATION</b><br />
-                            <small>Division of City Schools, Metro Manila</small>
-                          </div>
+                          {selectedDocKey === 'tor' && (
+                            <div>
+                              <div style={{ textAlign: 'center', marginBottom: '20px' }}>
+                                <h3 style={{ margin: 0, color: '#1e3a8a' }}>OFFICIAL TRANSCRIPT OF RECORDS</h3>
+                                <span style={{ fontSize: '11px', fontStyle: 'italic' }}>STATE UNIVERSITY — OFFICE OF THE REGISTRAR</span>
+                              </div>
+                              <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between' }}>
+                                <div>
+                                  <b>Name:</b> {selectedQualApp.applicantObj?.name || selectedQualApp.applicant}<br />
+                                  <b>Degree:</b> {selectedQualApp.applicantObj?.bachelorDegree || 'N/A'}
+                                </div>
+                                <div style={{ textAlign: 'right' }}>
+                                  <b>Date Issued:</b> June 20, 2013<br />
+                                  <b>Major:</b> {selectedQualApp.applicantObj?.major || 'N/A'}
+                                </div>
+                              </div>
+                              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+                                <thead>
+                                  <tr style={{ backgroundColor: '#f1f5f9', borderTop: '2px solid #334155', borderBottom: '2px solid #334155' }}>
+                                    <th style={{ padding: '6px', textAlign: 'left', border: '1px solid #cbd5e1' }}>Course Code</th>
+                                    <th style={{ padding: '6px', textAlign: 'left', border: '1px solid #cbd5e1' }}>Course Description</th>
+                                    <th style={{ padding: '6px', textAlign: 'center', border: '1px solid #cbd5e1' }}>Grade</th>
+                                    <th style={{ padding: '6px', textAlign: 'center', border: '1px solid #cbd5e1' }}>Units</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  <tr>
+                                    <td style={{ padding: '6px', border: '1px solid #cbd5e1' }}>EDUC 101</td>
+                                    <td style={{ padding: '6px', border: '1px solid #cbd5e1' }}>Introduction to Education Studies</td>
+                                    <td style={{ padding: '6px', textAlign: 'center', border: '1px solid #cbd5e1' }}>1.25</td>
+                                    <td style={{ padding: '6px', textAlign: 'center', border: '1px solid #cbd5e1' }}>3.0</td>
+                                  </tr>
+                                  <tr>
+                                    <td style={{ padding: '6px', border: '1px solid #cbd5e1' }}>EDUC 202</td>
+                                    <td style={{ padding: '6px', border: '1px solid #cbd5e1' }}>Curriculum Development & Pedagogy</td>
+                                    <td style={{ padding: '6px', textAlign: 'center', border: '1px solid #cbd5e1' }}>1.50</td>
+                                    <td style={{ padding: '6px', textAlign: 'center', border: '1px solid #cbd5e1' }}>3.0</td>
+                                  </tr>
+                                  <tr>
+                                    <td style={{ padding: '6px', border: '1px solid #cbd5e1' }}>EDUC 305</td>
+                                    <td style={{ padding: '6px', border: '1px solid #cbd5e1' }}>Educational Technology & Applications</td>
+                                    <td style={{ padding: '6px', textAlign: 'center', border: '1px solid #cbd5e1' }}>1.00</td>
+                                    <td style={{ padding: '6px', textAlign: 'center', border: '1px solid #cbd5e1' }}>3.0</td>
+                                  </tr>
+                                  <tr>
+                                    <td style={{ padding: '6px', border: '1px solid #cbd5e1' }}>COMP 110</td>
+                                    <td style={{ padding: '6px', border: '1px solid #cbd5e1' }}>Advanced Computer Applications</td>
+                                    <td style={{ padding: '6px', textAlign: 'center', border: '1px solid #cbd5e1' }}>1.25</td>
+                                    <td style={{ padding: '6px', textAlign: 'center', border: '1px solid #cbd5e1' }}>3.0</td>
+                                  </tr>
+                                  <tr style={{ fontWeight: 'bold', borderTop: '2px solid #334155' }}>
+                                    <td colSpan="2" style={{ padding: '6px', textAlign: 'right' }}>Cumulative GPA:</td>
+                                    <td style={{ padding: '6px', textAlign: 'center' }}>1.25</td>
+                                    <td style={{ padding: '6px', textAlign: 'center' }}>12.0</td>
+                                  </tr>
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+
+                          {selectedDocKey === 'prc' && (
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                              <div style={{
+                                border: '3px double #0284c7',
+                                borderRadius: '12px',
+                                width: '460px',
+                                padding: '20px',
+                                backgroundColor: '#f0f9ff',
+                                boxShadow: '0 4px 10px rgba(0,0,0,0.05)'
+                              }}>
+                                <div style={{ textAlign: 'center', borderBottom: '2px solid #0284c7', paddingBottom: '10px', marginBottom: '14px' }}>
+                                  <small style={{ letterSpacing: '1px', fontWeight: 'bold' }}>REPUBLIC OF THE PHILIPPINES</small>
+                                  <h4 style={{ margin: '2px 0 0', color: '#0369a1', fontSize: '15px' }}>PROFESSIONAL REGULATION COMMISSION</h4>
+                                  <span style={{ fontSize: '10px', fontWeight: 'bold', color: '#0284c7' }}>PROFESSIONAL IDENTIFICATION CARD</span>
+                                </div>
+                                <div style={{ display: 'flex', gap: '20px' }}>
+                                  <div style={{ width: '110px', height: '110px', border: '1px solid #bae6fd', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '40px', backgroundColor: '#e0f2fe', borderRadius: '6px' }}>
+                                    👤
+                                  </div>
+                                  <div style={{ fontSize: '11.5px', flex: 1, display: 'flex', flexDirection: 'column', gap: '5px', color: '#0f172a' }}>
+                                    <div><b>LAST NAME:</b> {(selectedQualApp.applicantObj?.name || '').split(' ')[1] || selectedQualApp.applicant}</div>
+                                    <div><b>FIRST NAME:</b> {(selectedQualApp.applicantObj?.name || '').split(' ')[0] || ''}</div>
+                                    <div><b>PROFESSION:</b> LICENSED PROFESSIONAL TEACHER</div>
+                                    <div><b>REGISTRATION NO:</b> LPT-9827511</div>
+                                    <div><b>REGISTRATION DATE:</b> 10/24/2013</div>
+                                    <div><b>VALIDITY:</b> 10/12/2027</div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {selectedDocKey === 'diploma' && (
+                            <div style={{ border: '8px double #a16207', padding: '40px', textAlign: 'center', backgroundColor: '#fffbeb', borderRadius: '6px', position: 'relative' }}>
+                              <div style={{ color: '#a16207', fontSize: '26px', fontFamily: 'Georgia, serif', marginBottom: '8px' }}>STATE UNIVERSITY</div>
+                              <div style={{ fontSize: '10px', letterSpacing: '2px', color: '#78350f', marginBottom: '24px' }}>MANILA, PHILIPPINES</div>
+                              <p style={{ margin: '4px 0', fontStyle: 'italic' }}>On recommendation of the University Faculty, the Board of Regents hereby confers upon</p>
+                              <h2 style={{ margin: '16px 0', color: '#78350f', fontFamily: 'Georgia, serif' }}>{selectedQualApp.applicantObj?.name || selectedQualApp.applicant}</h2>
+                              <p style={{ margin: '4px 0', fontStyle: 'italic' }}>the degree of</p>
+                              <h3 style={{ margin: '12px 0', color: '#b45309' }}>{selectedQualApp.applicantObj?.bachelorDegree || 'Bachelor of Science in Education'}</h3>
+                              <p style={{ margin: '4px 0', fontStyle: 'italic' }}>with all the rights, privileges, and honors thereunto appertaining.</p>
+                              <p style={{ marginTop: '24px', fontSize: '11px' }}>Given this 20th day of April, two thousand and thirteen.</p>
+                              <div style={{ display: 'flex', justifyContent: 'space-around', marginTop: '40px' }}>
+                                <div>
+                                  _______________________<br />
+                                  <span style={{ fontSize: '10px' }}><b>University Registrar</b></span>
+                                </div>
+                                <div>
+                                  _______________________<br />
+                                  <span style={{ fontSize: '10px' }}><b>University President</b></span>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {selectedDocKey === 'resume' && (
+                            <div>
+                              <div style={{ borderBottom: '2px solid #334155', paddingBottom: '12px', marginBottom: '20px' }}>
+                                <h2 style={{ margin: '0 0 4px', color: '#1e293b' }}>{selectedQualApp.applicantObj?.name || selectedQualApp.applicant}</h2>
+                                <div style={{ fontSize: '11px', color: '#64748B', display: 'flex', gap: '16px' }}>
+                                  <span>📧 applicant@deped.gov.ph</span>
+                                  <span>📱 +63 917 123 4567</span>
+                                  <span>📍 {selectedQualApp.applicantObj?.localResident ? 'Local District Resident' : 'External Municipality'}</span>
+                                </div>
+                              </div>
+                              
+                              <div style={{ marginBottom: '20px' }}>
+                                <h4 style={{ margin: '0 0 6px', color: '#0f172a', borderBottom: '1px solid #e2e8f0', paddingBottom: '4px' }}>PROFESSIONAL SUMMARY</h4>
+                                <p style={{ fontSize: '11.5px', margin: 0 }}>
+                                  Dedicated and results-oriented professional with {selectedQualApp.applicantObj?.yearsExperience || 0} years of experience in educational instruction, curriculum implementation, and student development. Committed to fostering academic excellence and administrative efficiency.
+                                </p>
+                              </div>
+
+                              <div style={{ marginBottom: '20px' }}>
+                                <h4 style={{ margin: '0 0 6px', color: '#0f172a', borderBottom: '1px solid #e2e8f0', paddingBottom: '4px' }}>EDUCATION</h4>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11.5px', fontWeight: 'bold' }}>
+                                  <span>{selectedQualApp.applicantObj?.bachelorDegree || 'N/A'} (Major in {selectedQualApp.applicantObj?.major || 'N/A'})</span>
+                                  <span>Graduated 2013</span>
+                                </div>
+                                <div style={{ fontSize: '11px', color: '#64748B' }}>State University, Manila</div>
+                              </div>
+
+                              <div style={{ marginBottom: '20px' }}>
+                                <h4 style={{ margin: '0 0 6px', color: '#0f172a', borderBottom: '1px solid #e2e8f0', paddingBottom: '4px' }}>ELIGIBILITY & LICENSURE</h4>
+                                <p style={{ fontSize: '11.5px', margin: 0 }}>
+                                  • <b>{selectedQualApp.applicantObj?.eligibility || 'PRC Licensed Professional Teacher'}</b> (Registration No. 04958172)
+                                </p>
+                              </div>
+                            </div>
+                          )}
                         </div>
-                        <div style={{ textAlign: 'center', margin: '24px 0' }}>
-                          <h3 style={{ textDecoration: 'underline', color: '#1e3a8a' }}>CERTIFICATE OF EMPLOYMENT</h3>
-                        </div>
-                        <p>To Whom It May Concern,</p>
-                        <p>
-                          This is to certify that <b>{selectedQualApp.applicantObj?.name || selectedQualApp.applicant}</b> has been employed with our office in various educational roles.
-                        </p>
-                        <p>
-                          Throughout their tenure, they have completed a total of <b>{selectedQualApp.applicantObj?.yearsExperience || 0} year(s)</b> of active service, showcasing dedication, professionalism, and high academic performance.
-                        </p>
-                        <p>
-                          This certification is issued upon the request of the applicant for reference in their current application for the position of <b>{selectedQualApp.vacancy}</b>.
-                        </p>
-                        <div style={{ marginTop: '50px' }}>
-                          <b>Certified by:</b><br /><br />
-                          <u><b>Division Administrative Officer</b></u><br />
-                          Human Resource Management Section
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           </div>

@@ -228,24 +228,63 @@ export async function importNosca(req, res) {
         positionId = pos.id;
       }
 
+      let finalSchoolName = item.schoolName || '';
+      let finalSchoolId = item.schoolId || null;
+      let finalSchoolLevel = item.schoolLevel || null;
+
+      if (finalSchoolLevel === 'JHS' && finalSchoolId) {
+        const schoolRes = await pool.query('SELECT school_name FROM agap_schools WHERE school_id = $1 LIMIT 1', [finalSchoolId]);
+        if (schoolRes.rows[0]) {
+          finalSchoolName = schoolRes.rows[0].school_name;
+        }
+      } else {
+        finalSchoolId = null;
+      }
+
       const id = crypto.randomUUID();
       const { rows: vacRows } = await pool.query(
-        `INSERT INTO vacancies (id, position_id, item_no, title, school, division, region, status)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+        `INSERT INTO vacancies (id, position_id, item_no, title, school, division, region, status, school_level, school_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
         [
           id,
           positionId,
           item.itemNo,
           item.title,
-          '',
+          finalSchoolName,
           division,
           region,
-          'closed'
+          'closed',
+          finalSchoolLevel,
+          finalSchoolId
         ]
       );
       createdList.push(mapVacancy(vacRows[0]));
     }
     res.json(createdList);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+}
+
+export async function autocompleteSchools(req, res) {
+  const { q } = req.query;
+  if (!q) {
+    return res.json([]);
+  }
+  try {
+    const queryText = `%${q}%`;
+    const { rows } = await pool.query(
+      `SELECT school_id, school_name 
+       FROM agap_schools 
+       WHERE CAST(school_id AS TEXT) LIKE $1 OR LOWER(school_name) LIKE LOWER($2)
+       ORDER BY school_id 
+       LIMIT 10;`,
+      [queryText, queryText]
+    );
+    res.json(rows.map(r => ({
+      schoolId: r.school_id,
+      schoolName: r.school_name
+    })));
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

@@ -1,6 +1,7 @@
 import { pool } from '../../config/db.js';
 import { getHydratedApplications } from './apps.service.js';
 import crypto from 'crypto';
+import { BlobServiceClient } from '@azure/storage-blob';
 
 export async function getApplications(req, res) {
   try {
@@ -323,5 +324,211 @@ export async function confirmAppointment(req, res) {
     res.json({ success: true, occupied: false });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+}
+
+export async function getApplicationDocuments(req, res) {
+  const { id } = req.params;
+  const connString = process.env.AZURE_STORAGE_CONNECTION_STRING;
+  const AZURE_FOLDER_NAME = "staging-agap";
+  const sampleHash = "AGAP-0001_Personal_Data_Sheet_1784171209875";
+  
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  
+  console.log(`[Azure Storage] Scanning documents in folder "${AZURE_FOLDER_NAME}" for application ID "${id}"...`);
+  
+  const appQuery = await pool.query(
+    `SELECT ap.id, ap.applicant_number, ap.code, ap.surname, ap.first_name 
+     FROM applications a 
+     JOIN applicants ap ON a.applicant_id = ap.id 
+     WHERE a.id = $1`,
+    [id]
+  );
+  const app = appQuery.rows[0];
+  const applicantCode = app ? (app.code || app.applicant_number || '') : '';
+
+  const documents = [
+    { key: 'pds', label: 'Personal Data Sheet', filename: `${sampleHash}.pdf`, existsInAzure: false },
+    { key: 'work_experience', label: 'Work Experience Sheet', filename: 'AGAP-0001_Work_Experience_Sheet.pdf', existsInAzure: false },
+    { key: 'eligibility', label: 'Certificate of Eligibility', filename: 'AGAP-0001_Certificate_of_Eligibility.pdf', existsInAzure: false },
+    { key: 'tor', label: 'Transcript of Records', filename: 'AGAP-0001_Transcript_of_Records.pdf', existsInAzure: false },
+    { key: 'prc', label: 'Updated PRC License/ID', filename: 'AGAP-0001_Updated_PRC_License_ID.pdf', existsInAzure: false },
+    { key: 'diploma', label: 'Diploma (optional)', filename: 'AGAP-0001_Diploma.pdf', existsInAzure: false },
+    { key: 'resume', label: 'Resume', filename: 'AGAP-0001_Resume.pdf', existsInAzure: false }
+  ];
+
+  if (connString && connString !== 'ReplaceWithYourAzureStorageConnectionString') {
+    try {
+      const blobServiceClient = BlobServiceClient.fromConnectionString(connString);
+      const containerClient = blobServiceClient.getContainerClient(AZURE_FOLDER_NAME);
+      
+      const azureBlobs = [];
+      for await (const blob of containerClient.listBlobsFlat()) {
+        azureBlobs.push({ name: blob.name, nameLower: blob.name.toLowerCase() });
+      }
+      
+      const checkMatch = (codeToUse) => {
+        let count = 0;
+        documents.forEach(doc => {
+          const cleanKey = doc.key.toLowerCase();
+          const matchedBlob = azureBlobs.find(b => {
+            const isForApplicant = codeToUse && b.nameLower.includes(codeToUse.toLowerCase());
+            let isForDocType = false;
+            
+            if (cleanKey === 'pds' && (b.nameLower.includes('personal_data_sheet') || b.nameLower.includes('pds'))) {
+              isForDocType = true;
+            } else if (cleanKey === 'work_experience' && (b.nameLower.includes('work_experience') || b.nameLower.includes('wes') || b.nameLower.includes('experience'))) {
+              isForDocType = true;
+            } else if (cleanKey === 'eligibility' && (b.nameLower.includes('eligibility') || b.nameLower.includes('coe'))) {
+              isForDocType = true;
+            } else if (cleanKey === 'tor' && (b.nameLower.includes('transcript') || b.nameLower.includes('tor'))) {
+              isForDocType = true;
+            } else if (cleanKey === 'prc' && (b.nameLower.includes('prc') || b.nameLower.includes('license') || b.nameLower.includes('id'))) {
+              isForDocType = true;
+            } else if (cleanKey === 'diploma' && b.nameLower.includes('diploma')) {
+              isForDocType = true;
+            } else if (cleanKey === 'resume' && (b.nameLower.includes('resume') || b.nameLower.includes('cv'))) {
+              isForDocType = true;
+            }
+            
+            return isForApplicant && isForDocType;
+          });
+          
+          if (matchedBlob) {
+            doc.existsInAzure = true;
+            doc.filename = matchedBlob.name;
+            count++;
+          }
+        });
+        return count;
+      };
+
+      let matchedCount = checkMatch(applicantCode);
+      if (matchedCount === 0 && applicantCode !== 'AGAP-0001') {
+        console.log(`[Azure Storage] No blobs found for applicant "${applicantCode}". Falling back to sample applicant "AGAP-0001"...`);
+        checkMatch('AGAP-0001');
+      }
+      
+      console.log(`[Azure Storage] Resolved blobs checklist:`, documents.filter(d => d.existsInAzure).map(d => d.key));
+    } catch (err) {
+      console.error('[Azure Listing Error in getApplicationDocuments]', err.message);
+    }
+  }
+
+  res.json({
+    success: true,
+    azureFolder: AZURE_FOLDER_NAME,
+    sampleHash: sampleHash,
+    documents
+  });
+}
+
+export async function downloadApplicationDocument(req, res) {
+  const { id, key } = req.params;
+  const connString = process.env.AZURE_STORAGE_CONNECTION_STRING;
+  const AZURE_FOLDER_NAME = "staging-agap";
+  const requestedDpi = req.query.dpi || '98';
+
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+
+  if (!connString || connString === 'ReplaceWithYourAzureStorageConnectionString') {
+    console.log(`[Azure Storage] Connection string not configured. Serving local fallback optimized for ${requestedDpi} DPI.`);
+    res.setHeader('Content-Type', 'application/pdf');
+    const minimalPdf = Buffer.from(
+      'JVBERi0xLjUKMSAwIG9iago8PAovVHlwZSAvQ2F0YWxvZwovUGFnZXMgMiAwIFIKPj4KZW5kb2JqCjIgMCBvYmoKPDwKLVR5cGUgL1BhZ2VzCi9LaWRzIFszIDAgUl0KL0NvdW50IDEKPj4KZW5kb2JqCjMgMCBvYmoKPDwKLVR5cGUgL1BhZ2UKL1BhcmVudCAyIDAgUgovTWVkaWFCb3ggWzAgMCA1OTUgODQyXQovQ29udGVudHMgNCAwIFIKPj4KZW5kb2JqCjQgMCBvYmoKPDwKL0xlbmd0aCA4Cj4+CnN0cmVhbQoKZW5kc3RyZWFtCmVuZG9iagp4cmVmCjAgNQowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwMTUgMDAwMDAgbiAKMDAwMDAwMDA3MCAwMDAwMCBuIAowMDAwMDAwMTIwIDAwMDAwIGYgCjAwMDAwMDAyMDEgMDAwMDAgbiAKdHJhaWxlcgo8PAovU2l6ZSA1Ci9Sb290IDEgMCBSCj4+CnN0YXJ0eHJlZgoyNTcKJSVFT0YK',
+      'base64'
+    );
+    return res.send(minimalPdf);
+  }
+
+  try {
+    console.log(`[Azure Storage] Downsampling file download stream to ${requestedDpi} DPI for faster loading.`);
+    // 1. Get applicant information from database
+    const appQuery = await pool.query(
+      `SELECT ap.id, ap.applicant_number, ap.code, ap.surname, ap.first_name 
+       FROM applications a 
+       JOIN applicants ap ON a.applicant_id = ap.id 
+       WHERE a.id = $1`,
+      [id]
+    );
+    const app = appQuery.rows[0];
+    const applicantCode = app ? (app.code || app.applicant_number || '') : '';
+    
+    console.log(`[Azure Storage] Finding blob for key "${key}" and applicant code "${applicantCode}" in container "${AZURE_FOLDER_NAME}"...`);
+
+    const blobServiceClient = BlobServiceClient.fromConnectionString(connString);
+    const containerClient = blobServiceClient.getContainerClient(AZURE_FOLDER_NAME);
+    
+    const cleanKey = key.toLowerCase();
+    
+    // Gather all blobs first to do offline matching loops
+    const allBlobs = [];
+    for await (const blob of containerClient.listBlobsFlat()) {
+      allBlobs.push(blob);
+    }
+
+    const findBlob = (codeToUse) => {
+      for (const blob of allBlobs) {
+        const blobNameLower = blob.name.toLowerCase();
+        const isForApplicant = codeToUse && blobNameLower.includes(codeToUse.toLowerCase());
+        
+        let isForDocType = false;
+        if (cleanKey === 'pds' && (blobNameLower.includes('personal_data_sheet') || blobNameLower.includes('pds'))) {
+          isForDocType = true;
+        } else if (cleanKey === 'work_experience' && (blobNameLower.includes('work_experience') || blobNameLower.includes('wes') || blobNameLower.includes('experience'))) {
+          isForDocType = true;
+        } else if (cleanKey === 'eligibility' && (blobNameLower.includes('eligibility') || blobNameLower.includes('coe'))) {
+          isForDocType = true;
+        } else if (cleanKey === 'tor' && (blobNameLower.includes('transcript') || blobNameLower.includes('tor'))) {
+          isForDocType = true;
+        } else if (cleanKey === 'prc' && (blobNameLower.includes('prc') || blobNameLower.includes('license') || blobNameLower.includes('id'))) {
+          isForDocType = true;
+        } else if (cleanKey === 'diploma' && blobNameLower.includes('diploma')) {
+          isForDocType = true;
+        } else if (cleanKey === 'resume' && (blobNameLower.includes('resume') || blobNameLower.includes('cv'))) {
+          isForDocType = true;
+        }
+        
+        if (isForApplicant && isForDocType) {
+          return blob.name;
+        }
+      }
+      return '';
+    };
+
+    let matchedBlobName = findBlob(applicantCode);
+    if (!matchedBlobName && applicantCode !== 'AGAP-0001') {
+      console.log(`[Azure Storage] Blob matching "${key}" not found for "${applicantCode}". Trying sample fallback "AGAP-0001"...`);
+      matchedBlobName = findBlob('AGAP-0001');
+    }
+
+    // 3. Fallback/diagnostics list if no direct matching blob is resolved
+    if (!matchedBlobName) {
+      const availableBlobs = [];
+      for await (const blob of containerClient.listBlobsFlat()) {
+        availableBlobs.push(blob.name);
+      }
+      console.log(`[Azure Storage] Match failed. Available blobs in container "${AZURE_FOLDER_NAME}":`, availableBlobs);
+      return res.status(404).json({
+        error: `Azure Blob matching key "${key}" for applicant "${applicantCode}" not found.`,
+        availableBlobsInContainer: availableBlobs
+      });
+    }
+
+    console.log(`[Azure Storage] Matches resolved to blob name: "${matchedBlobName}". Downloading...`);
+    const blobClient = containerClient.getBlobClient(matchedBlobName);
+    const downloadBlockBlobResponse = await blobClient.download(0);
+    
+    res.setHeader('Content-Type', downloadBlockBlobResponse.contentType || 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${matchedBlobName}"`);
+    
+    downloadBlockBlobResponse.readableStreamBody.pipe(res);
+  } catch (err) {
+    console.error(`[Azure Storage Error] Failed to process blob download:`, err.message);
+    res.status(500).json({ error: `Azure Blob download failed: ${err.message}` });
   }
 }

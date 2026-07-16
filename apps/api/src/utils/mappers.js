@@ -25,6 +25,8 @@ export function mapVacancy(row) {
     division: row.division,
     region: row.region,
     status: row.status,
+    schoolLevel: row.school_level,
+    schoolId: row.school_id,
     fillingUpStatus: row.filling_up_status || 'UNFILLED',
     postingStart: row.posting_start ? new Date(row.posting_start) : null,
     postingEnd: row.posting_end ? new Date(row.posting_end) : null,
