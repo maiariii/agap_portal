@@ -237,6 +237,21 @@ export default function VacanciesPage() {
   const [detectedItems, setDetectedItems] = useState([]);
   const [selectedNoscaItemNos, setSelectedNoscaItemNos] = useState([]);
 
+  React.useEffect(() => {
+    const handleTourUpdate = () => {
+      if (window.agap_tour_open_nosca) {
+        setShowNosca(true);
+      } else if (window.agap_tour_open_nosca === false) {
+        setShowNosca(false);
+      }
+    };
+    window.addEventListener('agap-tour-update', handleTourUpdate);
+    if (window.agap_tour_open_nosca) {
+      setShowNosca(true);
+    }
+    return () => window.removeEventListener('agap-tour-update', handleTourUpdate);
+  }, []);
+
   // Close Warning Override states
   const [showCloseWarning, setShowCloseWarning] = useState(false);
   const [closeWarningVac, setCloseWarningVac] = useState(null);
@@ -255,7 +270,7 @@ export default function VacanciesPage() {
   const getVacancyCellValue = (v, key) => {
     if (key === 'itemNo') return v.itemNo || '';
     if (key === 'position') return positions.find(p => p.id === v.positionId)?.title || 'Unmapped position';
-    if (key === 'schoolOffice') return v.school || v.location || '';
+    if (key === 'schoolOffice') return v.school || v.division || '';
     if (key === 'applications') return applications.filter(a => a.vacancyId === v.id).length;
     if (key === 'deadline') return v.postingEnd || '';
     if (key === 'daysRemaining') {
@@ -288,7 +303,7 @@ export default function VacanciesPage() {
       list = list.filter(v => 
         (v.itemNo || '').toLowerCase().includes(q) || 
         (positions.find(p => p.id === v.positionId)?.title || '').toLowerCase().includes(q) ||
-        (v.school || v.location || '').toLowerCase().includes(q)
+        (v.school || v.division || '').toLowerCase().includes(q)
       );
     }
     if (vacPosFilter) list = list.filter(v => v.positionId === vacPosFilter);
@@ -946,7 +961,7 @@ export default function VacanciesPage() {
                       </div>
                       <div className="position-info-tile">
                         <b>Division</b>
-                        <span>{calVacancy.location || 'SDO Manila'}</span>
+                        <span>{calVacancy.division || 'SDO Manila'}</span>
                       </div>
                     </div>
                   </section>

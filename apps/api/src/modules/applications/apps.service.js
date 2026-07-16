@@ -1,7 +1,7 @@
 import { pool } from '../../config/db.js';
 import { computeFit } from '@agap/shared';
 
-export async function getHydratedApplications(vacancyId = null) {
+export async function getHydratedApplications(vacancyId = null, region = null, division = null) {
   let query = `
     SELECT 
       a.*,
@@ -15,7 +15,7 @@ export async function getHydratedApplications(vacancyId = null) {
       ap.eligibility as applicant_eligibility,
       v.title as vacancy_title,
       v.item_no as vacancy_item_no,
-      v.location as vacancy_location,
+      v.division as vacancy_division,
       v.school as vacancy_school,
       v.salary_grade as vacancy_salary_grade,
       v.posting_end as vacancy_posting_end,
@@ -45,9 +45,22 @@ export async function getHydratedApplications(vacancyId = null) {
   `;
   
   const values = [];
+  const clauses = [];
   if (vacancyId) {
-    query += ` WHERE a.vacancy_id = $1`;
     values.push(vacancyId);
+    clauses.push(`a.vacancy_id = $${values.length}`);
+  }
+  if (region) {
+    values.push(region);
+    clauses.push(`v.region = $${values.length}`);
+  }
+  if (division) {
+    values.push(division);
+    clauses.push(`v.division = $${values.length}`);
+  }
+
+  if (clauses.length > 0) {
+    query += ` WHERE ` + clauses.join(' AND ');
   }
 
   const { rows } = await pool.query(query, values);
@@ -122,7 +135,7 @@ export async function getHydratedApplications(vacancyId = null) {
       trainingHours: Number(row.applicant_training_hours || 0),
       vacancy: row.vacancy_title || "—",
       itemNo: row.vacancy_item_no || null,
-      location: row.vacancy_location || row.vacancy_school || "—",
+      division: row.vacancy_division || row.vacancy_school || "—",
       school: row.vacancy_school || "—",
       salaryGrade: row.vacancy_salary_grade || "—",
       qsDegree: row.position_required_bachelor_degree || "No degree specified",
@@ -152,7 +165,7 @@ export async function getHydratedApplications(vacancyId = null) {
         itemNo: row.vacancy_item_no,
         title: row.vacancy_title,
         school: row.vacancy_school,
-        location: row.vacancy_location,
+        division: row.vacancy_division,
         region: 'NCR',
         status: row.vacancy_status,
         postingEnd: row.vacancy_posting_end

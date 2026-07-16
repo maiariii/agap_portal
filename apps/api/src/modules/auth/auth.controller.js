@@ -129,3 +129,37 @@ export async function verifyPasscode(req, res) {
     res.status(500).json({ error: 'Internal server error' });
   }
 }
+
+export async function getRegionsDivisions(req, res) {
+  try {
+    const { rows } = await pool.query('SELECT DISTINCT region, division FROM agap_schools ORDER BY region, division;');
+    
+    const mapping = {};
+    const allDivisionsSet = new Set();
+    
+    rows.forEach(row => {
+      const r = row.region || '';
+      const d = row.division || '';
+      if (r) {
+        if (!mapping[r]) {
+          mapping[r] = [];
+        }
+        if (d && !mapping[r].includes(d)) {
+          mapping[r].push(d);
+        }
+      }
+      if (d) {
+        allDivisionsSet.add(d);
+      }
+    });
+
+    res.json({
+      regions: Object.keys(mapping).sort(),
+      divisionsByRegion: mapping,
+      allDivisions: Array.from(allDivisionsSet).sort()
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Server error fetching regions and divisions.' });
+  }
+}

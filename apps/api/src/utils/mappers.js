@@ -22,7 +22,7 @@ export function mapVacancy(row) {
     itemNo: row.item_no,
     title: row.title,
     school: row.school,
-    location: row.location,
+    division: row.division,
     region: row.region,
     status: row.status,
     fillingUpStatus: row.filling_up_status || 'UNFILLED',

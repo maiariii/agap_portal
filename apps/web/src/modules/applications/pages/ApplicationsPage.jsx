@@ -39,6 +39,35 @@ export default function ApplicationsPage() {
   const [reviewDirty, setReviewDirty] = useState(false);
   const [showUnsavedPrompt, setShowUnsavedPrompt] = useState(false);
 
+  React.useEffect(() => {
+    const handleTourUpdate = () => {
+      if (window.agap_tour_open_review) {
+        if (applications && applications.length > 0) {
+          const app = applications[0];
+          setReviewId(app.id);
+          setReviewApp(app);
+          
+          const isAlreadyQualifiedStatus = app.status?.toLowerCase() === 'qualified' || app.status?.toLowerCase() === 'disqualified';
+          const docChecklist = app.docChecklist || app.appObj?.docChecklist || app.documents || {};
+          const checklistState = {};
+          DOC_REQUIREMENTS.forEach((req) => {
+            const k = req.key;
+            checklistState[k] = docChecklist[k] ?? isAlreadyQualifiedStatus;
+          });
+          setReviewDocs(checklistState);
+        }
+      } else if (window.agap_tour_open_review === false) {
+        setReviewId(null);
+        setReviewApp(null);
+      }
+    };
+    window.addEventListener('agap-tour-update', handleTourUpdate);
+    if (window.agap_tour_open_review && applications && applications.length > 0) {
+      handleTourUpdate();
+    }
+    return () => window.removeEventListener('agap-tour-update', handleTourUpdate);
+  }, [applications]);
+
   const cls = (str) => {
     if (!str) return '';
     return str.toLowerCase().replace(/[^a-z0-9]/g, '-');

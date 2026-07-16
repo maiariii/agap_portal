@@ -74,7 +74,7 @@ export default function DashboardPage() {
           positionTitle: pos.title || '',
           itemNo: v.itemNo || '',
           region: v.region || '',
-          division: v.location || '',
+          division: v.division || '',
           school: v.school || '',
           itemStatus: isFilledItem(v) ? 'filled' : 'unfilled'
         };
@@ -186,7 +186,7 @@ export default function DashboardPage() {
           positionTitle: pos.title || '',
           itemNo: v.itemNo || '',
           region: v.region || '',
-          division: v.location || '',
+          division: v.division || '',
           school: v.school || '',
           postingStatus: v.status
         };

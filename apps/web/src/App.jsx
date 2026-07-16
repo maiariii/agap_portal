@@ -58,6 +58,25 @@ export default function App() {
   const [regSuccess, setRegSuccess] = useState('');
   const [regLoading, setRegLoading] = useState(false);
 
+  // Region and Division data from agap_schools
+  const [regions, setRegions] = useState([]);
+  const [divisionsByRegion, setDivisionsByRegion] = useState({});
+  const [allDivisions, setAllDivisions] = useState([]);
+
+  useEffect(() => {
+    async function fetchRegionsDivisions() {
+      try {
+        const data = await apiFetch('/api/auth/regions-divisions');
+        setRegions(data.regions || []);
+        setDivisionsByRegion(data.divisionsByRegion || {});
+        setAllDivisions(data.allDivisions || []);
+      } catch (e) {
+        console.error('Failed to load regions and divisions:', e);
+      }
+    }
+    fetchRegionsDivisions();
+  }, []);
+
   // Guided Onboarding Tour State
   const [tourActive, setTourActive] = useState(false);
   const [showWelcome, setShowWelcome] = useState(() => {
@@ -233,7 +252,7 @@ export default function App() {
 
       if (!inViewport) {
         try {
-          el.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
+          el.scrollIntoView({ block: "center", inline: "nearest", behavior: "auto" });
         } catch (e) {}
       }
 
@@ -272,9 +291,14 @@ export default function App() {
       navigate(targetPath);
     }
 
+    // Set active states on window for modals
+    window.agap_tour_open_nosca = step.modal === "nosca";
+    window.agap_tour_open_review = step.modal === "review";
+    window.dispatchEvent(new Event('agap-tour-update'));
+
     const delay = viewChanged ? 380 : 0;
     setTimeout(() => {
-      repositionTour(false);
+      repositionTour(viewChanged);
     }, delay);
   };
 
@@ -329,6 +353,9 @@ export default function App() {
     } else {
       if (highlightRef.current) highlightRef.current.classList.remove("active");
       if (tooltipRef.current) tooltipRef.current.classList.remove("active");
+      window.agap_tour_open_nosca = false;
+      window.agap_tour_open_review = false;
+      window.dispatchEvent(new Event('agap-tour-update'));
     }
   }, [tourActive]);
 
@@ -337,11 +364,17 @@ export default function App() {
     setShowWelcome(false);
     tourStepRef.current = 0;
     setTourActive(true);
+    window.agap_tour_open_nosca = false;
+    window.agap_tour_open_review = false;
+    window.dispatchEvent(new Event('agap-tour-update'));
   };
 
   const endTour = () => {
     setTourActive(false);
     localStorage.setItem("deped_tour_seen", "1");
+    window.agap_tour_open_nosca = false;
+    window.agap_tour_open_review = false;
+    window.dispatchEvent(new Event('agap-tour-update'));
   };
 
   if (!token) {
@@ -501,28 +534,38 @@ export default function App() {
                       <label style={{ color: 'var(--navy)', fontWeight: 750, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px' }}>Region</label>
                       <div className="form-group-input-wrapper">
                         <span className="input-icon">📍</span>
-                        <input
-                          type="text"
+                        <select
                           value={regRegion}
-                          onChange={e => setRegRegion(e.target.value)}
-                          placeholder="Region III"
+                          onChange={e => {
+                            setRegRegion(e.target.value);
+                            setRegDivision('');
+                          }}
                           required
-                          style={{ padding: '12px 14px 12px 42px', borderRadius: '12px', border: '1.5px solid rgba(8, 49, 95, 0.15)', background: '#fff', color: 'var(--text)', fontSize: '13.5px' }}
-                        />
+                          style={{ padding: '12px 14px 12px 42px', borderRadius: '12px', border: '1.5px solid rgba(8, 49, 95, 0.15)', background: '#fff', color: 'var(--text)', fontSize: '13.5px', width: '100%', height: '47px' }}
+                        >
+                          <option value="">Select Region</option>
+                          {regions.map(r => (
+                            <option key={r} value={r}>{r}</option>
+                          ))}
+                        </select>
                       </div>
                     </div>
                     <div className="form-group" style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: '6px' }}>
                       <label style={{ color: 'var(--navy)', fontWeight: 750, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px' }}>Division</label>
                       <div className="form-group-input-wrapper">
                         <span className="input-icon">📍</span>
-                        <input
-                          type="text"
+                        <select
                           value={regDivision}
                           onChange={e => setRegDivision(e.target.value)}
-                          placeholder="Pampanga"
                           required
-                          style={{ padding: '12px 14px 12px 42px', borderRadius: '12px', border: '1.5px solid rgba(8, 49, 95, 0.15)', background: '#fff', color: 'var(--text)', fontSize: '13.5px' }}
-                        />
+                          disabled={!regRegion}
+                          style={{ padding: '12px 14px 12px 42px', borderRadius: '12px', border: '1.5px solid rgba(8, 49, 95, 0.15)', background: regRegion ? '#fff' : '#f1f5f9', color: 'var(--text)', fontSize: '13.5px', width: '100%', height: '47px' }}
+                        >
+                          <option value="">{regRegion ? 'Select Division' : 'Select region first'}</option>
+                          {(divisionsByRegion[regRegion] || []).map(d => (
+                            <option key={d} value={d}>{d}</option>
+                          ))}
+                        </select>
                       </div>
                     </div>
                   </div>

@@ -3487,33 +3487,38 @@ body:has(.sidebar:hover) .modal {
   border: 3px solid var(--gold);
   box-shadow: 0 0 0 9999px rgba(8, 49, 95, .64), 0 0 0 6px rgba(251, 191, 36, .35);
   pointer-events: none;
-  display: none;
-  transition: top .28s ease, left .28s ease, width .28s ease, height .28s ease
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity .35s ease, visibility .35s ease, top .4s cubic-bezier(0.25, 1, 0.5, 1), left .4s cubic-bezier(0.25, 1, 0.5, 1), width .4s cubic-bezier(0.25, 1, 0.5, 1), height .4s cubic-bezier(0.25, 1, 0.5, 1);
 }
 
 .tour-highlight.active {
-  display: block
+  opacity: 1;
+  visibility: visible;
 }
 
 .tour-tooltip {
   position: fixed;
   z-index: 1001;
-  display: none;
+  opacity: 0;
+  visibility: hidden;
   width: min(390px, 94vw);
   background: white;
   border: 2.5px solid var(--blue);
   border-radius: 20px;
   padding: 20px 20px 16px;
-  box-shadow: 0 22px 44px rgba(8, 49, 95, .34)
+  box-shadow: 0 22px 44px rgba(8, 49, 95, .34);
+  transition: opacity .35s ease, visibility .35s ease, top .4s cubic-bezier(0.25, 1, 0.5, 1), left .4s cubic-bezier(0.25, 1, 0.5, 1);
 }
 
 .tour-tooltip.active {
-  display: block
+  opacity: 1;
+  visibility: visible;
 }
 
 .tour-highlight.no-transition,
 .tour-tooltip.no-transition {
-  transition: none !important
+  transition: none !important;
 }
 
 .tour-tooltip .tour-step-label {

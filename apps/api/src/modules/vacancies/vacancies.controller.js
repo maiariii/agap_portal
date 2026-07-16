@@ -23,9 +23,16 @@ export async function getVacancies(req, res) {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
+    const userQuery = await pool.query('SELECT region, division FROM users WHERE id = $1', [req.user.id]);
+    const user = userQuery.rows[0];
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    const { region, division } = user;
+
     const { rows: expiredVacancies } = await pool.query(
-      "SELECT id FROM vacancies WHERE status = 'open' AND posting_end < $1",
-      [today]
+      "SELECT id FROM vacancies WHERE status = 'open' AND posting_end < $1 AND region = $2 AND division = $3",
+      [today, region, division]
     );
 
     if (expiredVacancies.length > 0) {
@@ -45,7 +52,8 @@ export async function getVacancies(req, res) {
              p.eligibility_required as position_eligibility_required
       FROM vacancies v
       JOIN positions p ON v.position_id = p.id
-    `);
+      WHERE v.region = $1 AND v.division = $2
+    `, [region, division]);
 
     res.json(rows.map(r => ({
       ...mapVacancy(r),
@@ -66,11 +74,19 @@ export async function getVacancies(req, res) {
 }
 
 export async function createVacancy(req, res) {
-  const { positionId, itemNo, title, school, location, postingStart, postingEnd, salaryGrade } = req.body;
+  const { positionId, itemNo, title, school, division: bodyDivision, postingStart, postingEnd, salaryGrade } = req.body;
   try {
+    const userQuery = await pool.query('SELECT region, division FROM users WHERE id = $1', [req.user.id]);
+    const user = userQuery.rows[0];
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    const region = user.region || 'NCR';
+    const division = user.division || bodyDivision || 'SDO Manila';
+
     const id = crypto.randomUUID();
     const { rows } = await pool.query(
-      `INSERT INTO vacancies (id, position_id, item_no, title, school, location, region, status, posting_start, posting_end, salary_grade)
+      `INSERT INTO vacancies (id, position_id, item_no, title, school, division, region, status, posting_start, posting_end, salary_grade)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        RETURNING *`,
       [
@@ -79,8 +95,8 @@ export async function createVacancy(req, res) {
         itemNo,
         title,
         school,
-        location,
-        'NCR',
+        division,
+        region,
         'open',
         postingStart ? new Date(postingStart) : null,
         postingEnd ? new Date(postingEnd) : null,
@@ -177,6 +193,14 @@ export async function scanNosca(req, res) {
 export async function importNosca(req, res) {
   const { items } = req.body;
   try {
+    const userQuery = await pool.query('SELECT region, division FROM users WHERE id = $1', [req.user.id]);
+    const user = userQuery.rows[0];
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    const region = user.region || 'NCR';
+    const division = user.division || 'SDO Manila';
+
     const createdList = [];
     for (const item of items) {
       let positionId = item.positionId;
@@ -206,7 +230,7 @@ export async function importNosca(req, res) {
 
       const id = crypto.randomUUID();
       const { rows: vacRows } = await pool.query(
-        `INSERT INTO vacancies (id, position_id, item_no, title, school, location, region, status)
+        `INSERT INTO vacancies (id, position_id, item_no, title, school, division, region, status)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
         [
           id,
@@ -214,8 +238,8 @@ export async function importNosca(req, res) {
           item.itemNo,
           item.title,
           '',
-          'SDO Manila',
-          'NCR',
+          division,
+          region,
           'closed'
         ]
       );

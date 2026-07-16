@@ -94,7 +94,7 @@ async function main() {
         item_no TEXT UNIQUE NOT NULL,
         title TEXT NOT NULL,
         school TEXT,
-        location TEXT,
+        division TEXT,
         region TEXT,
         status TEXT NOT NULL DEFAULT 'open',
         filling_up_status VARCHAR(50) NOT NULL DEFAULT 'UNFILLED',
@@ -252,16 +252,16 @@ async function main() {
 
     const adminId = crypto.randomUUID();
     await pool.query(
-      `INSERT INTO users (id, username, email, full_name, password_hash, passcode_hash, role, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [adminId, "admin", "admin@deped.gov.ph", "System Administrator", passwordHash, passcodeHash, "admin", "active"]
+      `INSERT INTO users (id, username, email, full_name, region, division, password_hash, passcode_hash, role, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      [adminId, "admin", "admin@deped.gov.ph", "System Administrator", "NCR", "SDO Manila", passwordHash, passcodeHash, "admin", "active"]
     );
 
     const hrOfficerId = crypto.randomUUID();
     await pool.query(
-      `INSERT INTO users (id, username, email, full_name, password_hash, passcode_hash, role, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [hrOfficerId, "hr_officer", "hr@deped.gov.ph", "HR Officer", passwordHash, passcodeHash, "hr_officer", "active"]
+      `INSERT INTO users (id, username, email, full_name, region, division, password_hash, passcode_hash, role, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      [hrOfficerId, "hr_officer", "hr@deped.gov.ph", "HR Officer", "NCR", "SDO Manila", passwordHash, passcodeHash, "hr_officer", "active"]
     );
 
     console.log("Seeding positions...");
@@ -284,20 +284,20 @@ async function main() {
 
     console.log("Seeding vacancies...");
     const vacanciesData = [
-      { id: crypto.randomUUID(), positionKey: "Teacher I", itemNo: "TCH1-001", title: "Teacher I - Elementary", school: "Rizal ES", location: "SDO Manila", region: "NCR", status: "open", postingStart: new Date("2026-07-01"), postingEnd: new Date("2026-08-15"), salaryGrade: 11 },
-      { id: crypto.randomUUID(), positionKey: "Master Teacher I", itemNo: "MT1-002", title: "Master Teacher I", school: "Manila Science HS", location: "SDO Manila", region: "NCR", status: "open", postingStart: new Date("2026-07-01"), postingEnd: new Date("2026-08-20"), salaryGrade: 18 },
-      { id: crypto.randomUUID(), positionKey: "Head Teacher I", itemNo: "HT1-003", title: "Head Teacher I", school: "Bonifacio ES", location: "SDO Manila", region: "NCR", status: "open", postingStart: new Date("2026-07-03"), postingEnd: new Date("2026-08-25"), salaryGrade: 14 },
-      { id: crypto.randomUUID(), positionKey: "Administrative Officer II", itemNo: "AO2-004", title: "Administrative Officer II", school: "SDO Manila", location: "Division Office", region: "NCR", status: "open", postingStart: new Date("2026-07-05"), postingEnd: new Date("2026-08-18"), salaryGrade: 11 },
-      { id: crypto.randomUUID(), positionKey: "Guidance Counselor I", itemNo: "GC1-005", title: "Guidance Counselor I", school: "Manila Integrated School", location: "SDO Manila", region: "NCR", status: "open", postingStart: new Date("2026-07-06"), postingEnd: new Date("2026-08-22"), salaryGrade: 11 },
-      { id: crypto.randomUUID(), positionKey: "School Nurse II", itemNo: "NUR2-006", title: "School Nurse II", school: "Tondo HS", location: "SDO Manila", region: "NCR", status: "open", postingStart: new Date("2026-07-07"), postingEnd: new Date("2026-08-28"), salaryGrade: 15 }
+      { id: crypto.randomUUID(), positionKey: "Teacher I", itemNo: "TCH1-001", title: "Teacher I - Elementary", school: "Rizal ES", division: "SDO Manila", region: "NCR", status: "open", postingStart: new Date("2026-07-01"), postingEnd: new Date("2026-08-15"), salaryGrade: 11 },
+      { id: crypto.randomUUID(), positionKey: "Master Teacher I", itemNo: "MT1-002", title: "Master Teacher I", school: "Manila Science HS", division: "SDO Manila", region: "NCR", status: "open", postingStart: new Date("2026-07-01"), postingEnd: new Date("2026-08-20"), salaryGrade: 18 },
+      { id: crypto.randomUUID(), positionKey: "Head Teacher I", itemNo: "HT1-003", title: "Head Teacher I", school: "Bonifacio ES", division: "SDO Manila", region: "NCR", status: "open", postingStart: new Date("2026-07-03"), postingEnd: new Date("2026-08-25"), salaryGrade: 14 },
+      { id: crypto.randomUUID(), positionKey: "Administrative Officer II", itemNo: "AO2-004", title: "Administrative Officer II", school: "SDO Manila", division: "Division Office", region: "NCR", status: "open", postingStart: new Date("2026-07-05"), postingEnd: new Date("2026-08-18"), salaryGrade: 11 },
+      { id: crypto.randomUUID(), positionKey: "Guidance Counselor I", itemNo: "GC1-005", title: "Guidance Counselor I", school: "Manila Integrated School", division: "SDO Manila", region: "NCR", status: "open", postingStart: new Date("2026-07-06"), postingEnd: new Date("2026-08-22"), salaryGrade: 11 },
+      { id: crypto.randomUUID(), positionKey: "School Nurse II", itemNo: "NUR2-006", title: "School Nurse II", school: "Tondo HS", division: "SDO Manila", region: "NCR", status: "open", postingStart: new Date("2026-07-07"), postingEnd: new Date("2026-08-28"), salaryGrade: 15 }
     ];
 
     for (const vac of vacanciesData) {
       const pos = positionsData.find(p => p.title === vac.positionKey);
       await pool.query(
-        `INSERT INTO vacancies (id, position_id, item_no, title, school, location, region, status, posting_start, posting_end, salary_grade)
+        `INSERT INTO vacancies (id, position_id, item_no, title, school, division, region, status, posting_start, posting_end, salary_grade)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-        [vac.id, pos.id, vac.itemNo, vac.title, vac.school, vac.location, vac.region, vac.status, vac.postingStart, vac.postingEnd, vac.salaryGrade]
+        [vac.id, pos.id, vac.itemNo, vac.title, vac.school, vac.division, vac.region, vac.status, vac.postingStart, vac.postingEnd, vac.salaryGrade]
       );
       vac.positionId = pos.id; // Map positionId for applicant generation
     }
