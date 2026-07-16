@@ -39,7 +39,7 @@ export async function getHydratedApplications(vacancyId = null) {
         WHERE q.application_id = a.id
       ) as qual_evals
     FROM applicants ap
-    LEFT JOIN applications a ON a.applicant_id = ap.id
+    INNER JOIN applications a ON a.applicant_id = ap.id
     LEFT JOIN vacancies v ON a.vacancy_id = v.id
     LEFT JOIN positions p ON v.position_id = p.id
   `;
