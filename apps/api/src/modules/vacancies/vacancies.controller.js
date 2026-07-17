@@ -2,6 +2,7 @@ import { pool } from '../../config/db.js';
 import { mapPosition, mapVacancy } from '../../utils/mappers.js';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import { exec } from 'child_process';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
@@ -148,7 +149,7 @@ export async function scanNosca(req, res) {
   const rootDir = path.resolve(__dirname, '../../../../../');
   const scannerPath = path.join(rootDir, 'scanner.py');
   const tempFilename = `temp_${Date.now()}_${fileName || 'nosca.pdf'}`;
-  const tempFilePath = path.join(rootDir, tempFilename);
+  const tempFilePath = path.join(os.tmpdir(), tempFilename);
 
   try {
     const buffer = Buffer.from(fileData, 'base64');
