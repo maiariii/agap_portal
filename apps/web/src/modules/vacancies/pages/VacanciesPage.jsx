@@ -405,7 +405,7 @@ export default function VacanciesPage() {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       if (v.status === 'closed' || today < start || today > end) return -999999;
-      return Math.round((end - today) / 86400000);
+      return Math.round((end - today) / 86400000) + 1;
     }
     if (key === 'postingStatus') {
       const today = new Date();
@@ -947,9 +947,9 @@ export default function VacanciesPage() {
                 let drText = 'N/A';
                 let drColor = 'var(--muted)';
                 if (!isClosed && end) {
-                  const rem = Math.round((end - today) / 86400000);
+                  const rem = Math.round((end - today) / 86400000) + 1;
                   drText = String(rem);
-                  drColor = rem < 0 ? 'var(--red)' : rem <= 3 ? 'var(--amber)' : 'var(--green)';
+                  drColor = rem <= 1 ? 'var(--red)' : rem <= 3 ? 'var(--amber)' : 'var(--green)';
                 }
 
                 const appCountColor = appCount === 0 ? 'var(--red)' : 'var(--navy)';
