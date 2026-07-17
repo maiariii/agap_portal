@@ -926,7 +926,8 @@ export default function ApplicationsPage() {
                   );
                 })()}
               </div>
-              </div>
+            </div>
+          </div>
               
               {showReviewDocsVault && (
                 <div style={{ position: 'sticky', top: '72px' }}>
