@@ -43,6 +43,7 @@ export default function ApplicationsPage() {
   const [showReviewDocsVault, setShowReviewDocsVault] = useState(false);
   const [availableDocs, setAvailableDocs] = useState([]);
   const [selectedDocKey, setSelectedDocKey] = useState('pds');
+  const [docsLoading, setDocsLoading] = useState(false);
 
   React.useEffect(() => {
     const handleTourUpdate = () => {
@@ -309,11 +310,13 @@ export default function ApplicationsPage() {
     setSelectedDocKey('pds');
     setShowReviewDocsVault(false);
     if (appRow.id) {
+      setDocsLoading(true);
       apiFetch(`/api/applications/${appRow.id}/documents`)
         .then(data => {
           setAvailableDocs(data.documents || []);
         })
-        .catch(err => console.error('Error fetching documents:', err));
+        .catch(err => console.error('Error fetching documents:', err))
+        .finally(() => setDocsLoading(false));
     }
 
     const docChecklist = appRow.docChecklist || appRow.appObj?.docChecklist || appRow.documents || {};
@@ -1020,6 +1023,41 @@ export default function ApplicationsPage() {
                   <span style={{ fontSize: '12px', color: 'var(--muted)' }}>Page 1 of 1</span>
                 </div>
                 {(() => {
+                  if (docsLoading) {
+                    return (
+                      <div style={{
+                        backgroundColor: '#f8fafc',
+                        minHeight: '400px',
+                        maxHeight: '600px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        gap: '12px',
+                        width: '100%',
+                        color: '#64748B',
+                        padding: '40px',
+                        boxSizing: 'border-box'
+                      }}>
+                        <style>{`
+                          @keyframes spin {
+                            0% { transform: rotate(0deg); }
+                            100% { transform: rotate(360deg); }
+                          }
+                        `}</style>
+                        <div style={{
+                          border: '4px solid #e2e8f0',
+                          borderTop: '4px solid var(--blue)',
+                          borderRadius: '50%',
+                          width: '32px',
+                          height: '32px',
+                          animation: 'spin 1s linear infinite'
+                        }} />
+                        <b style={{ fontSize: '14px' }}>Loading Documents...</b>
+                        <span style={{ fontSize: '12px' }}>Checking file attachments</span>
+                      </div>
+                    );
+                  }
                   const selectedDocInfo = availableDocs.find(d => d.key === selectedDocKey);
                   const existsInAzure = !!selectedDocInfo?.existsInAzure;
                   const isPdf = !!selectedDocInfo?.filename?.toLowerCase().endsWith('.pdf');

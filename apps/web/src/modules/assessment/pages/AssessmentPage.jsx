@@ -48,10 +48,12 @@ export default function AssessmentPage() {
   const [showDocsModal, setShowDocsModal] = useState(false);
   const [selectedDocKey, setSelectedDocKey] = useState('pds');
   const [availableDocs, setAvailableDocs] = useState([]);
+  const [docsLoading, setDocsLoading] = useState(false);
 
   useEffect(() => {
     if (showDocsModal && selectedQualApp?.id) {
       setAvailableDocs([]);
+      setDocsLoading(true);
       console.log(`[Azure Storage] Requesting documents for applicant ID "${selectedQualApp.applicantId || 'AGAP-0001'}" in folder "staging-agap"...`);
       apiFetch(`/api/applications/${selectedQualApp.id}/documents`)
         .then(data => {
@@ -64,7 +66,8 @@ export default function AssessmentPage() {
         .catch(err => {
           console.error('[Azure Storage Fetch ERROR] Failed to fetch documents:', err);
           setAvailableDocs([]);
-        });
+        })
+        .finally(() => setDocsLoading(false));
     }
   }, [showDocsModal, selectedQualApp]);
 
@@ -1383,6 +1386,41 @@ export default function AssessmentPage() {
                   <span style={{ fontSize: '12px', color: 'var(--muted)' }}>Page 1 of 1</span>
                 </div>
                 {(() => {
+                  if (docsLoading) {
+                    return (
+                      <div style={{
+                        backgroundColor: '#f8fafc',
+                        minHeight: '400px',
+                        maxHeight: '550px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        gap: '12px',
+                        width: '100%',
+                        color: '#64748B',
+                        padding: '40px',
+                        boxSizing: 'border-box'
+                      }}>
+                        <style>{`
+                          @keyframes spin {
+                            0% { transform: rotate(0deg); }
+                            100% { transform: rotate(360deg); }
+                          }
+                        `}</style>
+                        <div style={{
+                          border: '4px solid #e2e8f0',
+                          borderTop: '4px solid var(--blue)',
+                          borderRadius: '50%',
+                          width: '32px',
+                          height: '32px',
+                          animation: 'spin 1s linear infinite'
+                        }} />
+                        <b style={{ fontSize: '14px' }}>Loading Documents...</b>
+                        <span style={{ fontSize: '12px' }}>Checking file attachments</span>
+                      </div>
+                    );
+                  }
                   const selectedDocInfo = availableDocs.find(d => d.key === selectedDocKey);
                   const existsInAzure = !!selectedDocInfo?.existsInAzure;
                   const isPdf = !!selectedDocInfo?.filename?.toLowerCase().endsWith('.pdf');
