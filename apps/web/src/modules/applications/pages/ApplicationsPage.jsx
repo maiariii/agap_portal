@@ -39,6 +39,11 @@ export default function ApplicationsPage() {
   const [reviewDirty, setReviewDirty] = useState(false);
   const [showUnsavedPrompt, setShowUnsavedPrompt] = useState(false);
 
+  // Document Vault modal states in evaluation modal
+  const [showReviewDocsVault, setShowReviewDocsVault] = useState(false);
+  const [availableDocs, setAvailableDocs] = useState([]);
+  const [selectedDocKey, setSelectedDocKey] = useState('pds');
+
   React.useEffect(() => {
     const handleTourUpdate = () => {
       if (window.agap_tour_open_review) {
@@ -299,6 +304,17 @@ export default function ApplicationsPage() {
     setReviewId(appRow.id);
     setReviewApp(appRow);
     setRemarks(appRow.reason || appRow.appObj?.reason || '');
+    
+    setAvailableDocs([]);
+    setSelectedDocKey('pds');
+    setShowReviewDocsVault(false);
+    if (appRow.id) {
+      apiFetch(`/api/applications/${appRow.id}/documents`)
+        .then(data => {
+          setAvailableDocs(data.documents || []);
+        })
+        .catch(err => console.error('Error fetching documents:', err));
+    }
 
     const docChecklist = appRow.docChecklist || appRow.appObj?.docChecklist || appRow.documents || {};
     const statusLower = appRow.status ? appRow.status.toLowerCase() : '';
@@ -713,10 +729,22 @@ export default function ApplicationsPage() {
               alignItems: 'center'
             }}>
               <h2 style={{ margin: 0 }}>Initial Evaluation Review — {reviewApp.applicant}</h2>
-              <button className="secondary" onClick={handleCloseReviewModal}>Close</button>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button type="button" className="secondary" onClick={() => setShowReviewDocsVault(!showReviewDocsVault)}>
+                  {showReviewDocsVault ? 'Hide Documents' : '📂 View Documents'}
+                </button>
+                <button className="secondary" onClick={handleCloseReviewModal}>Close</button>
+              </div>
             </div>
 
-            <div className="qs-matrix-wrap">
+            <div style={{ 
+              display: 'grid', 
+              gridTemplateColumns: showReviewDocsVault ? '1fr 500px' : '1fr', 
+              gap: '24px', 
+              alignItems: 'start' 
+            }}>
+              <div>
+                <div className="qs-matrix-wrap">
               <div className="qs-matrix-head">
                 <div>
                   <div className="position-detail-eyebrow">Qualification Standards</div>
@@ -898,6 +926,135 @@ export default function ApplicationsPage() {
                   );
                 })()}
               </div>
+              </div>
+              
+              {showReviewDocsVault && (
+                <div style={{ position: 'sticky', top: '72px' }}>
+                  <div style={{ display: 'flex', gap: '4px', overflowX: 'auto', marginBottom: '8px', borderBottom: '1px solid var(--line)', paddingBottom: '6px' }}>
+                    {[
+                      { key: 'pds', label: 'PDS' },
+                      { key: 'work_experience', label: 'Work Experience' },
+                      { key: 'eligibility', label: 'Eligibility' },
+                      { key: 'tor', label: 'TOR' },
+                      { key: 'prc', label: 'PRC License' },
+                      { key: 'diploma', label: 'Diploma' },
+                      { key: 'resume', label: 'Resume' },
+                    ].map((doc) => {
+                      const isSelected = selectedDocKey === doc.key;
+                      const isUploaded = availableDocs.find(d => d.key === doc.key)?.existsInAzure;
+                      return (
+                        <button
+                          key={doc.key}
+                          type="button"
+                          onClick={() => setSelectedDocKey(doc.key)}
+                          style={{
+                            padding: '6px 12px',
+                            fontSize: '12px',
+                            borderRadius: '6px',
+                            border: isSelected ? '1px solid var(--blue)' : '1px solid var(--line)',
+                            background: isSelected ? 'var(--blue)' : 'white',
+                            color: isSelected ? 'white' : 'var(--navy)',
+                            cursor: 'pointer',
+                            fontWeight: 'bold',
+                            whiteSpace: 'nowrap',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px'
+                          }}
+                        >
+                          {doc.label} {isUploaded ? '✓' : ''}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div style={{ border: '1px solid var(--line)', borderRadius: '12px', overflow: 'hidden' }}>
+                    <div style={{ padding: '12px 16px', backgroundColor: 'var(--blue-50)', borderBottom: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <b style={{ color: 'var(--blue-900)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <svg 
+                          width="16" 
+                          height="16" 
+                          viewBox="0 0 24 24" 
+                          fill="none" 
+                          stroke="currentColor" 
+                          strokeWidth="2.5" 
+                          strokeLinecap="round" 
+                          strokeLinejoin="round"
+                          style={{ color: 'var(--blue-800)' }}
+                        >
+                          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                          <circle cx="12" cy="12" r="3" />
+                        </svg>
+                        Document Viewer: {
+                          selectedDocKey === 'pds' ? 'Personal Data Sheet (PDS)' :
+                          selectedDocKey === 'work_experience' ? 'Work Experience Sheet' :
+                          selectedDocKey === 'eligibility' ? 'Certificate of Eligibility' :
+                          selectedDocKey === 'tor' ? 'Transcript of Records (TOR)' :
+                          selectedDocKey === 'prc' ? 'Updated PRC License/ID' :
+                          selectedDocKey === 'diploma' ? 'Diploma' : 'Resume'
+                        }
+                      </b>
+                    </div>
+                    {(() => {
+                      const selectedDocInfo = availableDocs.find(d => d.key === selectedDocKey);
+                      const existsInAzure = !!selectedDocInfo?.existsInAzure;
+                      const isPdf = !!selectedDocInfo?.filename?.toLowerCase().endsWith('.pdf');
+                      return (
+                        <div style={{
+                          padding: (existsInAzure && isPdf) ? '0' : '24px',
+                          backgroundColor: '#f8fafc',
+                          minHeight: '400px',
+                          maxHeight: '650px',
+                          overflowY: (existsInAzure && isPdf) ? 'hidden' : 'auto',
+                          display: 'flex',
+                          justifyContent: 'center',
+                          width: '100%',
+                          alignItems: 'stretch'
+                        }}>
+                          {existsInAzure ? (
+                            isPdf ? (
+                              <iframe
+                                src={`${import.meta.env.VITE_API_URL || window.location.origin}/api/applications/${reviewApp.id}/documents/${selectedDocKey}/download?token=${localStorage.getItem('agap_token')}&dpi=98`}
+                                style={{ width: '100%', height: '650px', border: 'none', borderRadius: '0 0 12px 12px' }}
+                                title="Azure Document Viewer"
+                              />
+                            ) : (
+                              <div style={{ width: '100%', display: 'flex', flexDirection: 'column', backgroundColor: 'white', border: '1px solid var(--line)', borderRadius: '12px', overflow: 'hidden' }}>
+                                <div style={{ padding: '12px 16px', borderBottom: '1px solid #e2e8f0', background: '#f8fafc', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <span style={{ fontSize: '12px', color: '#64748B', fontWeight: 'bold' }}>
+                                    Previewing Spreadsheet: {selectedDocInfo?.filename}
+                                  </span>
+                                  <a
+                                    href={`${import.meta.env.VITE_API_URL || window.location.origin}/api/applications/${reviewApp.id}/documents/${selectedDocKey}/download?token=${localStorage.getItem('agap_token')}`}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    style={{ fontSize: '12px', color: 'var(--blue-600)', textDecoration: 'underline', fontWeight: 'bold' }}
+                                  >
+                                    Download Original
+                                  </a>
+                                </div>
+                              </div>
+                            )
+                          ) : (
+                            <div style={{ textAlign: 'center', color: '#64748B', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ color: '#94A3B8' }}>
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                <polyline points="14 2 14 8 20 8" />
+                                <line x1="9" y1="15" x2="15" y2="15" />
+                                <line x1="12" y1="12" x2="12" y2="18" />
+                              </svg>
+                              <b style={{ fontSize: '14px' }}>No Document Uploaded</b>
+                              <span style={{ fontSize: '12px', maxWidth: '240px' }}>
+                                The applicant has not uploaded a file for this requirement type.
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
