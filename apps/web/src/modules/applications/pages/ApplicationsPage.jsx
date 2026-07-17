@@ -823,7 +823,7 @@ export default function ApplicationsPage() {
                         <div className="compare-box"><b>Applicant</b><br/>{c.appVal}</div>
                         <div className="compare-box"><b>Qualification Standard</b><br/>{c.reqVal}</div>
                       </div>
-                       <div className="toggle-group" style={{ marginTop: '12px' }}>
+                       <div className="toggle-group" style={{ marginTop: 'auto' }}>
                         <button className={`secondary ${reviewDecisions[c.key] === 'pass' ? 'good' : ''}`} onClick={() => { if (isAlreadyQualified) return; setReviewDecisions({ ...reviewDecisions, [c.key]: reviewDecisions[c.key] === 'pass' ? null : 'pass' }); setReviewDirty(true); }} style={isAlreadyQualified ? { cursor: 'not-allowed', opacity: 0.8 } : {}}>Meet the QS</button>
                         <button className={`secondary ${reviewDecisions[c.key] === 'fail' ? 'danger' : ''}`} onClick={() => { if (isAlreadyQualified) return; setReviewDecisions({ ...reviewDecisions, [c.key]: reviewDecisions[c.key] === 'fail' ? null : 'fail' }); setReviewDirty(true); }} style={isAlreadyQualified ? { cursor: 'not-allowed', opacity: 0.8 } : {}}>Did not Meet the QS</button>
                       </div>
