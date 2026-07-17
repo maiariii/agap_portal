@@ -83,7 +83,8 @@ export default function AssessmentPage() {
       setCsvError(null);
       setCsvData(null);
 
-      const downloadUrl = `${window.location.hostname === 'localhost' ? 'http://localhost:5000' : window.location.origin}/api/applications/${selectedQualApp.id}/documents/${selectedDocKey}/download?token=${localStorage.getItem('agap_token')}`;
+      const apiBaseUrl = import.meta.env.VITE_API_URL || window.location.origin;
+      const downloadUrl = `${apiBaseUrl}/api/applications/${selectedQualApp.id}/documents/${selectedDocKey}/download?token=${localStorage.getItem('agap_token')}`;
       
       fetch(downloadUrl)
         .then(res => {
@@ -1401,7 +1402,7 @@ export default function AssessmentPage() {
                       {existsInAzure ? (
                         isPdf ? (
                           <iframe
-                            src={`${window.location.hostname === 'localhost' ? 'http://localhost:5000' : window.location.origin}/api/applications/${selectedQualApp.id}/documents/${selectedDocKey}/download?token=${localStorage.getItem('agap_token')}&dpi=98`}
+                            src={`${import.meta.env.VITE_API_URL || window.location.origin}/api/applications/${selectedQualApp.id}/documents/${selectedDocKey}/download?token=${localStorage.getItem('agap_token')}&dpi=98`}
                             style={{ width: '100%', height: '550px', border: 'none', borderRadius: '0 0 12px 12px' }}
                             title="Azure Document Viewer"
                           />
@@ -1412,7 +1413,7 @@ export default function AssessmentPage() {
                                 Previewing Spreadsheet: {selectedDocInfo?.filename}
                               </span>
                               <a
-                                href={`${window.location.hostname === 'localhost' ? 'http://localhost:5000' : window.location.origin}/api/applications/${selectedQualApp.id}/documents/${selectedDocKey}/download?token=${localStorage.getItem('agap_token')}`}
+                                href={`${import.meta.env.VITE_API_URL || window.location.origin}/api/applications/${selectedQualApp.id}/documents/${selectedDocKey}/download?token=${localStorage.getItem('agap_token')}`}
                                 target="_blank"
                                 rel="noreferrer"
                                 style={{ fontSize: '12px', color: 'var(--blue-600)', textDecoration: 'underline', fontWeight: 'bold' }}
