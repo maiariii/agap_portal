@@ -112,17 +112,19 @@ export async function getHydratedApplications(vacancyId = null, region = null, d
     );
 
     const qualEvalsArray = row.qual_evals || [];
-    const latestEval = qualEvalsArray[0] || null;
+    const absoluteLatest = qualEvalsArray[0] || null;
+    const latestQsEval = qualEvalsArray.find(q => q.degree_decision !== null) || absoluteLatest;
+
     let parsedAreaScores = {};
-    if (latestEval && latestEval.area_scores) {
-      if (typeof latestEval.area_scores === 'object') {
-        parsedAreaScores = latestEval.area_scores;
+    if (absoluteLatest && absoluteLatest.area_scores) {
+      if (typeof absoluteLatest.area_scores === 'object') {
+        parsedAreaScores = absoluteLatest.area_scores;
       } else {
-        try { parsedAreaScores = JSON.parse(latestEval.area_scores); } catch(e){}
+        try { parsedAreaScores = JSON.parse(absoluteLatest.area_scores); } catch(e){}
       }
     }
 
-    const overallFit = latestEval && latestEval.overall_fit !== null ? Number(latestEval.overall_fit) : fitBase.overall;
+    const overallFit = absoluteLatest && absoluteLatest.overall_fit !== null ? Number(absoluteLatest.overall_fit) : fitBase.overall;
 
     return {
       id: row.id || `unapplied-${row.applicant_id || Math.random()}`,
@@ -185,24 +187,24 @@ export async function getHydratedApplications(vacancyId = null, region = null, d
         overall: overallFit,
         manualScores: parsedAreaScores
       },
-      latestEval: latestEval ? {
-        id: latestEval.id,
-        applicationId: latestEval.application_id,
-        result: latestEval.result,
-        overallFit: latestEval.overall_fit,
-        degreeScore: latestEval.degree_score,
-        experienceScore: latestEval.experience_score,
-        trainingScore: latestEval.training_score,
-        eligibilityScore: latestEval.eligibility_score,
-        degreeDecision: latestEval.degree_decision,
-        experienceDecision: latestEval.experience_decision,
-        trainingDecision: latestEval.training_decision,
-        eligibilityDecision: latestEval.eligibility_decision,
-        documentaryComplete: latestEval.documentary_complete,
-        remarks: latestEval.remarks,
+      latestEval: latestQsEval ? {
+        id: latestQsEval.id,
+        applicationId: latestQsEval.application_id,
+        result: latestQsEval.result,
+        overallFit: latestQsEval.overall_fit,
+        degreeScore: latestQsEval.degree_score,
+        experienceScore: latestQsEval.experience_score,
+        trainingScore: latestQsEval.training_score,
+        eligibilityScore: latestQsEval.eligibility_score,
+        degreeDecision: latestQsEval.degree_decision,
+        experienceDecision: latestQsEval.experience_decision,
+        trainingDecision: latestQsEval.training_decision,
+        eligibilityDecision: latestQsEval.eligibility_decision,
+        documentaryComplete: latestQsEval.documentary_complete,
+        remarks: latestQsEval.remarks,
         areaScores: parsedAreaScores,
-        createdAt: latestEval.at,
-        updatedAt: latestEval.at
+        createdAt: latestQsEval.at,
+        updatedAt: latestQsEval.at
       } : null,
       history: row.history || [],
       documents: parsedDocs,
