@@ -151,9 +151,27 @@ export async function scanNosca(req, res) {
 
   try {
     const buffer = Buffer.from(fileData, 'base64');
-    const { PDFParse } = pdfParse;
-    const parser = new PDFParse(new Uint8Array(buffer));
-    const parseResult = await parser.getText();
+    const pageTexts = [];
+    const options = {
+      pagerender: function(pageData) {
+        return pageData.getTextContent()
+          .then(function(textContent) {
+            let lastY, text = '';
+            for (let item of textContent.items) {
+              if (lastY == item.transform[5] || !lastY){
+                text += item.str;
+              } else {
+                text += '\n' + item.str;
+              }
+              lastY = item.transform[5];
+            }
+            pageTexts.push(text);
+            return text;
+          });
+      }
+    };
+
+    const parseResult = await pdfParse(buffer, options);
 
     const results = {
       serial_no: "UNKNOWN",
@@ -186,8 +204,7 @@ export async function scanNosca(req, res) {
 
     let currentPageCat = "ELEMENTARY";
 
-    for (const page of parseResult.pages) {
-      const extracted = page.text;
+    for (const extracted of pageTexts) {
       const pageLower = extracted.toLowerCase();
 
       // Determine category for this specific page
