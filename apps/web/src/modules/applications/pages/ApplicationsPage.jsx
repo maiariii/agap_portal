@@ -17,6 +17,29 @@ const DOC_REQUIREMENTS = [
   { key: "other", label: "Other documents as may be required for comparative assessment (e.g. MOVs, or Performance Rating from relevant work experience)" }
 ];
 
+const getAdaptiveFontSize = (val) => {
+  let text = '';
+  if (typeof val === 'string') {
+    text = val;
+  } else if (React.isValidElement(val)) {
+    const extractText = (node) => {
+      if (!node) return '';
+      if (typeof node === 'string' || typeof node === 'number') return String(node);
+      if (Array.isArray(node)) return node.map(extractText).join('');
+      if (node.props && node.props.children) return extractText(node.props.children);
+      return '';
+    };
+    text = extractText(val);
+  } else {
+    return 'inherit';
+  }
+  const len = text.length;
+  if (len > 300) return '10.5px';
+  if (len > 150) return '11.5px';
+  if (len > 80) return '12.5px';
+  return 'inherit';
+};
+
 export default function ApplicationsPage() {
   const { vacancies, applications, loadAllData } = useAppData();
   const { setToast } = useToast();
@@ -830,8 +853,28 @@ export default function ApplicationsPage() {
                     <div className="qs-card" key={c.key}>
                       <h3>{c.label}</h3>
                       <div className="compare" style={{ marginBottom: '12px' }}>
-                        <div className="compare-box"><b>Applicant</b><br/>{c.appVal}</div>
-                        <div className="compare-box"><b>Qualification Standard</b><br/>{c.reqVal}</div>
+                        <div className="compare-box">
+                          <b>Applicant</b>
+                          <div style={{
+                            whiteSpace: 'pre-line',
+                            fontSize: getAdaptiveFontSize(c.appVal),
+                            lineHeight: '1.4',
+                            marginTop: '4px'
+                          }}>
+                            {c.appVal}
+                          </div>
+                        </div>
+                        <div className="compare-box">
+                          <b>Qualification Standard</b>
+                          <div style={{
+                            whiteSpace: 'pre-line',
+                            fontSize: getAdaptiveFontSize(c.reqVal),
+                            lineHeight: '1.4',
+                            marginTop: '4px'
+                          }}>
+                            {c.reqVal}
+                          </div>
+                        </div>
                       </div>
                        <div className="toggle-group" style={{ marginTop: 'auto' }}>
                         <button className={`secondary ${reviewDecisions[c.key] === 'pass' ? 'good' : ''}`} onClick={() => { if (isAlreadyQualified) return; setReviewDecisions({ ...reviewDecisions, [c.key]: reviewDecisions[c.key] === 'pass' ? null : 'pass' }); setReviewDirty(true); }} style={isAlreadyQualified ? { cursor: 'not-allowed', opacity: 0.8 } : {}}>Meet the QS</button>

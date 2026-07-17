@@ -412,3 +412,16 @@ export async function autocompleteSchools(req, res) {
     res.status(500).json({ error: error.message });
   }
 }
+
+export async function deleteVacancy(req, res) {
+  const { id } = req.params;
+  try {
+    const { rowCount } = await pool.query('DELETE FROM vacancies WHERE id = $1', [id]);
+    if (rowCount === 0) {
+      return res.status(404).json({ error: 'Vacancy not found' });
+    }
+    res.json({ success: true, message: 'Vacancy deleted successfully.' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+}

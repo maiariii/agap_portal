@@ -5,7 +5,8 @@ import {
   toggleVacancyStatus,
   scanNosca,
   importNosca,
-  autocompleteSchools
+  autocompleteSchools,
+  deleteVacancy
 } from './vacancies.controller.js';
 import { authenticateToken } from '../../middleware/auth.middleware.js';
 
@@ -17,5 +18,6 @@ router.post('/', authenticateToken, createVacancy);
 router.put('/:id', authenticateToken, toggleVacancyStatus);
 router.post('/scan-nosca', authenticateToken, scanNosca);
 router.post('/import-nosca', authenticateToken, importNosca);
+router.delete('/:id', authenticateToken, deleteVacancy);
 
 export default router;

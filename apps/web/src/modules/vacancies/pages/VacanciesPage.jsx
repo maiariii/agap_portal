@@ -361,6 +361,33 @@ export default function VacanciesPage() {
   const [detectedItems, setDetectedItems] = useState([]);
   const [selectedNoscaItemNos, setSelectedNoscaItemNos] = useState([]);
 
+  // Manual Add Form states
+  const [showManualFields, setShowManualFields] = useState(false);
+  const [manualPositionId, setManualPositionId] = useState('');
+  const [manualItemNo, setManualItemNo] = useState('SCA1-00000-2026');
+  const [manualSchoolLevel, setManualSchoolLevel] = useState('');
+  const [manualSchoolId, setManualSchoolId] = useState(null);
+  const [manualSchoolName, setManualSchoolName] = useState('');
+  const [manualSchoolSearchQuery, setManualSchoolSearchQuery] = useState('');
+  const [manualSearchResults, setManualSearchResults] = useState([]);
+  const [showManualDropdown, setShowManualDropdown] = useState(false);
+
+  React.useEffect(() => {
+    if (!manualSchoolSearchQuery || !manualSchoolSearchQuery.trim()) {
+      setManualSearchResults([]);
+      return;
+    }
+    const delayDebounce = setTimeout(async () => {
+      try {
+        const data = await apiFetch(`/api/vacancies/schools/autocomplete?q=${encodeURIComponent(manualSchoolSearchQuery)}`);
+        setManualSearchResults(data || []);
+      } catch (err) {
+        console.error('Error fetching schools:', err);
+      }
+    }, 300);
+    return () => clearTimeout(delayDebounce);
+  }, [manualSchoolSearchQuery]);
+
 
   React.useEffect(() => {
     const handleTourUpdate = () => {
@@ -377,13 +404,18 @@ export default function VacanciesPage() {
     return () => window.removeEventListener('agap-tour-update', handleTourUpdate);
   }, []);
 
-  // Close Warning Override states
   const [showCloseWarning, setShowCloseWarning] = useState(false);
   const [closeWarningVac, setCloseWarningVac] = useState(null);
   const [closeReason, setCloseReason] = useState('');
   const [closeReasonOther, setCloseReasonOther] = useState('');
   const [closePasscode, setClosePasscode] = useState('');
   const [passcodeError, setPasscodeError] = useState('');
+
+  // Delete Confirmation States
+  const [showDeleteConfirmModal, setShowDeleteConfirmModal] = useState(false);
+  const [deleteConfirmVac, setDeleteConfirmVac] = useState(null);
+  const [deletePasscode, setDeletePasscode] = useState('');
+  const [deletePasscodeError, setDeletePasscodeError] = useState('');
 
   const vacanciesKpiStats = useMemo(() => {
     const total = vacancies.length;
@@ -532,6 +564,35 @@ export default function VacanciesPage() {
     }
   };
 
+  const handleInitiateDeleteVacancy = (vac) => {
+    setDeleteConfirmVac(vac);
+    setDeletePasscode('');
+    setDeletePasscodeError('');
+    setShowDeleteConfirmModal(true);
+  };
+
+  const handleConfirmDeleteVacancy = async () => {
+    if (!deletePasscode) {
+      setDeletePasscodeError("Please enter your passcode.");
+      return;
+    }
+    try {
+      await apiFetch('/api/auth/verify-passcode', {
+        method: 'POST',
+        body: JSON.stringify({ passcode: deletePasscode })
+      });
+      await apiFetch(`/api/vacancies/${deleteConfirmVac.id}`, {
+        method: 'DELETE'
+      });
+      setToast({ message: 'Vacancy deleted successfully.', type: 'success' });
+      setShowDeleteConfirmModal(false);
+      setDeleteConfirmVac(null);
+      loadAllData();
+    } catch (e) {
+      setDeletePasscodeError(e.message || "Incorrect passcode. Deletion is not allowed.");
+    }
+  };
+
   const handleConfirmOverrideClose = async () => {
     let finalReason = closeReason;
     if (closeReason === '__other__') {
@@ -669,20 +730,64 @@ export default function VacanciesPage() {
     }
   };
 
+  const handleConfirmAddManual = async () => {
+    if (!manualPositionId) {
+      setToast({ message: 'Please select a position.', type: 'error' });
+      return;
+    }
+    if (!isValidItemNo(manualItemNo)) {
+      setToast({ message: 'Item number format must be like OSEC-DEPEDB-ADO2-540033-2026 or SCA1-00000-2026.', type: 'error' });
+      return;
+    }
+    if (!manualSchoolLevel) {
+      setToast({ message: 'Please select a school level.', type: 'error' });
+      return;
+    }
+    if (manualSchoolLevel === 'JHS' && !manualSchoolId) {
+      setToast({ message: 'Please select a school ID for JHS.', type: 'error' });
+      return;
+    }
+
+    const pos = positions.find(p => p.id === manualPositionId);
+    const newItem = {
+      itemNo: manualItemNo,
+      title: pos.title,
+      positionId: manualPositionId,
+      schoolLevel: manualSchoolLevel,
+      schoolId: manualSchoolLevel === 'JHS' ? manualSchoolId : null,
+      schoolName: manualSchoolLevel === 'JHS' ? manualSchoolName : ''
+    };
+
+    try {
+      await apiFetch('/api/vacancies/import-nosca', {
+        method: 'POST',
+        body: JSON.stringify({ items: [newItem] })
+      });
+      setToast({ message: 'Vacancy created successfully!', type: 'success' });
+      setShowNosca(false);
+      setShowManualFields(false);
+      setManualPositionId('');
+      setManualItemNo('SCA1-00000-2026');
+      setManualSchoolLevel('');
+      setManualSchoolId(null);
+      setManualSchoolName('');
+      setManualSchoolSearchQuery('');
+      loadAllData();
+    } catch (e) {
+      setToast({ message: e.message, type: 'error' });
+    }
+  };
+
   const handleAddManually = () => {
     const positionName = "School Counselor Associate I";
     const positionId = positions.find(p => p.title.toLowerCase() === positionName.toLowerCase())?.id || '';
-    const defaultItem = {
-      itemNo: 'SCA1-00000-2026',
-      title: positionName,
-      positionId: positionId,
-      schoolLevel: '',
-      schoolId: null,
-      schoolName: '',
-      schoolSearchQuery: ''
-    };
-    setDetectedItems([defaultItem]);
-    setSelectedNoscaItemNos([defaultItem.itemNo]);
+    setManualPositionId(positionId);
+    setManualItemNo('SCA1-00000-2026');
+    setManualSchoolLevel('');
+    setManualSchoolId(null);
+    setManualSchoolName('');
+    setManualSchoolSearchQuery('');
+    setShowManualFields(true);
   };
 
   const selectCalDate = (iso) => {
@@ -970,7 +1075,7 @@ export default function VacanciesPage() {
                         {vac.fillingUpStatus || 'UNFILLED'}
                       </span>
                     </td>
-                    <td>
+                    <td style={{ display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'center' }}>
                       <button 
                         className={`vac-action ${vac.fillingUpStatus === 'FILLED' ? 'incomplete' : (isClosed ? 'good' : 'danger')}`} 
                         onClick={() => handleToggleVacancy(vac)}
@@ -978,6 +1083,31 @@ export default function VacanciesPage() {
                         style={vac.fillingUpStatus === 'FILLED' ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                       >
                         {isClosed ? 'Open' : 'Close'}
+                      </button>
+                      <button
+                        onClick={() => handleInitiateDeleteVacancy(vac)}
+                        title="Delete vacancy"
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          cursor: 'pointer',
+                          color: '#EF4444',
+                          padding: '6px',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          borderRadius: '6px',
+                          transition: 'background-color 0.2s'
+                        }}
+                        onMouseOver={e => e.currentTarget.style.backgroundColor = '#FEE2E2'}
+                        onMouseOut={e => e.currentTarget.style.backgroundColor = 'transparent'}
+                      >
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="3 6 5 6 21 6"></polyline>
+                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                          <line x1="10" y1="11" x2="10" y2="17"></line>
+                          <line x1="14" y1="11" x2="14" y2="17"></line>
+                        </svg>
                       </button>
                     </td>
                   </tr>
@@ -1293,7 +1423,128 @@ export default function VacanciesPage() {
                   />
                 </div>
 
-                <div className="nosca-scan" style={{ minHeight: '300px', border: '2px solid var(--line)', borderRadius: '18px', padding: '16px', background: 'white', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                {showManualFields ? (
+                  <div className="nosca-scan manual-form" style={{ minHeight: '300px', border: '2px solid var(--line)', borderRadius: '18px', padding: '24px 20px', background: 'white', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                    <h3 style={{ fontFamily: 'var(--font-heading)', color: 'var(--navy)', margin: 0, fontSize: '16px', fontWeight: 'bold' }}>Add Vacancy Manually</h3>
+                    
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                      <div>
+                        <label style={{ display: 'block', fontSize: '10.5px', fontWeight: 'bold', textTransform: 'uppercase', color: 'var(--navy)', marginBottom: '4px' }}>Position Title</label>
+                        <select
+                          value={manualPositionId}
+                          onChange={e => setManualPositionId(e.target.value)}
+                          style={{ width: '100%', height: '38px', padding: '0 8px', borderRadius: '8px', border: '1.5px solid var(--blue)', background: 'white', color: 'var(--navy)', fontSize: '12px', boxSizing: 'border-box' }}
+                        >
+                          <option value="">Select Position...</option>
+                          {positions.map(p => (
+                            <option key={p.id} value={p.id}>{p.title}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label style={{ display: 'block', fontSize: '10.5px', fontWeight: 'bold', textTransform: 'uppercase', color: 'var(--navy)', marginBottom: '4px' }}>Item Number</label>
+                        <input
+                          type="text"
+                          placeholder="e.g. SCA1-00000-2026"
+                          value={manualItemNo}
+                          onChange={e => setManualItemNo(e.target.value.toUpperCase())}
+                          style={{ width: '100%', height: '38px', padding: '0 12px', borderRadius: '8px', border: '1.5px solid var(--line)', background: 'white', color: 'var(--navy)', fontSize: '12px', boxSizing: 'border-box' }}
+                        />
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                      <div>
+                        <label style={{ display: 'block', fontSize: '10.5px', fontWeight: 'bold', textTransform: 'uppercase', color: 'var(--navy)', marginBottom: '4px' }}>School Level</label>
+                        <select
+                          value={manualSchoolLevel || ''}
+                          onChange={(e) => {
+                            setManualSchoolLevel(e.target.value);
+                            setManualSchoolId(null);
+                            setManualSchoolName('');
+                            setManualSchoolSearchQuery('');
+                          }}
+                          style={{ width: '100%', height: '38px', padding: '0 8px', borderRadius: '8px', border: '1.5px solid var(--line)', background: 'white', color: 'var(--navy)', fontSize: '12px', boxSizing: 'border-box' }}
+                        >
+                          <option value="">Select School Level</option>
+                          <option value="ES">ES</option>
+                          <option value="JHS">JHS</option>
+                          <option value="SHS">SHS</option>
+                        </select>
+                      </div>
+
+                      {manualSchoolLevel === 'JHS' && (
+                        <div style={{ position: 'relative' }}>
+                          <label style={{ display: 'block', fontSize: '10.5px', fontWeight: 'bold', textTransform: 'uppercase', color: 'var(--navy)', marginBottom: '4px' }}>School ID & Name</label>
+                          <input
+                            type="text"
+                            value={manualSchoolSearchQuery || ''}
+                            onChange={(e) => {
+                              setManualSchoolSearchQuery(e.target.value);
+                              setShowManualDropdown(true);
+                            }}
+                            onFocus={() => setShowManualDropdown(true)}
+                            placeholder="Type School ID or Name..."
+                            style={{
+                              width: '100%',
+                              padding: '0 12px',
+                              borderRadius: '8px',
+                              border: '1px solid var(--line)',
+                              fontSize: '12px',
+                              height: '38px',
+                              boxSizing: 'border-box'
+                            }}
+                          />
+                          {showManualDropdown && manualSearchResults.length > 0 && (
+                            <div style={{
+                              position: 'absolute',
+                              top: '100%',
+                              left: 0,
+                              right: 0,
+                              background: 'white',
+                              border: '1px solid var(--line)',
+                              borderRadius: '8px',
+                              boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
+                              zIndex: 9999,
+                              maxHeight: '150px',
+                              overflowY: 'auto',
+                              marginTop: '4px'
+                            }}>
+                              {manualSearchResults.map((sch) => (
+                                <div
+                                  key={sch.schoolId}
+                                  onClick={() => {
+                                    setManualSchoolId(sch.schoolId);
+                                    setManualSchoolName(sch.schoolName);
+                                    setManualSchoolSearchQuery(`${sch.schoolId} - ${sch.schoolName}`);
+                                    setShowManualDropdown(false);
+                                  }}
+                                  style={{
+                                    padding: '8px 12px',
+                                    fontSize: '11.5px',
+                                    cursor: 'pointer',
+                                    borderBottom: '1px solid #F1F5F9'
+                                  }}
+                                  onMouseEnter={(e) => e.target.style.background = '#F8FAFC'}
+                                  onMouseLeave={(e) => e.target.style.background = 'transparent'}
+                                >
+                                  <b>{sch.schoolId}</b> - {sch.schoolName}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: 'auto', paddingTop: '16px', borderTop: '1px solid var(--line)' }}>
+                      <button type="button" className="secondary" onClick={() => setShowManualFields(false)} style={{ padding: '10px 20px', borderRadius: '10px', fontSize: '13px' }}>Cancel</button>
+                      <button type="button" className="good" onClick={handleConfirmAddManual} style={{ padding: '10px 20px', borderRadius: '10px', fontSize: '13px' }}>Add Vacancy</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="nosca-scan" style={{ minHeight: '300px', border: '2px solid var(--line)', borderRadius: '18px', padding: '16px', background: 'white', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
                   {noscaScanning ? (
                     <div className="nosca-empty" style={{ height: '100%', minHeight: '230px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', color: 'var(--muted)', fontWeight: '700', fontSize: '13px', gap: '4px' }}>
                       <p>Scanning document metadata...</p>
@@ -1458,7 +1709,8 @@ export default function VacanciesPage() {
                     </div>
                   )}
                 </div>
-              </div>
+              )}
+            </div>
             </div>
           </div>
         </div>
@@ -1617,6 +1869,67 @@ export default function VacanciesPage() {
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '16px' }}>
               <button className="secondary" onClick={() => setShowCloseWarning(false)} style={{ padding: '10px 20px', borderRadius: '12px' }}>Cancel</button>
               <button className="danger" onClick={handleConfirmOverrideClose} style={{ padding: '10px 20px', borderRadius: '12px' }}>Override & Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: DELETE VACANCY CONFIRMATION */}
+      {showDeleteConfirmModal && deleteConfirmVac && (
+        <div className="modal open" style={{ zIndex: 100003, left: 0, background: 'rgba(15, 23, 42, 0.45)', backdropFilter: 'blur(16px)' }}>
+          <div className="modal-box" style={{ width: 'min(480px, 94vw)', padding: '24px 32px', borderRadius: '24px', background: 'white', borderTop: '6px solid #EF4444', boxShadow: '0 24px 60px rgba(0, 0, 0, 0.15)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+              <span style={{ fontSize: '32px' }}>⚠️</span>
+              <h3 style={{ margin: 0, fontSize: '20px', fontWeight: 900, fontFamily: 'var(--font-heading)', color: '#EF4444' }}>Delete Vacancy Posting</h3>
+            </div>
+            
+            <p style={{ margin: '0 0 20px', lineHeight: '1.6', fontSize: '14px', color: 'var(--text)' }}>
+              Are you sure you want to delete the vacancy posting for Item No. <b>{deleteConfirmVac.itemNo}</b>? This action will permanently remove the item from the database. This cannot be undone.
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginBottom: '20px' }}>
+              <div>
+                <label style={{
+                  color: '#991B1B',
+                  fontWeight: '900',
+                  fontSize: '11px',
+                  letterSpacing: '0.06em',
+                  textTransform: 'uppercase',
+                  margin: '0 0 6px',
+                  display: 'block'
+                }}>Enter Passcode to Confirm</label>
+                <input
+                  type="password"
+                  placeholder="Enter 6-digit passcode"
+                  value={deletePasscode}
+                  onChange={e => setDeletePasscode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      handleConfirmDeleteVacancy();
+                    }
+                  }}
+                  style={{
+                    background: 'white',
+                    border: '1.5px solid #D7EEF8',
+                    height: '42px',
+                    borderRadius: '10px',
+                    fontSize: '13px',
+                    width: '100%',
+                    boxSizing: 'border-box',
+                    padding: '0 12px'
+                  }}
+                />
+                {deletePasscodeError && (
+                  <div style={{ color: 'var(--red)', fontSize: '12px', fontWeight: '900', marginTop: '6px' }}>
+                    {deletePasscodeError}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button className="secondary" onClick={() => { setShowDeleteConfirmModal(false); setDeleteConfirmVac(null); }} style={{ padding: '10px 20px', borderRadius: '12px', cursor: 'pointer' }}>Cancel</button>
+              <button className="danger" onClick={handleConfirmDeleteVacancy} style={{ padding: '10px 20px', borderRadius: '12px', cursor: 'pointer' }}>Delete Permanently</button>
             </div>
           </div>
         </div>
