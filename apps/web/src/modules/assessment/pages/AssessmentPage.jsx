@@ -59,7 +59,17 @@ export default function AssessmentPage() {
           console.log('Azure Folder Name:', data.azureFolder);
           console.log('Sample Hash Reference:', data.sampleHash);
           console.log('Retrieved Documents Checklist:', data.documents);
-          setAvailableDocs(data.documents || []);
+          const docs = data.documents || [];
+          setAvailableDocs(docs);
+          const firstUploaded = [
+            { key: 'pds' }, { key: 'work_experience' }, { key: 'eligibility' },
+            { key: 'tor' }, { key: 'prc' }, { key: 'diploma' }, { key: 'resume' }
+          ].find(doc => docs.find(d => d.key === doc.key)?.existsInAzure);
+          if (firstUploaded) {
+            setSelectedDocKey(firstUploaded.key);
+          } else {
+            setSelectedDocKey('');
+          }
         })
         .catch(err => {
           console.error('[Azure Storage Fetch ERROR] Failed to fetch documents:', err);
@@ -1314,43 +1324,53 @@ export default function AssessmentPage() {
                   <h4 style={{ margin: 0, color: 'var(--navy)', fontSize: '14px' }}>Document Checklist</h4>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', background: 'white' }}>
-                  {[
-                    { key: 'pds', label: 'Personal Data Sheet', required: true },
-                    { key: 'work_experience', label: 'Work Experience Sheet', required: true },
-                    { key: 'eligibility', label: 'Certificate of Eligibility', required: true },
-                    { key: 'tor', label: 'Transcript of Records', required: true },
-                    { key: 'prc', label: 'Updated PRC License/ID', required: true },
-                    { key: 'diploma', label: 'Diploma (optional)', required: false },
-                    { key: 'resume', label: 'Resume', required: true },
-                  ].map((doc) => {
-                    const isSelected = selectedDocKey === doc.key;
-                    return (
-                      <div
-                        key={doc.key}
-                        onClick={() => setSelectedDocKey(doc.key)}
-                        style={{
-                          padding: '12px 16px',
-                          cursor: 'pointer',
-                          backgroundColor: isSelected ? 'var(--blue-50)' : 'white',
-                          borderLeft: isSelected ? '4px solid var(--blue-600)' : '4px solid transparent',
-                          borderBottom: '1px solid #F1F5F9',
-                          transition: 'all 0.15s ease',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: '2px'
-                        }}
-                      >
-                        <div style={{ fontWeight: 'bold', fontSize: '13px', color: isSelected ? 'var(--blue-800)' : 'var(--navy)', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                          {doc.label} {doc.required && <span style={{ color: '#EF4444' }}>*</span>}
+                  {(() => {
+                    const uploadedDocsList = [
+                      { key: 'pds', label: 'Personal Data Sheet', required: true },
+                      { key: 'work_experience', label: 'Work Experience Sheet', required: true },
+                      { key: 'eligibility', label: 'Certificate of Eligibility', required: true },
+                      { key: 'tor', label: 'Transcript of Records', required: true },
+                      { key: 'prc', label: 'Updated PRC License/ID', required: true },
+                      { key: 'diploma', label: 'Diploma (optional)', required: false },
+                      { key: 'resume', label: 'Resume', required: true },
+                    ].filter(doc => availableDocs.find(d => d.key === doc.key)?.existsInAzure);
+
+                    if (uploadedDocsList.length === 0) {
+                      return (
+                        <div style={{ padding: '24px 16px', textAlign: 'center', color: '#64748B', fontSize: '13px', fontWeight: 'bold' }}>
+                          No Document Attached
                         </div>
-                        {doc.required && (
+                      );
+                    }
+
+                    return uploadedDocsList.map((doc) => {
+                      const isSelected = selectedDocKey === doc.key;
+                      return (
+                        <div
+                          key={doc.key}
+                          onClick={() => setSelectedDocKey(doc.key)}
+                          style={{
+                            padding: '12px 16px',
+                            cursor: 'pointer',
+                            backgroundColor: isSelected ? 'var(--blue-50)' : 'white',
+                            borderLeft: isSelected ? '4px solid var(--blue-600)' : '4px solid transparent',
+                            borderBottom: '1px solid #F1F5F9',
+                            transition: 'all 0.15s ease',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '2px'
+                          }}
+                        >
+                          <div style={{ fontWeight: 'bold', fontSize: '13px', color: isSelected ? 'var(--blue-800)' : 'var(--navy)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            {doc.label} {doc.required && <span style={{ color: '#EF4444' }}>*</span>} ✓
+                          </div>
                           <div style={{ fontSize: '11px', color: isSelected ? 'var(--blue-600)' : '#64748B' }}>
                             View Uploaded Document
                           </div>
-                        )}
-                      </div>
-                    );
-                  })}
+                        </div>
+                      );
+                    });
+                  })()}
                 </div>
               </div>
 
