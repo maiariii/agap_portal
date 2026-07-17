@@ -669,6 +669,22 @@ export default function VacanciesPage() {
     }
   };
 
+  const handleAddManually = () => {
+    const positionName = "School Counselor Associate I";
+    const positionId = positions.find(p => p.title.toLowerCase() === positionName.toLowerCase())?.id || '';
+    const defaultItem = {
+      itemNo: 'SCA1-00000-2026',
+      title: positionName,
+      positionId: positionId,
+      schoolLevel: '',
+      schoolId: null,
+      schoolName: '',
+      schoolSearchQuery: ''
+    };
+    setDetectedItems([defaultItem]);
+    setSelectedNoscaItemNos([defaultItem.itemNo]);
+  };
+
   const selectCalDate = (iso) => {
     if (calField === 'start') {
       setCalStart(iso);
@@ -1265,6 +1281,9 @@ export default function VacanciesPage() {
                   <button className="gold" onClick={handleScanNOSCA} disabled={noscaScanning} style={{ marginTop: '8px' }}>
                     {noscaScanning ? 'Scanning...' : '↑ Upload NOSCA'}
                   </button>
+                  <button className="secondary" onClick={handleAddManually} disabled={noscaScanning} style={{ marginTop: '4px', width: '100%', maxWidth: '170px' }}>
+                    ✎ Add Manually
+                  </button>
                   <input
                     id="nosca-file-input"
                     type="file"
@@ -1312,25 +1331,47 @@ export default function VacanciesPage() {
                                   id={`nosca-checkbox-${idx}`}
                                 />
                                 <div>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                                    <span className="si-title" style={{ fontSize: '12px', color: 'var(--navy)', fontWeight: '900' }}>{it.title}</span>
-                                    <span style={{ fontSize: '11px', color: 'var(--muted)' }}>(Edit per character below)</span>
-                                    {isInvalid && (
-                                      <span style={{
-                                        fontSize: '10px',
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px', width: '100%' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                                      <span className="si-title" style={{ fontSize: '12px', color: 'var(--navy)', fontWeight: '900' }}>{it.title}</span>
+                                      <span style={{ fontSize: '11px', color: 'var(--muted)' }}>(Edit per character below)</span>
+                                      {isInvalid && (
+                                        <span style={{
+                                          fontSize: '10px',
+                                          background: '#FEF2F2',
+                                          color: '#EF4444',
+                                          border: '1px solid #FCA5A5',
+                                          padding: '1px 6px',
+                                          borderRadius: '6px',
+                                          fontWeight: 'bold',
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: '3px'
+                                        }}>
+                                          ⚠️ Scan Check Needed
+                                        </span>
+                                      )}
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setDetectedItems(prev => prev.filter((_, i) => i !== idx));
+                                        setSelectedNoscaItemNos(prev => prev.filter(x => x !== it.itemNo));
+                                      }}
+                                      style={{
+                                        padding: '2px 8px',
+                                        fontSize: '11px',
+                                        minHeight: 'auto',
+                                        borderRadius: '6px',
                                         background: '#FEF2F2',
                                         color: '#EF4444',
                                         border: '1px solid #FCA5A5',
-                                        padding: '1px 6px',
-                                        borderRadius: '6px',
-                                        fontWeight: 'bold',
-                                        display: 'inline-flex',
-                                        alignItems: 'center',
-                                        gap: '3px'
-                                      }}>
-                                        ⚠️ Scan Check Needed
-                                      </span>
-                                    )}
+                                        cursor: 'pointer',
+                                        fontWeight: 'bold'
+                                      }}
+                                    >
+                                      Remove
+                                    </button>
                                   </div>
                                   <NOSCAItemEditor
                                     itemIndex={idx}
@@ -1370,6 +1411,28 @@ export default function VacanciesPage() {
                       </div>
 
                       <div className="nosca-actions" style={{ marginTop: '14px', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '10px' }}>
+                        <button
+                          type="button"
+                          className="secondary"
+                          style={{ marginRight: 'auto' }}
+                          onClick={() => {
+                            const positionName = "School Counselor Associate I";
+                            const positionId = positions.find(p => p.title.toLowerCase() === positionName.toLowerCase())?.id || '';
+                            const newItem = {
+                              itemNo: `SCA1-0000${detectedItems.length + 1}-2026`,
+                              title: positionName,
+                              positionId: positionId,
+                              schoolLevel: '',
+                              schoolId: null,
+                              schoolName: '',
+                              schoolSearchQuery: ''
+                            };
+                            setDetectedItems(prev => [...prev, newItem]);
+                            setSelectedNoscaItemNos(prev => [...prev, newItem.itemNo]);
+                          }}
+                        >
+                          + Add Item
+                        </button>
                         <button className="secondary" onClick={() => { setDetectedItems([]); setSelectedNoscaItemNos([]); }}>Clear</button>
                         <button className="good" onClick={() => {
                           if (!selectedNoscaItemNos.length) return setToast({ message: 'Please tick at least one item to add', type: 'error' });
