@@ -2209,7 +2209,8 @@ body:has(.sidebar:hover) .modal {
 .compare {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px
+  gap: 10px;
+  margin-bottom: 12px
 }
 
 .compare-box {
