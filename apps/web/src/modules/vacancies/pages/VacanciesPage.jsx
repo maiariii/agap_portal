@@ -8,7 +8,7 @@ function isValidItemNo(itemNo) {
   if (itemNo.toUpperCase().includes('UNKNOWN')) return false;
   if (/\s/.test(itemNo)) return false;
   if (/[a-z]/.test(itemNo)) return false;
-  return /^(?:OSEC-)?[A-Z0-9]+-[A-Z0-9\-]+-[0-9]+-20\d\d$/.test(itemNo);
+  return /^(?:OSEC-)?[A-Z0-9\-]+-[0-9]+-20\d\d$/.test(itemNo);
 }
 
 function isCharInvalidAtIndex(char, index, fullString) {
@@ -676,7 +676,7 @@ export default function VacanciesPage() {
       itemNo: 'SCA1-00000-2026',
       title: positionName,
       positionId: positionId,
-      schoolLevel: '',
+      schoolLevel: 'ES',
       schoolId: null,
       schoolName: '',
       schoolSearchQuery: ''
@@ -1422,7 +1422,7 @@ export default function VacanciesPage() {
                               itemNo: `SCA1-0000${detectedItems.length + 1}-2026`,
                               title: positionName,
                               positionId: positionId,
-                              schoolLevel: '',
+                              schoolLevel: 'ES',
                               schoolId: null,
                               schoolName: '',
                               schoolSearchQuery: ''
