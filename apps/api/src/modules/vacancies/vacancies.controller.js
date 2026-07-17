@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { exec } from 'child_process';
+import pdfParse from 'pdf-parse';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 
@@ -146,48 +147,168 @@ export async function scanNosca(req, res) {
     return res.status(400).json({ error: 'No file data provided' });
   }
 
-  const rootDir = path.resolve(__dirname, '../../../../../');
-  const scannerPath = path.join(rootDir, 'scanner.py');
-  const tempFilename = `temp_${Date.now()}_${fileName || 'nosca.pdf'}`;
-  const tempFilePath = path.join(os.tmpdir(), tempFilename);
-
   try {
     const buffer = Buffer.from(fileData, 'base64');
-    fs.writeFileSync(tempFilePath, buffer);
 
-    const pythonCmd = process.platform === 'win32' ? 'py' : 'python';
-    exec(`${pythonCmd} "${scannerPath}" "${tempFilePath}"`, (error, stdout, stderr) => {
-      try {
-        if (fs.existsSync(tempFilePath)) {
-          fs.unlinkSync(tempFilePath);
+    const results = {
+      serial_no: "UNKNOWN",
+      division: "",
+      school_name: "",
+      items: [],
+      position: "School Counselor Associate I",
+      category: "ELEMENTARY",
+      count: 0,
+      category_breakdown: {
+        ELEMENTARY: [],
+        JHS: [],
+        SHS: [],
+        ALS: []
+      },
+      raw_text: "",
+      ai_powered: false
+    };
+
+    let fullText = "";
+    const categoryItemsMap = {
+      ELEMENTARY: [],
+      JHS: [],
+      SHS: [],
+      ALS: []
+    };
+    const allSeenItems = new Set();
+    const itemPattern = /(?:OSEC[A-Z0-9\-\s]+)?(?:TCH[0-9]|SPET[0-9]?|SST[0-9]|SP[0-9]?|ADO[0-9]?|AO[0-9]?|SCA[0-9]?|PDO[0-9]?)[A-Z0-9\-\s]+20\d\d/g;
+    const fallbackItemPattern = /[A-Z0-9]{2,}\s*[\-\s]\s*[\d]{5,}\s*[\-\s]\s*20\d\d/g;
+
+    let currentPageCat = "ELEMENTARY";
+
+    const pageTexts = [];
+    const options = {
+      pagerender: function(pageData) {
+        return pageData.getTextContent()
+          .then(function(textContent) {
+            let lastY, text = '';
+            for (let item of textContent.items) {
+              if (lastY == item.transform[5] || !lastY){
+                text += item.str;
+              } else {
+                text += '\n' + item.str;
+              }
+              lastY = item.transform[5];
+            }
+            pageTexts.push(text);
+            return text;
+          });
+      }
+    };
+
+    await pdfParse(buffer, options);
+
+    for (const extracted of pageTexts) {
+      fullText += extracted + "\n";
+      const pageLower = extracted.toLowerCase();
+
+      // Determine category for this specific page
+      if (pageLower.includes("senior high school") || pageLower.includes("- shs")) {
+        currentPageCat = "SHS";
+      } else if (pageLower.includes("alternative learning") || pageLower.includes("- als") || pageLower.includes("als ")) {
+        currentPageCat = "ALS";
+      } else if (pageLower.includes("junior high school") || pageLower.includes("high school") || pageLower.includes("national high")) {
+        currentPageCat = "JHS";
+        const schoolMatch = extracted.match(/([A-Za-z\s\n]+?(?:National|Memorial|Integrated|Science|Vocational|City)?\s+High\s+School)/i);
+        if (schoolMatch && !results.school_name) {
+          const rawSchool = schoolMatch[1];
+          const cleanSchool = rawSchool.replace(/\s+/g, " ").trim();
+          results.school_name = cleanSchool;
         }
-      } catch (err) {
-        console.error('Failed to delete temp file:', err);
+      } else if (pageLower.includes("elementary") || pageLower.includes("elem ")) {
+        currentPageCat = "ELEMENTARY";
       }
 
-      if (error) {
-        console.error(`Exec error: ${error}`);
-        return res.status(500).json({ error: `Scanning failed: ${stderr || error.message}` });
+      let itemsFound = extracted.match(itemPattern) || [];
+      if (itemsFound.length === 0) {
+        itemsFound = extracted.match(fallbackItemPattern) || [];
       }
 
-      try {
-        const parsed = JSON.parse(stdout);
-        if (parsed.error) {
-          return res.status(400).json({ error: parsed.error });
+      const cleanItems = itemsFound.map(i => i.replace(/\s+/g, ""));
+      for (const item of cleanItems) {
+        if (!allSeenItems.has(item)) {
+          allSeenItems.add(item);
+          categoryItemsMap[currentPageCat].push(item);
+          results.items.push(item);
         }
-        res.json(parsed);
-      } catch (parseError) {
-        console.error(`Failed to parse scanner output: ${stdout}`);
-        res.status(500).json({ error: 'Failed to parse scanner output' });
       }
-    });
+    }
+
+    results.raw_text = fullText.slice(0, 2000);
+
+    // Perform Smart Regex Extraction for Serial Number & Division
+    try {
+      // 1. Extract Serial Number
+      let serialNo = "UNKNOWN";
+      let snMatch = fullText.match(/N[0O]SCA\s+SER[I1L]AL\s+N[0O]?[A-Z]*(?:[\.\s,:-]*)\s*([0-9-oilsbzg]{3,})/i);
+      if (!snMatch) {
+        snMatch = fullText.match(/SER[I1L]AL\s+N[0O]?[A-Z]*(?:[\.\s,:-]*)\s*([0-9-oilsbzg]{3,})/i);
+      }
+      if (!snMatch) {
+        snMatch = fullText.match(/N[0O]SCA\s+N[0O]?[A-Z]*(?:[\.\s,:-]*)\s*([0-9-oilsbzg]{3,})/i);
+      }
+      if (!snMatch) {
+        snMatch = fullText.match(/([0-9oilsbzg]{6,8}-[0-9oilsbzg]{2}-[0-9oilsbzg]{3})/i);
+      }
+
+      if (snMatch) {
+        const rawSn = snMatch[1];
+        const lookalikeLetters = { 'O': '0', 'I': '1', 'L': '1', 'S': '5', 'B': '8', 'Z': '2', 'G': '6' };
+        const cleanedSn = [...rawSn.toUpperCase()].map(char => lookalikeLetters[char] || char).join("");
+        serialNo = cleanedSn;
+      }
+      results.serial_no = serialNo;
+      results.count = results.items.length;
+
+      // 2. Detect Position (fixed fallback or list matching)
+      let position = "School Counselor Associate I";
+      const posList = ["Teacher I", "Teacher III", "Teacher IV", "Principal I", "AO II", "SCA I", "PDO I"];
+      for (const pos of posList) {
+        if (fullText.toLowerCase().includes(pos.toLowerCase())) {
+          position = pos;
+          break;
+        }
+      }
+      results.position = position;
+
+      // 3. Detect Division
+      const divMatch = fullText.match(/Division\s+of\s+([A-Za-z\s]+?)(?:\s*-\s*|$)/i);
+      if (divMatch) {
+        const divClean = divMatch[1].replace("Senior High School", "").replace("ALS", "").trim();
+        results.division = divClean;
+      }
+
+      // 4. Set Category Breakdown and primary category
+      results.category_breakdown = categoryItemsMap;
+
+      let maxCat = "ELEMENTARY";
+      let maxCount = -1;
+      for (const [cat, items] of Object.entries(categoryItemsMap)) {
+        if (items.length > maxCount) {
+          maxCount = items.length;
+          maxCat = cat;
+        }
+      }
+      if (maxCount > 0) {
+        results.category = maxCat;
+      }
+      results.ai_powered = true;
+    } catch (e) {
+      results.error = e.message;
+    }
+
+    if (results.error) {
+      return res.status(400).json({ error: results.error });
+    }
+
+    res.json(results);
   } catch (error) {
     console.error(error);
-    try {
-      if (fs.existsSync(tempFilePath)) {
-        fs.unlinkSync(tempFilePath);
-      }
-    } catch (_) {}
     res.status(500).json({ error: error.message });
   }
 }
