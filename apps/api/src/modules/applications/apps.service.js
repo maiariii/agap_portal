@@ -13,6 +13,8 @@ export async function getHydratedApplications(vacancyId = null, region = null, d
       ap.years_experience as applicant_years_experience,
       ap.training_hours as applicant_training_hours,
       ap.eligibility as applicant_eligibility,
+      ap.educational_background as applicant_educational_background,
+      ap.civil_service_eligibility as applicant_civil_service_eligibility,
       v.title as vacancy_title,
       v.item_no as vacancy_item_no,
       v.division as vacancy_division,
@@ -91,13 +93,39 @@ export async function getHydratedApplications(vacancyId = null, region = null, d
       }
     }
 
+    let eduBg = [];
+    if (row.applicant_educational_background) {
+      if (typeof row.applicant_educational_background === 'object') {
+        eduBg = row.applicant_educational_background;
+      } else {
+        try { eduBg = JSON.parse(row.applicant_educational_background || '[]'); } catch(e){}
+      }
+    }
+    const collegeBg = Array.isArray(eduBg) ? eduBg.find(e => String(e.level).toUpperCase() === 'COLLEGE') : null;
+    const fallbackDegree = collegeBg ? collegeBg.degree : null;
+    const fallbackMajor = collegeBg ? collegeBg.major || collegeBg.units : null;
+
+    let civilSvc = [];
+    if (row.applicant_civil_service_eligibility) {
+      if (typeof row.applicant_civil_service_eligibility === 'object') {
+        civilSvc = row.applicant_civil_service_eligibility;
+      } else {
+        try { civilSvc = JSON.parse(row.applicant_civil_service_eligibility || '[]'); } catch(e){}
+      }
+    }
+    const fallbackEligibility = Array.isArray(civilSvc) ? civilSvc.map(c => c.eligibility).filter(Boolean).join(', ') : null;
+
+    const bachelorDegree = row.applicant_bachelor_degree || fallbackDegree || '';
+    const major = row.applicant_major || fallbackMajor || '';
+    const eligibility = row.applicant_eligibility || fallbackEligibility || '';
+
     const fitBase = computeFit(
       {
-        bachelorDegree: row.applicant_bachelor_degree,
-        major: row.applicant_major,
+        bachelorDegree: bachelorDegree,
+        major: major,
         yearsExperience: Number(row.applicant_years_experience || 0),
         trainingHours: Number(row.applicant_training_hours || 0),
-        eligibility: row.applicant_eligibility
+        eligibility: eligibility
       },
       {
         id: row.position_id,
@@ -132,7 +160,7 @@ export async function getHydratedApplications(vacancyId = null, region = null, d
       code: row.applicant_code,
       dateApplied: row.date_applied ? new Date(row.date_applied).toISOString().slice(0,10) : "",
       deadline: row.vacancy_posting_end ? new Date(row.vacancy_posting_end).toISOString().slice(0,10) : "",
-      bachelorDegree: row.applicant_bachelor_degree,
+      bachelorDegree: bachelorDegree,
       yearsExperience: Number(row.applicant_years_experience || 0),
       trainingHours: Number(row.applicant_training_hours || 0),
       vacancy: row.vacancy_title || "—",
@@ -155,11 +183,11 @@ export async function getHydratedApplications(vacancyId = null, region = null, d
         name: row.applicant_name,
         code: row.applicant_code,
         localResident: row.applicant_local_resident,
-        bachelorDegree: row.applicant_bachelor_degree,
-        major: row.applicant_major,
+        bachelorDegree: bachelorDegree,
+        major: major,
         yearsExperience: row.applicant_years_experience,
         trainingHours: row.applicant_training_hours,
-        eligibility: row.applicant_eligibility
+        eligibility: eligibility
       },
       vacancyObj: {
         id: row.vacancy_id,
