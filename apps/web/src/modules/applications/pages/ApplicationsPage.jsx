@@ -696,7 +696,7 @@ export default function ApplicationsPage() {
       {/* MODAL: INITIAL EVALUATION REVIEW */}
       {reviewId && reviewApp && (
         <div className="modal open">
-          <div className="modal-box" style={{ padding: '0 24px 24px', maxHeight: '92vh', overflow: 'auto' }}>
+          <div className="modal-box" style={{ width: 'min(960px, 96vw)', padding: '0 24px 24px', maxHeight: '92vh', overflow: 'auto' }}>
             <div className="modal-head" style={{
               paddingTop: '24px',
               paddingBottom: '12px',
@@ -745,10 +745,9 @@ export default function ApplicationsPage() {
                       <td>
                         {reviewApp.applicantObj.bachelorDegree || '—'}
                         {reviewApp.applicantObj.major && (
-                          <>
-                            <br />
-                            <span className="small">{reviewApp.applicantObj.major}</span>
-                          </>
+                          <div className="small" style={{ marginTop: '4px', color: 'var(--muted)', fontSize: '11px', fontWeight: 'normal' }}>
+                            {reviewApp.applicantObj.major}
+                          </div>
                         )}
                       </td>
                       <td>{reviewApp.qsDegree || 'No minimum specified'}</td>
@@ -813,7 +812,7 @@ export default function ApplicationsPage() {
                 </div>
                 <div className="qs-grid">
                   {[
-                    { key: 'crit_degree', label: 'Bachelor\'s Degree', appVal: <>{reviewApp.bachelorDegree}{reviewApp.applicantObj.major && <><br /><span className="small">{reviewApp.applicantObj.major}</span></>}</>, reqVal: reviewApp.qsDegree || 'No minimum specified' },
+                    { key: 'crit_degree', label: 'Bachelor\'s Degree', appVal: <>{reviewApp.bachelorDegree}{reviewApp.applicantObj.major && <div className="small" style={{ marginTop: '4px', color: 'var(--muted)', fontSize: '11px', fontWeight: 'normal' }}>{reviewApp.applicantObj.major}</div>}</>, reqVal: reviewApp.qsDegree || 'No minimum specified' },
                     { key: 'crit_experience', label: 'Years of Experience', appVal: `${reviewApp.yearsExperience} year(s)`, reqVal: reviewApp.qsExperience || '0 minimum year(s)' },
                     { key: 'crit_training', label: 'Hours of Training', appVal: `${reviewApp.trainingHours} hour(s)`, reqVal: reviewApp.qsTraining || '0 minimum hour(s)' },
                     { key: 'crit_eligibility', label: 'Eligibility', appVal: reviewApp.applicantObj.eligibility || '—', reqVal: reviewApp.qsEligibility || 'Not specified' }
