@@ -352,22 +352,8 @@ export default function ApplicationsPage() {
   const docsComplete = Object.values(reviewDocs).every(Boolean);
 
   const isAlreadyQualified = useMemo(() => {
-    if (!reviewApp) return false;
-    const statusLower = reviewApp.status ? reviewApp.status.toLowerCase() : '';
-    const apptLower = (reviewApp.appointmentStatus || reviewApp.appObj?.appointmentStatus || '').toLowerCase();
-    const assessStatus = reviewApp.assessmentStatus || reviewApp.appObj?.assessmentStatus || '';
-    
-    if (apptLower === 'appointed' || apptLower === 'rejected' || apptLower === 'not appointed' || apptLower === 'not_appointed') {
-      return true;
-    }
-    if (assessStatus === 'Assessment Started' || assessStatus === 'Assessment Completed') {
-      return true;
-    }
-    if (statusLower === 'appointed') {
-      return true;
-    }
     return false;
-  }, [reviewApp]);
+  }, []);
 
   const calculatedResult = useMemo(() => {
     const decisions = Object.values(reviewDecisions);

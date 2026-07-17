@@ -634,10 +634,12 @@ export default function App() {
                     <div className="form-group-input-wrapper">
                       <span className="input-icon">🔑</span>
                       <input
-                        type="password"
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={6}
                         value={regPasscode}
-                        onChange={e => setRegPasscode(e.target.value)}
-                        placeholder="Min 4 chars"
+                        onChange={e => setRegPasscode(e.target.value.replace(/\D/g, ''))}
+                        placeholder="6-digit passcode"
                         required
                         style={{ padding: '12px 14px 12px 42px', borderRadius: '12px', border: '1.5px solid rgba(8, 49, 95, 0.15)', background: '#fff', color: 'var(--text)', fontSize: '13.5px', width: '100%' }}
                       />

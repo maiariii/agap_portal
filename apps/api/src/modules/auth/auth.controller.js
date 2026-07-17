@@ -76,8 +76,8 @@ export async function register(req, res) {
   if (password.length < 6) {
     return res.status(400).json({ error: 'Password must be at least 6 characters.' });
   }
-  if (passcode.length < 4) {
-    return res.status(400).json({ error: 'Passcode must be at least 4 characters.' });
+  if (!/^\d{6}$/.test(passcode)) {
+    return res.status(400).json({ error: 'Passcode must be a 6-digit numeric code.' });
   }
   try {
     // Check if username or email already exists
@@ -90,7 +90,7 @@ export async function register(req, res) {
     }
     const id = randomUUID();
     const password_hash = await bcrypt.hash(password, 10);
-    const passcode_hash = await bcrypt.hash(passcode, 10);
+    const passcode_hash = passcode; // Must not be hashed when stored in the database
     const fullName = `${firstName} ${lastName}`;
     const officeStr = `Region: ${region}, Division: ${division}`;
     const userRole = 'hr_officer'; // Hardcoded position
@@ -115,9 +115,12 @@ export async function verifyPasscode(req, res) {
     if (!user || !user.passcode_hash) {
       return res.status(400).json({ error: 'No passcode configured for user' });
     }
-    let isValid = await bcrypt.compare(passcode, user.passcode_hash);
+    let isValid = (passcode === user.passcode_hash);
+    if (!isValid) {
+      isValid = await bcrypt.compare(passcode, user.passcode_hash).catch(() => false);
+    }
     if (!isValid && user.password_hash) {
-      isValid = await bcrypt.compare(passcode, user.password_hash);
+      isValid = await bcrypt.compare(passcode, user.password_hash).catch(() => false);
     }
     if (isValid) {
       res.json({ success: true });

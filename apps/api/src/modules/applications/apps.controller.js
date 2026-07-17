@@ -1,6 +1,7 @@
 import { pool } from '../../config/db.js';
 import { getHydratedApplications } from './apps.service.js';
 import crypto from 'crypto';
+import bcrypt from 'bcryptjs';
 import { BlobServiceClient } from '@azure/storage-blob';
 
 export async function getApplications(req, res) {
@@ -40,16 +41,8 @@ export async function reviewApplication(req, res) {
 
   try {
     const { rows: appRows } = await pool.query('SELECT appointment_status, assessment_status, status FROM applications WHERE id = $1', [id]);
-    const app = appRows[0];
-    if (app) {
-      const apptLower = (app.appointment_status || '').toLowerCase();
-      if (apptLower === 'appointed' || apptLower === 'rejected' || apptLower === 'not appointed' || apptLower === 'not_appointed') {
-        return res.status(400).json({ error: 'Cannot modify evaluation once appointment is recorded.' });
-      }
-      if (app.assessment_status === 'Assessment Started' || app.assessment_status === 'Assessment Completed') {
-        return res.status(400).json({ error: 'Cannot modify evaluation once assessment has started.' });
-      }
-    }
+    // Evaluation locking is disabled
+    const app = null;
 
     const evalId = crypto.randomUUID();
     await pool.query(
@@ -226,8 +219,36 @@ export async function updatePipeline(req, res) {
 
 export async function confirmAppointment(req, res) {
   const { id } = req.params;
-  const { appointmentDate, appointmentReferenceCode } = req.body;
+  const { appointmentDate, passcode } = req.body;
   try {
+    // 1. Verify HRMO passcode
+    if (!passcode) {
+      return res.status(400).json({ error: 'HRMO passcode is required to confirm appointment.' });
+    }
+
+    const { rows: userRows } = await pool.query('SELECT * FROM users WHERE id = $1', [req.user.id]);
+    const user = userRows[0];
+    if (!user || !user.passcode_hash) {
+      return res.status(400).json({ error: 'No passcode configured for your user account.' });
+    }
+
+    let isValid = (passcode === user.passcode_hash);
+    if (!isValid) {
+      isValid = await bcrypt.compare(passcode, user.passcode_hash).catch(() => false);
+    }
+    if (!isValid && user.password_hash) {
+      isValid = await bcrypt.compare(passcode, user.password_hash).catch(() => false);
+    }
+
+    if (!isValid) {
+      return res.status(400).json({ error: 'Invalid passcode. Appointment cannot be confirmed.' });
+    }
+
+    // 2. Autogenerate reference code
+    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const rand = Math.floor(1000 + Math.random() * 9000);
+    const appointmentReferenceCode = `APPT-${today}-${rand}`;
+
     const { rows } = await pool.query(
       `SELECT a.*, v.item_no as vacancy_item_no 
        FROM applications a 
@@ -258,7 +279,7 @@ export async function confirmAppointment(req, res) {
         [
           appointmentDate ? new Date(appointmentDate) : null,
           currentApp.vacancy_item_no,
-          appointmentReferenceCode || null,
+          appointmentReferenceCode,
           id
         ]
       );
@@ -321,7 +342,7 @@ export async function confirmAppointment(req, res) {
       );
     }
 
-    res.json({ success: true, occupied: false });
+    res.json({ success: true, occupied: false, appointmentReferenceCode });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
