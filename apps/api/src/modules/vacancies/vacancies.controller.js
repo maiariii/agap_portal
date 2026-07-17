@@ -154,7 +154,8 @@ export async function scanNosca(req, res) {
     const buffer = Buffer.from(fileData, 'base64');
     fs.writeFileSync(tempFilePath, buffer);
 
-    exec(`python "${scannerPath}" "${tempFilePath}"`, (error, stdout, stderr) => {
+    const pythonCmd = process.platform === 'win32' ? 'py' : 'python';
+    exec(`${pythonCmd} "${scannerPath}" "${tempFilePath}"`, (error, stdout, stderr) => {
       try {
         if (fs.existsSync(tempFilePath)) {
           fs.unlinkSync(tempFilePath);
