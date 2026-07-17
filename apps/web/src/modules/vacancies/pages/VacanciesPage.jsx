@@ -676,7 +676,7 @@ export default function VacanciesPage() {
       itemNo: 'SCA1-00000-2026',
       title: positionName,
       positionId: positionId,
-      schoolLevel: 'ES',
+      schoolLevel: '',
       schoolId: null,
       schoolName: '',
       schoolSearchQuery: ''
@@ -1386,7 +1386,7 @@ export default function VacanciesPage() {
                                         return prev;
                                       });
                                     }}
-                                    schoolLevel={it.schoolLevel || 'ES'}
+                                    schoolLevel={it.schoolLevel || ''}
                                     onSchoolLevelChange={(level) => {
                                       setDetectedItems(prev => prev.map((item, i) => i === idx ? { ...item, schoolLevel: level, schoolId: null, schoolName: '', schoolSearchQuery: '' } : item));
                                     }}
@@ -1422,7 +1422,7 @@ export default function VacanciesPage() {
                               itemNo: `SCA1-0000${detectedItems.length + 1}-2026`,
                               title: positionName,
                               positionId: positionId,
-                              schoolLevel: 'ES',
+                              schoolLevel: '',
                               schoolId: null,
                               schoolName: '',
                               schoolSearchQuery: ''
