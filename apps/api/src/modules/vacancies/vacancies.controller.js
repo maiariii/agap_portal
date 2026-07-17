@@ -151,6 +151,9 @@ export async function scanNosca(req, res) {
 
   try {
     const buffer = Buffer.from(fileData, 'base64');
+    const { PDFParse } = pdfParse;
+    const parser = new PDFParse(new Uint8Array(buffer));
+    const parseResult = await parser.getText();
 
     const results = {
       serial_no: "UNKNOWN",
@@ -170,7 +173,7 @@ export async function scanNosca(req, res) {
       ai_powered: false
     };
 
-    let fullText = "";
+    let fullText = parseResult.text;
     const categoryItemsMap = {
       ELEMENTARY: [],
       JHS: [],
@@ -183,30 +186,8 @@ export async function scanNosca(req, res) {
 
     let currentPageCat = "ELEMENTARY";
 
-    const pageTexts = [];
-    const options = {
-      pagerender: function(pageData) {
-        return pageData.getTextContent()
-          .then(function(textContent) {
-            let lastY, text = '';
-            for (let item of textContent.items) {
-              if (lastY == item.transform[5] || !lastY){
-                text += item.str;
-              } else {
-                text += '\n' + item.str;
-              }
-              lastY = item.transform[5];
-            }
-            pageTexts.push(text);
-            return text;
-          });
-      }
-    };
-
-    await pdfParse(buffer, options);
-
-    for (const extracted of pageTexts) {
-      fullText += extracted + "\n";
+    for (const page of parseResult.pages) {
+      const extracted = page.text;
       const pageLower = extracted.toLowerCase();
 
       // Determine category for this specific page
