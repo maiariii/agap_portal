@@ -491,7 +491,7 @@ export default function AssessmentPage() {
       setQualModalDirty(false);
       setPipeOriginalKey(pipeSelectedKey);
       setShowQualModal(false);
-      setToast({ message: 'Qualified scoring and pipeline stage saved successfully!', type: 'success' });
+      setToast({ message: 'Changes saved successfully!', type: 'success' });
       loadAllData();
     } catch (e) {
       setToast({ message: e.message, type: 'error' });
