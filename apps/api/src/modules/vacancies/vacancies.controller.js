@@ -395,15 +395,29 @@ export async function autocompleteSchools(req, res) {
     return res.json([]);
   }
   try {
-    const queryText = `%${q}%`;
-    const { rows } = await pool.query(
-      `SELECT school_id, school_name 
-       FROM agap_schools 
-       WHERE CAST(school_id AS TEXT) LIKE $1 OR LOWER(school_name) LIKE LOWER($2)
-       ORDER BY school_id 
-       LIMIT 10;`,
-      [queryText, queryText]
-    );
+    const isNumeric = /^\d+$/.test(q);
+    let query;
+    let params;
+
+    if (isNumeric) {
+      // Numerical query: search school_id by prefix match (great for index utilization)
+      query = `SELECT school_id, school_name 
+               FROM agap_schools 
+               WHERE CAST(school_id AS TEXT) LIKE $1
+               ORDER BY school_id 
+               LIMIT 10;`;
+      params = [`${q}%`];
+    } else {
+      // Text query: search school_name using case-insensitive ILIKE
+      query = `SELECT school_id, school_name 
+               FROM agap_schools 
+               WHERE school_name ILIKE $1
+               ORDER BY school_id 
+               LIMIT 10;`;
+      params = [`%${q}%`];
+    }
+
+    const { rows } = await pool.query(query, params);
     res.json(rows.map(r => ({
       schoolId: r.school_id,
       schoolName: r.school_name

@@ -697,6 +697,7 @@ export default function App() {
             <div className="welcome-actions">
               <button className="secondary" onClick={() => { window.agap_tutorial_dismissed = true; setShowWelcome(false); localStorage.setItem("deped_tour_seen", "1"); }}>Skip</button>
               <button className="gold" onClick={startTour}>Show Tutorial</button>
+              <button onClick={() => window.open('https://sebtcheng.github.io/prototypes/agap_guides/agap-hrmo.html', '_blank')}>View Guide</button>
             </div>
           </div>
         )}

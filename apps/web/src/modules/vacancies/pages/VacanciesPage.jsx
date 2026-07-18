@@ -36,8 +36,6 @@ function NOSCAItemEditor({
   onSchoolSearchQueryChange,
   onSchoolSelect
 }) {
-  const chars = value.split('');
-  
   const [searchResults, setSearchResults] = React.useState([]);
   const [showDropdown, setShowDropdown] = React.useState(false);
 
@@ -57,199 +55,45 @@ function NOSCAItemEditor({
     return () => clearTimeout(delayDebounce);
   }, [schoolSearchQuery]);
 
-  const handleCharChange = (charIdx, newVal) => {
-    const char = newVal.slice(-1).toUpperCase();
-    const newChars = [...chars];
-    newChars[charIdx] = char || ' ';
-    const newValue = newChars.join('');
-    onChange(newValue);
-
-    if (char && charIdx < chars.length - 1) {
-      let nextIdx = charIdx + 1;
-      while (nextIdx < chars.length && chars[nextIdx] === '-') {
-        nextIdx++;
-      }
-      if (nextIdx < chars.length) {
-        document.getElementById(`char-input-${itemIndex}-${nextIdx}`)?.focus();
-      }
-    }
-  };
-
-  const handleKeyDown = (charIdx, e) => {
-    if (e.key === 'Backspace') {
-      e.preventDefault();
-      const newChars = [...chars];
-      newChars[charIdx] = ' ';
-      onChange(newChars.join(''));
-
-      let prevIdx = charIdx - 1;
-      while (prevIdx >= 0 && chars[prevIdx] === '-') {
-        prevIdx--;
-      }
-      if (prevIdx >= 0) {
-        document.getElementById(`char-input-${itemIndex}-${prevIdx}`)?.focus();
-      }
-    } else if (e.key === 'ArrowLeft') {
-      e.preventDefault();
-      let prevIdx = charIdx - 1;
-      while (prevIdx >= 0 && chars[prevIdx] === '-') {
-        prevIdx--;
-      }
-      if (prevIdx >= 0) {
-        document.getElementById(`char-input-${itemIndex}-${prevIdx}`)?.focus();
-      }
-    } else if (e.key === 'ArrowRight') {
-      e.preventDefault();
-      let nextIdx = charIdx + 1;
-      while (nextIdx < chars.length && chars[nextIdx] === '-') {
-        nextIdx++;
-      }
-      if (nextIdx < chars.length) {
-        document.getElementById(`char-input-${itemIndex}-${nextIdx}`)?.focus();
-      }
-    }
-  };
-
-  const handlePaste = (e) => {
-    e.preventDefault();
-    const pastedText = e.clipboardData.getData('text').toUpperCase().replace(/\s+/g, '');
-    if (pastedText) {
-      onChange(pastedText);
-    }
-  };
-
-  const handleAddChar = () => {
-    onChange(value + ' ');
-  };
-
-  const handleRemoveChar = () => {
-    if (value.length > 0) {
-      onChange(value.slice(0, -1));
-    }
-  };
-
-  const handleChangePrefixToSca = () => {
-    if (value.includes('-')) {
-      const parts = value.split('-');
-      parts[0] = 'SCAI';
-      onChange(parts.join('-'));
-    } else {
-      onChange('SCAI-' + value);
-    }
-  };
+  const isInvalid = !isValidItemNo(value);
 
   return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px', alignItems: 'center', marginTop: '6px' }}>
-       {chars.map((char, charIdx) => {
-        const isSeparator = char === '-';
-        const isCharInvalid = isCharInvalidAtIndex(char, charIdx, value);
-        return (
-          <input
-            key={charIdx}
-            id={`char-input-${itemIndex}-${charIdx}`}
-            type="text"
-            value={char === ' ' ? '' : char}
-            onChange={(e) => handleCharChange(charIdx, e.target.value)}
-            onKeyDown={(e) => handleKeyDown(charIdx, e)}
-            onPaste={handlePaste}
-            maxLength={1}
-            style={{
-              width: '20px',
-              height: '26px',
-              textAlign: 'center',
-              fontSize: '11px',
-              fontWeight: '900',
-              fontFamily: 'monospace',
-              border: isSeparator ? 'none' : (isCharInvalid ? '1px solid #EF4444' : '1px solid var(--line)'),
-              borderRadius: '4px',
-              background: isSeparator ? 'transparent' : (isCharInvalid ? '#FEF2F2' : '#F8FAFC'),
-              color: isSeparator ? 'var(--muted)' : (isCharInvalid ? '#EF4444' : 'var(--navy)'),
-              outline: 'none',
-              padding: 0,
-              boxShadow: isSeparator ? 'none' : 'inset 0 1px 2px rgba(0,0,0,0.05)'
-            }}
-            disabled={isSeparator}
-          />
-        );
-      })}
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center', marginTop: '6px' }}>
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value.toUpperCase().replace(/\s+/g, ''))}
+        placeholder="Enter Item Number"
+        style={{
+          padding: '4px 10px',
+          fontSize: '12px',
+          fontWeight: '800',
+          fontFamily: 'monospace',
+          border: isInvalid ? '1.5px solid #EF4444' : '1.5px solid var(--line)',
+          borderRadius: '8px',
+          background: isInvalid ? '#FEF2F2' : '#F8FAFC',
+          color: isInvalid ? '#EF4444' : 'var(--navy)',
+          outline: 'none',
+          height: '28px',
+          width: '240px',
+          boxSizing: 'border-box'
+        }}
+      />
       
       <div style={{ display: 'flex', gap: '2px', marginLeft: '4px', alignItems: 'center' }}>
-        <button
-          type="button"
-          onClick={handleAddChar}
-          title="Add character box"
-          style={{
-            padding: '2px 6px',
-            fontSize: '11px',
-            minHeight: '22px',
-            borderRadius: '4px',
-            border: '1px solid var(--line)',
-            background: '#F1F5F9',
-            color: '#475569',
-            cursor: 'pointer',
-            fontWeight: 'bold'
-          }}
-        >
-          +
-        </button>
-        {value.length > 0 && (
-          <button
-            type="button"
-            onClick={handleRemoveChar}
-            title="Remove last box"
-            style={{
-              padding: '2px 6px',
-              fontSize: '11px',
-              minHeight: '22px',
-              borderRadius: '4px',
-              border: '1px solid var(--line)',
-              background: '#F1F5F9',
-              color: '#475569',
-              cursor: 'pointer',
-              fontWeight: 'bold'
-            }}
-          >
-            -
-          </button>
-        )}
-        <button
-          type="button"
-          onClick={handleChangePrefixToSca}
-          title="Convert prefix to SCAI"
-          style={{
-            padding: '0 8px',
-            fontSize: '11px',
-            height: '26px',
-            borderRadius: '4px',
-            border: '1px solid var(--blue)',
-            background: 'var(--blue-50)',
-            color: 'var(--blue-600)',
-            cursor: 'pointer',
-            fontWeight: 'bold',
-            marginLeft: '4px',
-            whiteSpace: 'nowrap',
-            boxSizing: 'border-box',
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center'
-          }}
-        >
-          Use SCAI Prefix
-        </button>
-
         <select
           value={schoolLevel || ''}
           onChange={(e) => onSchoolLevelChange(e.target.value)}
           style={{
             padding: '0 8px',
             fontSize: '11px',
-            height: '26px',
-            borderRadius: '4px',
+            height: '28px',
+            borderRadius: '8px',
             border: '1.5px solid var(--blue)',
             background: 'var(--blue-50)',
             color: 'var(--blue-600)',
             fontWeight: 'bold',
-            marginLeft: '8px',
+            marginLeft: '4px',
             cursor: 'pointer',
             outline: 'none',
             whiteSpace: 'nowrap',
@@ -314,12 +158,15 @@ function NOSCAItemEditor({
                         padding: '6px 8px',
                         fontSize: '11px',
                         cursor: 'pointer',
+                        userSelect: 'none',
                         borderBottom: '1px solid #F1F5F9'
                       }}
-                      onMouseEnter={(e) => e.target.style.background = '#F8FAFC'}
-                      onMouseLeave={(e) => e.target.style.background = 'transparent'}
+                      onMouseEnter={(e) => e.currentTarget.style.background = '#F8FAFC'}
+                      onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                     >
-                      <b>{sch.schoolId}</b> - {sch.schoolName}
+                      <span style={{ pointerEvents: 'none' }}>
+                        <b>{sch.schoolId}</b> - {sch.schoolName}
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -1524,12 +1371,15 @@ export default function VacanciesPage() {
                                     padding: '8px 12px',
                                     fontSize: '11.5px',
                                     cursor: 'pointer',
+                                    userSelect: 'none',
                                     borderBottom: '1px solid #F1F5F9'
                                   }}
-                                  onMouseEnter={(e) => e.target.style.background = '#F8FAFC'}
-                                  onMouseLeave={(e) => e.target.style.background = 'transparent'}
+                                  onMouseEnter={(e) => e.currentTarget.style.background = '#F8FAFC'}
+                                  onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                                 >
-                                  <b>{sch.schoolId}</b> - {sch.schoolName}
+                                  <span style={{ pointerEvents: 'none' }}>
+                                    <b>{sch.schoolId}</b> - {sch.schoolName}
+                                  </span>
                                 </div>
                               ))}
                             </div>
@@ -1585,7 +1435,7 @@ export default function VacanciesPage() {
                                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px', width: '100%' }}>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                                       <span className="si-title" style={{ fontSize: '12px', color: 'var(--navy)', fontWeight: '900' }}>{it.title}</span>
-                                      <span style={{ fontSize: '11px', color: 'var(--muted)' }}>(Edit per character below)</span>
+                                      <span style={{ fontSize: '11px', color: 'var(--muted)' }}>(Edit below)</span>
                                       {isInvalid && (
                                         <span style={{
                                           fontSize: '10px',
