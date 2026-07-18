@@ -100,12 +100,13 @@ def main():
     print("\n[4/5] REMOTE extraction, npm dependencies, and PM2 launch...")
     remote_script = (
         f"cd {REMOTE_ROOT} && "
-        f"pm2 delete {PM2_NAME} 2>/dev/null || true && "
-        f"sudo rm -rf apps packages dist && "
+        f"pm2 stop {PM2_NAME} 2>/dev/null || true && "
+        f"sudo rm -rf apps packages && "
+        f"mkdir -p dist && sudo rm -rf dist/* && "
         f"tar -xzf {ARCHIVE_NAME} && "
         f"sudo chown -R {REMOTE_USER}:{REMOTE_USER} {REMOTE_ROOT} && "
-        # Move web static files to dist/
-        f"mv apps/web/dist dist && "
+        # Move web static files inside dist/ instead of renaming directory (prevents Nginx locks)
+        f"mv apps/web/dist/* dist/ && "
         f"rm -rf apps/web && "
         # Install workspace dependencies in production mode
         f"echo '       → Installing production npm packages...' && "
@@ -113,6 +114,7 @@ def main():
         # Setup directories for logs
         f"mkdir -p apps/api/logs && "
         # Start server with PM2
+        f"pm2 delete {PM2_NAME} 2>/dev/null || true && "
         f"pm2 start {ECOSYSTEM_CONFIG} && "
         f"rm -f {ARCHIVE_NAME}"
     )

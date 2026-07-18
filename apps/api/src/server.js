@@ -37,7 +37,7 @@ app.get('/api/positions', authenticateToken, getPositions);
 // Global Error Handler Middleware
 app.use(errorHandler);
 
-if (process.env.NODE_ENV !== 'production') {
+if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
   app.listen(PORT, () => {
     console.log(`Server listening on port ${PORT}`);
   });
