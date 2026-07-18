@@ -991,6 +991,10 @@ export default function ApplicationsPage() {
                     { key: 'prc', label: 'Updated PRC License/ID', required: true },
                     { key: 'diploma', label: 'Diploma (optional)', required: false },
                     { key: 'resume', label: 'Resume', required: true },
+                    { key: 'performance_rating', label: 'Performance Rating', required: false },
+                    { key: 'training_certificates', label: 'Training Certificates', required: false },
+                    { key: 'application_education', label: 'Application of Education', required: false },
+                    { key: 'application_learning', label: 'Application of Learning and Development', required: false }
                   ].map((doc) => {
                     const isSelected = selectedDocKey === doc.key;
                     const isUploaded = availableDocs.find(d => d.key === doc.key)?.existsInAzure;
@@ -1046,7 +1050,12 @@ export default function ApplicationsPage() {
                       selectedDocKey === 'eligibility' ? 'Certificate of Eligibility' :
                       selectedDocKey === 'tor' ? 'Transcript of Records (TOR)' :
                       selectedDocKey === 'prc' ? 'Updated PRC License/ID' :
-                      selectedDocKey === 'diploma' ? 'Diploma' : 'Resume'
+                      selectedDocKey === 'diploma' ? 'Diploma' :
+                      selectedDocKey === 'resume' ? 'Resume' :
+                      selectedDocKey === 'performance_rating' ? 'Performance Rating' :
+                      selectedDocKey === 'training_certificates' ? 'Training Certificates' :
+                      selectedDocKey === 'application_education' ? 'Application of Education' :
+                      selectedDocKey === 'application_learning' ? 'Application of Learning and Development' : ''
                     }
                   </b>
                   <span style={{ fontSize: '12px', color: 'var(--muted)' }}>Page 1 of 1</span>

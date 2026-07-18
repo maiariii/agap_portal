@@ -3,6 +3,8 @@ import { getHydratedApplications } from './apps.service.js';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { BlobServiceClient } from '@azure/storage-blob';
+import { computeOverallAreaScore } from '@agap/shared';
+
 
 export async function getApplications(req, res) {
   try {
@@ -149,18 +151,7 @@ export async function updatePipeline(req, res) {
       return res.status(400).json({ error: 'Cannot modify assessment once appointment is recorded.' });
     }
 
-    if (assessmentStatus !== undefined) {
-      const statusOrder = {
-        'Assessment Not Started': 1,
-        'Assessment Started': 2,
-        'Assessment Completed': 3
-      };
-      const currentOrder = statusOrder[currentApp.assessment_status] || 0;
-      const newOrder = statusOrder[assessmentStatus] || 0;
-      if (newOrder < currentOrder) {
-        return res.status(400).json({ error: 'Assessment status cannot move backward.' });
-      }
-    }
+    // Removed the backward assessment status check to allow more flexible score modifications
 
     const updatedStatus = status || currentApp.status;
 
@@ -186,6 +177,7 @@ export async function updatePipeline(req, res) {
     await pool.query(appQuery, values);
 
     if (areaScores) {
+      const computedOverallFit = computeOverallAreaScore(areaScores);
       const evalId = crypto.randomUUID();
       await pool.query(
         `INSERT INTO qual_evals (id, application_id, result, overall_fit, degree_score, experience_score, training_score, eligibility_score, area_scores, remarks)
@@ -194,7 +186,7 @@ export async function updatePipeline(req, res) {
           evalId,
           id,
           updatedStatus,
-          overallFit ? parseFloat(overallFit) : null,
+          computedOverallFit,
           areaScores.education ? parseFloat(areaScores.education) : null,
           areaScores.experience ? parseFloat(areaScores.experience) : null,
           areaScores.training ? parseFloat(areaScores.training) : null,
@@ -348,6 +340,80 @@ export async function confirmAppointment(req, res) {
   }
 }
 
+export async function rollbackAppointment(req, res) {
+  const { id } = req.params;
+  const { passcode } = req.body;
+  try {
+    if (!passcode) {
+      return res.status(400).json({ error: 'HRMO passcode is required to rollback appointment.' });
+    }
+
+    const { rows: userRows } = await pool.query('SELECT * FROM users WHERE id = $1', [req.user.id]);
+    const user = userRows[0];
+    if (!user || !user.passcode_hash) {
+      return res.status(400).json({ error: 'No passcode configured for your user account.' });
+    }
+
+    let isValid = (passcode === user.passcode_hash);
+    if (!isValid) {
+      isValid = await bcrypt.compare(passcode, user.passcode_hash).catch(() => false);
+    }
+    if (!isValid && user.password_hash) {
+      isValid = await bcrypt.compare(passcode, user.password_hash).catch(() => false);
+    }
+
+    if (!isValid) {
+      return res.status(400).json({ error: 'Invalid passcode. Appointment cannot be rolled back.' });
+    }
+
+    const { rows } = await pool.query('SELECT vacancy_id FROM applications WHERE id = $1', [id]);
+    const currentApp = rows[0];
+    if (!currentApp) {
+      return res.status(404).json({ error: 'Application not found' });
+    }
+
+    const { vacancy_id } = currentApp;
+
+    await pool.query(
+      `UPDATE vacancies 
+       SET status = 'open', filling_up_status = 'UNFILLED', updated_at = NOW() 
+       WHERE id = $1`,
+      [vacancy_id]
+    );
+
+    const { rows: affectedApps } = await pool.query(
+      `SELECT id, appointment_status FROM applications 
+       WHERE vacancy_id = $1 AND (appointment_status = 'appointed' OR appointment_status = 'not_appointed')`,
+      [vacancy_id]
+    );
+
+    await pool.query(
+      `UPDATE applications 
+       SET appointment_status = NULL, 
+           appointment_date = NULL, 
+           appointment_item_no = NULL, 
+           appointment_reference_code = NULL, 
+           reason = NULL,
+           updated_at = NOW()
+       WHERE vacancy_id = $1`,
+      [vacancy_id]
+    );
+
+    for (const app of affectedApps) {
+      const historyId = crypto.randomUUID();
+      await pool.query(
+        `INSERT INTO application_history (id, application_id, text) VALUES ($1, $2, $3)`,
+        [historyId, app.id, `Appointment rolled back. Previous status: ${app.appointment_status}`]
+      );
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+}
+
+
 export async function getApplicationDocuments(req, res) {
   const { id } = req.params;
   const connString = process.env.AZURE_STORAGE_CONNECTION_STRING;
@@ -377,7 +443,11 @@ export async function getApplicationDocuments(req, res) {
     { key: 'tor', label: 'Transcript of Records', filename: 'AGAP-0001_Transcript_of_Records.pdf', existsInAzure: false },
     { key: 'prc', label: 'Updated PRC License/ID', filename: 'AGAP-0001_Updated_PRC_License_ID.pdf', existsInAzure: false },
     { key: 'diploma', label: 'Diploma (optional)', filename: 'AGAP-0001_Diploma.pdf', existsInAzure: false },
-    { key: 'resume', label: 'Resume', filename: 'AGAP-0001_Resume.pdf', existsInAzure: false }
+    { key: 'resume', label: 'Resume', filename: 'AGAP-0001_Resume.pdf', existsInAzure: false },
+    { key: 'performance_rating', label: 'Performance Rating', filename: 'AGAP-0001_Performance_Rating.pdf', existsInAzure: false },
+    { key: 'training_certificates', label: 'Training Certificates', filename: 'AGAP-0001_Training_Certificates.pdf', existsInAzure: false },
+    { key: 'application_education', label: 'Application of Education', filename: 'AGAP-0001_Application_of_Education.pdf', existsInAzure: false },
+    { key: 'application_learning', label: 'Application of Learning and Development', filename: 'AGAP-0001_Application_of_Learning_and_Development.pdf', existsInAzure: false }
   ];
 
   if (connString && connString !== 'ReplaceWithYourAzureStorageConnectionString') {
@@ -411,6 +481,14 @@ export async function getApplicationDocuments(req, res) {
             } else if (cleanKey === 'diploma' && b.nameLower.includes('diploma')) {
               isForDocType = true;
             } else if (cleanKey === 'resume' && (b.nameLower.includes('resume') || b.nameLower.includes('cv'))) {
+              isForDocType = true;
+            } else if (cleanKey === 'performance_rating' && (b.nameLower.includes('performance') || b.nameLower.includes('rating'))) {
+              isForDocType = true;
+            } else if (cleanKey === 'training_certificates' && (b.nameLower.includes('training') || b.nameLower.includes('certificate'))) {
+              isForDocType = true;
+            } else if (cleanKey === 'application_education' && (b.nameLower.includes('application_education') || b.nameLower.includes('app_education'))) {
+              isForDocType = true;
+            } else if (cleanKey === 'application_learning' && (b.nameLower.includes('application_learning') || b.nameLower.includes('app_learning') || b.nameLower.includes('learning_and_development') || b.nameLower.includes('l&d'))) {
               isForDocType = true;
             }
             
@@ -511,6 +589,14 @@ export async function downloadApplicationDocument(req, res) {
         } else if (cleanKey === 'diploma' && blobNameLower.includes('diploma')) {
           isForDocType = true;
         } else if (cleanKey === 'resume' && (blobNameLower.includes('resume') || blobNameLower.includes('cv'))) {
+          isForDocType = true;
+        } else if (cleanKey === 'performance_rating' && (blobNameLower.includes('performance') || blobNameLower.includes('rating'))) {
+          isForDocType = true;
+        } else if (cleanKey === 'training_certificates' && (blobNameLower.includes('training') || blobNameLower.includes('certificate'))) {
+          isForDocType = true;
+        } else if (cleanKey === 'application_education' && (blobNameLower.includes('application_education') || blobNameLower.includes('app_education'))) {
+          isForDocType = true;
+        } else if (cleanKey === 'application_learning' && (blobNameLower.includes('application_learning') || blobNameLower.includes('app_learning') || blobNameLower.includes('learning_and_development') || blobNameLower.includes('l&d'))) {
           isForDocType = true;
         }
         

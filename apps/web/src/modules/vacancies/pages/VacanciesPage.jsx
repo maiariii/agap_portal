@@ -672,7 +672,7 @@ export default function VacanciesPage() {
     if (!startIso || !endIso) return 0;
     const start = new Date(startIso + "T00:00:00");
     const end = new Date(endIso + "T00:00:00");
-    return Math.max(0, Math.round((end - start) / 86400000) + 1);
+    return Math.max(0, Math.round((end - start) / 86400000));
   };
 
   const getCalSummaryText = () => {

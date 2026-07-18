@@ -23,16 +23,14 @@ export const DOC_REQUIREMENTS = [
 ];
 
 export const SCORE_AREAS = [
-  { key: "education", label: "Education", description: "Match between applicant degree/education and required education, based on the prescribed scoring mechanism and increments table." },
-  { key: "experience", label: "Experience", description: "Match between work experience and required years/type of experience, based on the prescribed scoring mechanism and increments table." },
-  { key: "training", label: "Training", description: "Match between completed training and required training hours/topics, based on the prescribed scoring mechanism and increments table." },
-  { key: "eligibility", label: "Eligibility", description: "Match between license, eligibility, or certification and the position requirement based on the submitted MOV for eligibility." },
-  { key: "outstandingAccomplishment", label: "Outstanding Accomplishment", description: "Score based on submitted proofs of outstanding accomplishments under the prescribed criteria." },
-  { key: "documentCompleteness", label: "Document Completeness", description: "Whether required credentials and files are complete, with corresponding scores under the prescribed criteria." },
-  { key: "applicationEducation", label: "Application of Education", description: "Score based on the application of education to the role under the prescribed criteria." },
-  { key: "applicationLearning", label: "Application of Learning and Development", description: "Score based on the application of learning and development under the prescribed criteria." },
-  { key: "performanceRating", label: "Performance Rating", description: "Score based on the applicable performance-rating mechanism and criteria." },
-  { key: "potential", label: "Potential", description: "Measured using other evaluative assessments such as WST, WE, and BEI." }
+  { key: "education", label: "Education", max: 10, description: "Match between applicant degree/education and required education, based on the prescribed scoring mechanism and increments table." },
+  { key: "experience", label: "Experience", max: 10, description: "Match between work experience and required years/type of experience, based on the prescribed scoring mechanism and increments table." },
+  { key: "training", label: "Training", max: 10, description: "Match between completed training and required training hours/topics, based on the prescribed scoring mechanism and increments table." },
+  { key: "outstandingAccomplishment", label: "Outstanding Accomplishment", max: 10, description: "Score based on submitted proofs of outstanding accomplishments under the prescribed criteria." },
+  { key: "applicationEducation", label: "Application of Education", max: 10, description: "Score based on the application of education to the role under the prescribed criteria." },
+  { key: "applicationLearning", label: "Application of Learning and Development", max: 10, description: "Score based on the application of learning and development under the prescribed criteria." },
+  { key: "performanceRating", label: "Performance Rating", max: 20, description: "Score based on the applicable performance-rating mechanism and criteria." },
+  { key: "potential", label: "Potential", max: 20, description: "Measured using other evaluative assessments such as WST, WE, and BEI." }
 ];
 
 export const columns = [
@@ -104,8 +102,14 @@ export function scoreTone(score) {
 }
 
 export function computeOverallAreaScore(scores) {
-  const values = Object.values(scores).filter(v => v !== "" && Number.isFinite(Number(v)));
-  return values.length ? Number((values.reduce((sum, v) => sum + Number(v), 0) / values.length).toFixed(2)) : 0;
+  let sum = 0;
+  for (const area of SCORE_AREAS) {
+    const val = scores[area.key];
+    if (val !== "" && val !== null && val !== undefined && Number.isFinite(Number(val))) {
+      sum += Number(val);
+    }
+  }
+  return Number(sum.toFixed(2));
 }
 
 export function cls(s) {

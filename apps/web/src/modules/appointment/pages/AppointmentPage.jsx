@@ -1,8 +1,11 @@
 import React, { useState, useMemo } from 'react';
 import { useAppData } from '../../../middleware/DataProvider.jsx';
+import { useToast } from '../../../middleware/ToastProvider.jsx';
+import { apiFetch } from '../../../config/api.js';
 
 export default function AppointmentPage() {
-  const { vacancies, applications } = useAppData();
+  const { vacancies, applications, loadAllData } = useAppData();
+  const { setToast } = useToast();
 
   const [apptSearch, setApptSearch] = useState('');
   const [apptColFilters, setApptColFilters] = useState({});
@@ -10,6 +13,10 @@ export default function AppointmentPage() {
   const [apptSortDir, setApptSortDir] = useState('asc');
   const [apptPage, setApptPage] = useState(1);
   const [apptPageSize, setAppPageSize] = useState(10);
+
+  const [rollbackApp, setRollbackApp] = useState(null);
+  const [rollbackPasscode, setRollbackPasscode] = useState('');
+  const [showRollbackConfirmModal, setShowRollbackConfirmModal] = useState(false);
 
   const [unapptColFilters, setUnapptColFilters] = useState({});
   const [unapptSortKey, setUnapptSortKey] = useState('');
@@ -191,6 +198,25 @@ SDO Manila, Department of Education
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+  };
+
+  const handleRollbackAppointment = async (app, passcode) => {
+    if (!passcode) {
+      return setToast({ message: 'HRMO passcode is required.', type: 'error' });
+    }
+    try {
+      await apiFetch(`/api/applications/${app.id}/rollback-appointment`, {
+        method: 'POST',
+        body: JSON.stringify({ passcode })
+      });
+      setToast({ message: 'Appointment rolled back successfully!', type: 'success' });
+      setShowRollbackConfirmModal(false);
+      setRollbackApp(null);
+      setRollbackPasscode('');
+      loadAllData();
+    } catch (e) {
+      setToast({ message: e.message, type: 'error' });
+    }
   };
 
   const appointmentKpiStats = useMemo(() => {
@@ -395,13 +421,27 @@ SDO Manila, Department of Education
                     <td><span className="small">{r.appointmentDate ? r.appointmentDate.slice(0, 10) : ''}</span></td>
                     <td>
                       {isAppointed ? (
-                        <button
-                          className="good"
-                          onClick={() => handleDownloadNoticeOfAppointment(r)}
-                          style={{ padding: '6px 12px', fontSize: '12px', borderRadius: '8px', fontWeight: 'bold', fontFamily: 'var(--font-heading)' }}
-                        >
-                          Notice of Appointment
-                        </button>
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <button
+                            className="good"
+                            onClick={() => handleDownloadNoticeOfAppointment(r)}
+                            style={{ padding: '6px 12px', fontSize: '12px', borderRadius: '8px', fontWeight: 'bold', fontFamily: 'var(--font-heading)' }}
+                          >
+                            Notice of Appointment
+                          </button>
+                          <button
+                            className="danger"
+                            onClick={() => {
+                              setRollbackApp(r);
+                              setRollbackPasscode('');
+                              setShowRollbackConfirmModal(true);
+                            }}
+                            style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '32px', height: '32px', padding: '0', fontSize: '18px', borderRadius: '8px', fontWeight: 'bold', fontFamily: 'var(--font-heading)' }}
+                            title="Withdraw Appointment"
+                          >
+                            ↺
+                          </button>
+                        </div>
                       ) : '—'}
                     </td>
                   </tr>
@@ -608,6 +648,44 @@ SDO Manila, Department of Education
           </div>
         </div>
       </div>
+      {/* MODAL: ROLLBACK APPOINTMENT CONFIRMATION */}
+      {showRollbackConfirmModal && rollbackApp && (
+        <div className="modal open" style={{ zIndex: 1000 }}>
+          <div className="modal-box" style={{ width: 'min(500px, 94vw)' }}>
+            <div className="modal-head">
+              <h3>Withdraw Appointment — {rollbackApp.applicant}</h3>
+            </div>
+            <div style={{ padding: '0 20px' }}>
+              <p className="small" style={{ marginTop: '8px' }}>
+                You are about to withdraw the appointment for <b>{rollbackApp.applicant}</b>. This will return the applicant and all other candidates for the item number (<b>{rollbackApp.itemNo || '—'}</b>) back to the comparative assessment pool, restoring their assessment states and scores.
+              </p>
+            </div>
+            <div className="modal-body" style={{ margin: '16px 0', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div>
+                  <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '6px' }}>Confirm with HRMO Passcode</label>
+                  <input
+                    type="password"
+                    value={rollbackPasscode}
+                    onChange={e => setRollbackPasscode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    placeholder="Enter 6-digit passcode"
+                    style={{ width: '100%', height: '40px', padding: '0 8px', borderRadius: '8px', border: '1px solid var(--line)', boxSizing: 'border-box' }}
+                  />
+                </div>
+              </div>
+            </div>
+            <div className="decision-row" style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button className="secondary" onClick={() => { setShowRollbackConfirmModal(false); setRollbackApp(null); setRollbackPasscode(''); }}>Cancel</button>
+              <button 
+                className="good" 
+                onClick={() => handleRollbackAppointment(rollbackApp, rollbackPasscode)}
+              >
+                Withdraw Appointment
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

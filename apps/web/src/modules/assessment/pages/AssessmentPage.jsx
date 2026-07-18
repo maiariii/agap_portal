@@ -360,10 +360,9 @@ export default function AssessmentPage() {
     const compChecks = [csObj.bei, csObj.wst, csObj.we].map(hasValue);
     const compCount = compChecks.filter(Boolean).length;
     
-    const areaChecks = Object.values(areaScores).map(hasValue);
-    const areaCount = areaChecks.filter(Boolean).length;
+    const areaCount = SCORE_AREAS.filter(sa => hasValue(areaScores[sa.key])).length;
     
-    if (areaCount === 10 && compCount === 3) return { label: 'Assessment Completed', badge: 'green' };
+    if (areaCount === SCORE_AREAS.length && compCount === 3) return { label: 'Assessment Completed', badge: 'green' };
     if (areaCount > 0 || compCount > 0) return { label: 'Assessment Started', badge: 'orange' };
     return { label: 'Assessment Not Started', badge: 'blue' };
   };
@@ -464,15 +463,13 @@ export default function AssessmentPage() {
     const overall = allAreasScored ? computeOverallAreaScore(modalAreaScores) : null;
     const nextStatus = ['qualified', 'Qualified', 'ier_posted'].includes(pipeSelectedKey) ? 'Qualified' : 'for_comparative_assessment';
 
-    // Calculate computed assessment status based on updated scores
     const hasValue = v => v !== "" && v !== null && v !== undefined && Number.isFinite(Number(v));
-    const areaChecks = Object.values(modalAreaScores).map(hasValue);
-    const areaCount = areaChecks.filter(Boolean).length;
+    const areaCount = SCORE_AREAS.filter(sa => hasValue(modalAreaScores[sa.key])).length;
     const compChecks = [modalCompScores.bei, modalCompScores.wst, modalCompScores.we].map(hasValue);
     const compCount = compChecks.filter(Boolean).length;
 
     let computedAssessmentStatus = 'Assessment Not Started';
-    if (areaCount === 10 && compCount === 3) {
+    if (areaCount === SCORE_AREAS.length && compCount === 3) {
       computedAssessmentStatus = 'Assessment Completed';
     } else if (areaCount > 0 || compCount > 0) {
       computedAssessmentStatus = 'Assessment Started';
@@ -510,7 +507,20 @@ export default function AssessmentPage() {
 
   const handleAreaScoreChange = (key, val) => {
     setModalAreaScores(prev => {
-      const updated = { ...prev, [key]: val === '' ? '' : Math.max(0, Math.min(100, Number(val))) };
+      const area = SCORE_AREAS.find(a => a.key === key);
+      const maxVal = area && area.max !== undefined ? area.max : 100;
+      let finalVal = val;
+      if (val !== '') {
+        const num = Number(val);
+        if (!isNaN(num)) {
+          if (num > maxVal) {
+            finalVal = maxVal.toString();
+          } else if (num < 0) {
+            finalVal = '0';
+          }
+        }
+      }
+      const updated = { ...prev, [key]: finalVal };
       setQualModalDirty(true);
       return updated;
     });
@@ -543,8 +553,8 @@ export default function AssessmentPage() {
     }
   };
 
-  const scoredAreaCount = Object.values(modalAreaScores).filter(v => v !== '' && v !== null && v !== undefined).length;
-  const allAreasScored = scoredAreaCount === 10;
+  const scoredAreaCount = SCORE_AREAS.filter(sa => modalAreaScores[sa.key] !== '' && modalAreaScores[sa.key] !== null && modalAreaScores[sa.key] !== undefined).length;
+  const allAreasScored = scoredAreaCount === SCORE_AREAS.length;
   const overallScorefit = allAreasScored ? computeOverallAreaScore(modalAreaScores) : 0;
   const overallTone = scoreTone(overallScorefit);
 
@@ -674,7 +684,7 @@ export default function AssessmentPage() {
                 </th>
                 <th className="num-col">
                   <button className="th-btn" onClick={() => handleQualSort('fit')}>
-                    Average Score{getQualSortIndicator('fit')}
+                    Overall Score{getQualSortIndicator('fit')}
                   </button>
                   <div className="column-filter-range">
                     <input
@@ -798,8 +808,9 @@ export default function AssessmentPage() {
                 
                 const areaScores = r.latestEval?.areaScores || {};
                 const hasValue = v => v !== "" && v !== null && v !== undefined && Number.isFinite(Number(v));
-                const areaCount = Object.values(areaScores).map(hasValue).filter(Boolean).length;
-                const allAreasScored = areaCount === 10;
+                const areaCount = Object.keys(areaScores).filter(k => SCORE_AREAS.some(sa => sa.key === k)).map(k => hasValue(areaScores[k])).filter(Boolean).length;
+                const allAreasScored = areaCount === SCORE_AREAS.length;
+
 
                 const fmtScore = (v) => (v !== '' && v !== null && v !== undefined && Number.isFinite(Number(v))) ? (
                   <span className={`badge ${Number(v) >= 85 ? 'green' : Number(v) >= 70 ? 'blue' : Number(v) >= 50 ? 'orange' : 'red'}`}>
@@ -852,7 +863,7 @@ export default function AssessmentPage() {
                     <td className="num-col">
                       {allAreasScored && r.fit !== null && r.fit !== undefined ? (
                         <span className={`badge ${r.fit >= 85 ? 'green' : r.fit >= 70 ? 'blue' : r.fit >= 50 ? 'orange' : 'red'}`}>
-                          {Number(r.fit).toFixed(2)}%
+                          {Number(r.fit).toFixed(2)}
                         </span>
                       ) : '—'}
                     </td>
@@ -995,11 +1006,6 @@ export default function AssessmentPage() {
                           <td style={{ padding: '12px 8px' }}>{selectedQualApp.trainingHours} hour(s)</td>
                           <td style={{ padding: '12px 8px' }}>{selectedQualApp.positionObj?.minTrainingHours || 0} minimum hour(s)</td>
                         </tr>
-                        <tr style={{ borderBottom: '1px solid var(--line)' }}>
-                          <td style={{ padding: '12px 8px' }}>Eligibility</td>
-                          <td style={{ padding: '12px 8px' }}>{selectedQualApp.applicantObj?.eligibility || '—'}</td>
-                          <td style={{ padding: '12px 8px' }}>{selectedQualApp.positionObj?.eligibilityRequired || 'Not specified'}</td>
-                        </tr>
                       </tbody>
                     </table>
                   </div>
@@ -1015,8 +1021,8 @@ export default function AssessmentPage() {
                   </div>
                   <div className="qs-matrix-summary" style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
                     <div className={`qs-score-card ${allAreasScored ? overallTone.color : ''}`} style={{ padding: '12px 20px', border: '2px solid var(--line)', borderRadius: '16px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-                      <span className="qs-score-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 800 }}>Overall Scorefit</span>
-                      <span className="qs-score-value" style={{ fontSize: '24px', fontWeight: 900, color: 'var(--navy)' }}>{allAreasScored ? `${overallScorefit.toFixed(2)}%` : '—'}</span>
+                      <span className="qs-score-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 800 }}>Overall Score</span>
+                      <span className="qs-score-value" style={{ fontSize: '24px', fontWeight: 900, color: 'var(--navy)' }}>{allAreasScored ? `${overallScorefit.toFixed(2)}` : '—'}</span>
                       <span className="qs-score-caption" style={{ fontSize: '11px', color: 'var(--muted)' }}>{allAreasScored ? 'All areas scored' : `${scoredAreaCount} of ${SCORE_AREAS.length} area(s) scored`}</span>
                     </div>
                     <button
@@ -1039,14 +1045,14 @@ export default function AssessmentPage() {
                           <input
                             type="number"
                             min="0"
-                            max="100"
+                            max={area.max !== undefined ? area.max : 100}
                             step="0.01"
                             value={modalAreaScores[area.key] ?? ''}
                             onChange={e => handleAreaScoreChange(area.key, e.target.value)}
-                            placeholder="0.00 - 100.00"
+                            placeholder={area.max !== undefined ? `0.00 - ${area.max.toFixed(2)}` : "0.00 - 100.00"}
                             style={{ height: '50px', textAlign: 'center', fontFamily: 'var(--font-heading)', fontSize: '24px', fontWeight: 950, border: '2.5px solid var(--blue-600)', background: 'white', boxShadow: '0 8px 18px rgba(2,132,199,.08)', width: '100%', boxSizing: 'border-box', borderRadius: '8px' }}
                           />
-                          <div className="small" style={{ marginTop: '8px', fontWeight: 800 }}>Enter a score from 0.00 to 100.00</div>
+                          <div className="small" style={{ marginTop: '8px', fontWeight: 800 }}>Enter a score from 0.00 to {area.max !== undefined ? area.max.toFixed(2) : "100.00"}</div>
                         </div>
                       </div>
                     ))}
@@ -1340,6 +1346,10 @@ export default function AssessmentPage() {
                     { key: 'prc', label: 'Updated PRC License/ID', required: true },
                     { key: 'diploma', label: 'Diploma (optional)', required: false },
                     { key: 'resume', label: 'Resume', required: true },
+                    { key: 'performance_rating', label: 'Performance Rating', required: false },
+                    { key: 'training_certificates', label: 'Training Certificates', required: false },
+                    { key: 'application_education', label: 'Application of Education', required: false },
+                    { key: 'application_learning', label: 'Application of Learning and Development', required: false }
                   ].map((doc) => {
                     const isSelected = selectedDocKey === doc.key;
                     const isUploaded = availableDocs.find(d => d.key === doc.key)?.existsInAzure;
@@ -1395,7 +1405,12 @@ export default function AssessmentPage() {
                       selectedDocKey === 'eligibility' ? 'Certificate of Eligibility' :
                       selectedDocKey === 'tor' ? 'Transcript of Records (TOR)' :
                       selectedDocKey === 'prc' ? 'Updated PRC License/ID' :
-                      selectedDocKey === 'diploma' ? 'Diploma' : 'Resume'
+                      selectedDocKey === 'diploma' ? 'Diploma' :
+                      selectedDocKey === 'resume' ? 'Resume' :
+                      selectedDocKey === 'performance_rating' ? 'Performance Rating' :
+                      selectedDocKey === 'training_certificates' ? 'Training Certificates' :
+                      selectedDocKey === 'application_education' ? 'Application of Education' :
+                      selectedDocKey === 'application_learning' ? 'Application of Learning and Development' : ''
                     }
                   </b>
                   <span style={{ fontSize: '12px', color: 'var(--muted)' }}>Page 1 of 1</span>
