@@ -29,6 +29,17 @@ const degreePool = [
 ];
 
 async function main() {
+  if (!process.argv.includes('--force-destructive-reset')) {
+    console.error("=========================================================================");
+    console.error("ERROR: SEED SCRIPT IS RUNNING IN DESTRUCTIVE MODE!");
+    console.error("This script drops and truncates all database tables, deleting active data.");
+    console.error("To proceed, you must execute the script with the explicit safety flag:");
+    console.error("  node src/db/seed.js --force-destructive-reset");
+    console.error("  or: npm run db:seed -- --force-destructive-reset");
+    console.error("=========================================================================");
+    process.exit(1);
+  }
+
   console.log("Connecting to PostgreSQL database...");
   const pool = new pg.Pool({
     connectionString: process.env.DATABASE_URL,

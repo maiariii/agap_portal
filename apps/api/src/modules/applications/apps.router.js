@@ -5,6 +5,7 @@ import {
   postIer,
   updatePipeline,
   confirmAppointment,
+  flagAppointment,
   rollbackAppointment,
   getApplicationDocuments,
   downloadApplicationDocument
@@ -20,6 +21,7 @@ router.post('/:id/review', authenticateToken, reviewApplication);
 router.post('/post-ier', authenticateToken, postIer);
 router.put('/:id/pipeline', authenticateToken, updatePipeline);
 router.post('/:id/appointment', authenticateToken, confirmAppointment);
+router.post('/:id/flag-appointment', authenticateToken, flagAppointment);
 router.post('/:id/rollback-appointment', authenticateToken, rollbackAppointment);
 
 export default router;

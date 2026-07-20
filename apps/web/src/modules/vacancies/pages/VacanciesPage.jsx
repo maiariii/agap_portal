@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { useAppData } from '../../../middleware/DataProvider.jsx';
 import { useToast } from '../../../middleware/ToastProvider.jsx';
 import { apiFetch } from '../../../config/api.js';
+import VacancyClusterAccordion from '../../../components/VacancyClusterAccordion.jsx';
 
 function isValidItemNo(itemNo) {
   if (!itemNo) return false;
@@ -743,7 +744,7 @@ export default function VacanciesPage() {
       <div className="card">
         <h2>Vacancy Postings</h2>
         <div className="table-wrap">
-          <table style={{ minWidth: '1000px' }}>
+          <table style={{ width: '100%', tableLayout: 'fixed' }}>
             <thead>
               <tr>
                 <th className="row-num">No.</th>
@@ -787,33 +788,7 @@ export default function VacanciesPage() {
                     }}
                   />
                 </th>
-                <th className="num-col">
-                  <button className="th-btn" onClick={() => handleVSortClick('applications')}>Applications {vSortKey === 'applications' ? (vSortDir === 'asc' ? '▲' : '▼') : ''}</button>
-                  <div className="column-filter-range" style={{ display: 'flex', gap: '4px' }}>
-                    <input
-                      className="column-filter"
-                      type="number"
-                      placeholder="Min"
-                      value={vColumnFilters.applications?.min || ''}
-                      onChange={e => {
-                        const current = vColumnFilters.applications || {};
-                        setVColumnFilters({ ...vColumnFilters, applications: { ...current, min: e.target.value } });
-                        setVacPage(1);
-                      }}
-                    />
-                    <input
-                      className="column-filter"
-                      type="number"
-                      placeholder="Max"
-                      value={vColumnFilters.applications?.max || ''}
-                      onChange={e => {
-                        const current = vColumnFilters.applications || {};
-                        setVColumnFilters({ ...vColumnFilters, applications: { ...current, max: e.target.value } });
-                        setVacPage(1);
-                      }}
-                    />
-                  </div>
-                </th>
+
                 <th>
                   <button className="th-btn" onClick={() => handleVSortClick('deadline')}>Deadline {vSortKey === 'deadline' ? (vSortDir === 'asc' ? '▲' : '▼') : ''}</button>
                   <input
@@ -887,79 +862,98 @@ export default function VacanciesPage() {
               </tr>
             </thead>
             <tbody>
-              {paginatedVacancies.map((vac, idx) => {
-                const appCount = applications.filter(a => a.vacancyId === vac.jobClusterId).length;
-                const today = new Date();
-                today.setHours(0, 0, 0, 0);
-                const start = vac.postingStart ? new Date(vac.postingStart.slice(0, 10) + "T00:00:00") : null;
-                const end = vac.postingEnd ? new Date(vac.postingEnd.slice(0, 10) + "T00:00:00") : null;
-                const isClosed = vac.status === 'closed' || (start && today < start) || (end && today > end);
-                const deadlinePast = end ? end < today : false;
-                
-                let drText = 'N/A';
-                let drColor = 'var(--muted)';
-                if (!isClosed && end) {
-                  const rem = Math.round((end - today) / 86400000) + 1;
-                  drText = String(rem);
-                  drColor = rem <= 1 ? 'var(--red)' : rem <= 3 ? 'var(--amber)' : 'var(--green)';
+              {(() => {
+                const grouped = {};
+                paginatedVacancies.forEach(vac => {
+                  const title = positions.find(p => p.id === vac.positionId)?.title || vac.title || 'Unassigned';
+                  if (!grouped[title]) grouped[title] = [];
+                  grouped[title].push(vac);
+                });
+                if (paginatedVacancies.length === 0) {
+                  return (
+                    <tr>
+                      <td colSpan={9} style={{ textAlign: 'center' }}>No vacancies match the filters.</td>
+                    </tr>
+                  );
                 }
+                return Object.entries(grouped).map(([clusterName, items]) => (
+                  <VacancyClusterAccordion key={clusterName} title={clusterName} colSpan={9}>
+                    {items.map((vac, idx) => {
+                      const appCount = applications.filter(a => a.vacancyId === vac.jobClusterId).length;
+                      const today = new Date();
+                      today.setHours(0, 0, 0, 0);
+                      const start = vac.postingStart ? new Date(vac.postingStart.slice(0, 10) + "T00:00:00") : null;
+                      const end = vac.postingEnd ? new Date(vac.postingEnd.slice(0, 10) + "T00:00:00") : null;
+                      const isClosed = vac.status === 'closed' || (start && today < start) || (end && today > end);
+                      const deadlinePast = end ? end < today : false;
+                      
+                      let drText = 'N/A';
+                      let drColor = 'var(--muted)';
+                      if (!isClosed && end) {
+                        const rem = Math.round((end - today) / 86400000) + 1;
+                        drText = String(rem);
+                        drColor = rem <= 1 ? 'var(--red)' : rem <= 3 ? 'var(--amber)' : 'var(--green)';
+                      }
 
-                const appCountColor = appCount === 0 ? 'var(--red)' : 'var(--navy)';
-                const deadlineColor = deadlinePast ? 'var(--red)' : 'var(--text)';
+                      const appCountColor = appCount === 0 ? 'var(--red)' : 'var(--navy)';
+                      const deadlineColor = deadlinePast ? 'var(--red)' : 'var(--text)';
 
-                return (
-                  <tr key={vac.id}>
-                    <td className="row-num">{(vacPage - 1) * vacPageSize + idx + 1}</td>
-                    <td><b>{vac.itemNo}</b></td>
-                    <td>{positions.find(p => p.id === vac.positionId)?.title || vac.title}</td>
-                    <td>{vac.school || 'Division Pool'}</td>
-                    <td className="num-col"><span className="qs-number" style={{ color: appCountColor }}>{appCount}</span></td>
-                    <td><span className="qs-number" style={{ color: deadlineColor }}>{vac.postingEnd ? vac.postingEnd.slice(0, 10) : '—'}</span></td>
-                    <td className="num-col"><span className="qs-number" style={{ color: drColor }}>{drText}</span></td>
-                    <td><span className={`badge ${isClosed ? 'gray' : 'green'}`}>{isClosed ? 'Closed' : 'Open for Application'}</span></td>
-                    <td>
-                      <span className={`badge ${vac.fillingUpStatus === 'FILLED' ? 'filled-status' : 'unfilled-status'}`}>
-                        {vac.fillingUpStatus || 'UNFILLED'}
-                      </span>
-                    </td>
-                    <td style={{ display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'center' }}>
-                      <button 
-                        className={`vac-action ${vac.fillingUpStatus === 'FILLED' ? 'incomplete' : (isClosed ? 'good' : 'danger')}`} 
-                        onClick={() => handleToggleVacancy(vac)}
-                        disabled={vac.fillingUpStatus === 'FILLED'}
-                        style={vac.fillingUpStatus === 'FILLED' ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
-                      >
-                        {isClosed ? 'Open' : 'Close'}
-                      </button>
-                      <button
-                        onClick={() => handleInitiateDeleteVacancy(vac)}
-                        title="Delete vacancy"
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          cursor: 'pointer',
-                          color: '#EF4444',
-                          padding: '6px',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          borderRadius: '6px',
-                          transition: 'background-color 0.2s'
-                        }}
-                        onMouseOver={e => e.currentTarget.style.backgroundColor = '#FEE2E2'}
-                        onMouseOut={e => e.currentTarget.style.backgroundColor = 'transparent'}
-                      >
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <polyline points="3 6 5 6 21 6"></polyline>
-                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                          <line x1="10" y1="11" x2="10" y2="17"></line>
-                          <line x1="14" y1="11" x2="14" y2="17"></line>
-                        </svg>
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
+                      return (
+                        <tr key={vac.id}>
+                          <td className="row-num">{(vacPage - 1) * vacPageSize + idx + 1}</td>
+                          <td><b>{vac.itemNo}</b></td>
+                          <td>{positions.find(p => p.id === vac.positionId)?.title || vac.title}</td>
+                          <td>{vac.school || 'Division Pool'}</td>
+
+                          <td><span className="qs-number" style={{ color: deadlineColor }}>{vac.postingEnd ? vac.postingEnd.slice(0, 10) : '—'}</span></td>
+                          <td className="num-col"><span className="qs-number" style={{ color: drColor }}>{drText}</span></td>
+                          <td><span className={`badge ${isClosed ? 'gray' : 'green'}`}>{isClosed ? 'Closed' : 'Open for Application'}</span></td>
+                          <td>
+                            <span className={`badge ${vac.fillingUpStatus === 'FILLED' ? 'filled-status' : 'unfilled-status'}`}>
+                              {vac.fillingUpStatus || 'UNFILLED'}
+                            </span>
+                          </td>
+                          <td style={{ display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'center' }}>
+                            <button 
+                              className={`vac-action ${vac.fillingUpStatus === 'FILLED' ? 'incomplete' : (isClosed ? 'good' : 'danger')}`} 
+                              onClick={() => handleToggleVacancy(vac)}
+                              disabled={vac.fillingUpStatus === 'FILLED'}
+                              style={vac.fillingUpStatus === 'FILLED' ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
+                            >
+                              {isClosed ? 'Open' : 'Close'}
+                            </button>
+                            <button
+                              onClick={() => handleInitiateDeleteVacancy(vac)}
+                              title="Delete vacancy"
+                              style={{
+                                background: 'none',
+                                border: 'none',
+                                cursor: 'pointer',
+                                color: '#EF4444',
+                                padding: '6px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                borderRadius: '6px',
+                                transition: 'background-color 0.2s'
+                              }}
+                              onMouseOver={e => e.currentTarget.style.backgroundColor = '#FEE2E2'}
+                              onMouseOut={e => e.currentTarget.style.backgroundColor = 'transparent'}
+                            >
+                              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <polyline points="3 6 5 6 21 6"></polyline>
+                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                                <line x1="10" y1="11" x2="10" y2="17"></line>
+                                <line x1="14" y1="11" x2="14" y2="17"></line>
+                              </svg>
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </VacancyClusterAccordion>
+                ));
+              })()}
             </tbody>
           </table>
         </div>

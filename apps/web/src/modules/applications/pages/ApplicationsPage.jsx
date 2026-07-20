@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { useAppData } from '../../../middleware/DataProvider.jsx';
 import { useToast } from '../../../middleware/ToastProvider.jsx';
 import { apiFetch } from '../../../config/api.js';
+import VacancyClusterAccordion from '../../../components/VacancyClusterAccordion.jsx';
 
 const DOC_REQUIREMENTS = [
   { key: "loi", label: "Letter of intent addressed to the Head of Office or highest human resource officer" },
@@ -472,7 +473,9 @@ export default function ApplicationsPage() {
               <label>Vacancy Item</label>
               <select value={appVacancyFilter} onChange={e => setAppVacancyFilter(e.target.value)}>
                 <option value="">All vacancies</option>
-                {vacancies.map(v => <option key={v.id} value={v.jobClusterId}>{v.title} — {v.itemNo}</option>)}
+                {Array.from(new Map(vacancies.map(v => [v.jobClusterId, v])).values()).map(v => (
+                  <option key={v.id} value={v.jobClusterId}>{v.title}</option>
+                ))}
               </select>
             </div>
             <div>
@@ -508,7 +511,7 @@ export default function ApplicationsPage() {
           }}>Multi-sort: {multiSort ? 'On' : 'Off'}</button>
         </div>
         <div className="table-wrap">
-          <table>
+          <table style={{ width: '100%', tableLayout: 'fixed' }}>
             <thead>
               <tr>
                 <th className="row-num">No.</th>
@@ -629,19 +632,6 @@ export default function ApplicationsPage() {
                 </th>
                 <th>
                   <div className="th-content">
-                    <button className="th-btn" onClick={() => handleSortClick('itemNo')}>
-                      Item No.{getSortIndicator('itemNo')}
-                    </button>
-                    <input
-                      className="column-filter"
-                      placeholder="Filter..."
-                      value={appColFilters.itemNo || ''}
-                      onChange={e => handleAppColFilterChange('itemNo', e.target.value)}
-                    />
-                  </div>
-                </th>
-                <th>
-                  <div className="th-content">
                     <button className="th-btn" onClick={() => handleSortClick('status')}>
                       Application Status{getSortIndicator('status')}
                     </button>
@@ -662,33 +652,46 @@ export default function ApplicationsPage() {
               </tr>
             </thead>
             <tbody>
-              {paginatedApps.map((r, i) => (
-                <tr key={r.id} className="clickable-row" onClick={() => handleOpenReview(r)}>
-                  <td className="row-num">{((appPage - 1) * appPageSize) + i + 1}</td>
-                  <td><b>{r.applicant}</b><br/><span className="small">{r.code}</span></td>
-                  <td>{r.dateApplied}</td>
-                  <td>{r.deadline}</td>
-                  <td>{r.bachelorDegree}</td>
-                  <td className="num-col">
-                    <span className={`qs-number ${r.fitObj?.experienceScore >= 60 ? 'qs-pass' : 'qs-fail'}`}>
-                      {r.yearsExperience}
-                    </span>
-                  </td>
-                  <td className="num-col">
-                    <span className={`qs-number ${r.fitObj?.trainingScore >= 60 ? 'qs-pass' : 'qs-fail'}`}>
-                      {r.trainingHours}
-                    </span>
-                  </td>
-                  <td>{r.vacancy}</td>
-                  <td>{r.itemNo || '—'}</td>
-                  <td><span className={`badge ${cls(getApplicationDisplayStatus(r))}`}>{getApplicationDisplayStatus(r)}</span></td>
-                </tr>
-              ))}
-              {paginatedApps.length === 0 && (
-                <tr>
-                  <td colSpan={10} style={{ textAlign: 'center' }}>No applications match the filters.</td>
-                </tr>
-              )}
+              {(() => {
+                const grouped = {};
+                paginatedApps.forEach(r => {
+                  const title = r.vacancy || 'Unassigned';
+                  if (!grouped[title]) grouped[title] = [];
+                  grouped[title].push(r);
+                });
+                if (paginatedApps.length === 0) {
+                  return (
+                    <tr>
+                      <td colSpan={9} style={{ textAlign: 'center' }}>No applications match the filters.</td>
+                    </tr>
+                  );
+                }
+                return Object.entries(grouped).map(([clusterName, items]) => (
+                  <VacancyClusterAccordion key={clusterName} title={clusterName} colSpan={9}>
+                    {items.map((r, i) => (
+                      <tr key={r.id} className="clickable-row" onClick={() => handleOpenReview(r)}>
+                        <td className="row-num">{((appPage - 1) * appPageSize) + i + 1}</td>
+                        <td><b>{r.applicant}</b><br/><span className="small">{r.code}</span></td>
+                        <td>{r.dateApplied}</td>
+                        <td>{r.deadline}</td>
+                        <td>{r.bachelorDegree}</td>
+                        <td className="num-col">
+                          <span className={`qs-number ${r.fitObj?.experienceScore >= 60 ? 'qs-pass' : 'qs-fail'}`}>
+                            {r.yearsExperience}
+                          </span>
+                        </td>
+                        <td className="num-col">
+                          <span className={`qs-number ${r.fitObj?.trainingScore >= 60 ? 'qs-pass' : 'qs-fail'}`}>
+                            {r.trainingHours}
+                          </span>
+                        </td>
+                        <td>{r.vacancy}</td>
+                        <td><span className={`badge ${cls(getApplicationDisplayStatus(r))}`}>{getApplicationDisplayStatus(r)}</span></td>
+                      </tr>
+                    ))}
+                  </VacancyClusterAccordion>
+                ));
+              })()}
             </tbody>
           </table>
         </div>

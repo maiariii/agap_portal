@@ -3,6 +3,7 @@ import { useAppData } from '../../../middleware/DataProvider.jsx';
 import { useToast } from '../../../middleware/ToastProvider.jsx';
 import { apiFetch } from '../../../config/api.js';
 import { computeOverallAreaScore, scoreTone, SCORE_AREAS } from '@agap/shared';
+import VacancyClusterAccordion from '../../../components/VacancyClusterAccordion.jsx';
 
 const QUAL_NOT_SELECTED = { key: "not_selected", phase: 2, label: "Not Selected", badge: "red", next: "Did not advance past HRMPSB deliberation" };
 
@@ -51,7 +52,7 @@ export default function AssessmentPage() {
   const [docsLoading, setDocsLoading] = useState(false);
 
   useEffect(() => {
-    if (showDocsModal && selectedQualApp?.id) {
+    if (selectedQualApp?.id) {
       setAvailableDocs([]);
       setDocsLoading(true);
       console.log(`[Azure Storage] Requesting documents for applicant ID "${selectedQualApp.applicantId || 'AGAP-0001'}" in folder "staging-agap"...`);
@@ -69,7 +70,7 @@ export default function AssessmentPage() {
         })
         .finally(() => setDocsLoading(false));
     }
-  }, [showDocsModal, selectedQualApp]);
+  }, [selectedQualApp]);
 
   // CSV viewer state & auto-fetcher
   const [csvData, setCsvData] = useState(null);
@@ -155,6 +156,7 @@ export default function AssessmentPage() {
   const [appointDate, setAppointDate] = useState('');
   const [appointRefCode, setAppointRefCode] = useState('');
   const [appointPasscode, setAppointPasscode] = useState('');
+  const [appointItemNo, setAppointItemNo] = useState('');
   const [showIncompleteAppointModal, setShowIncompleteAppointModal] = useState(false);
 
   const titleCase = (str) => {
@@ -277,7 +279,11 @@ export default function AssessmentPage() {
   };
 
   const qualifiedApps = useMemo(() => {
-    let rows = qualifiedPoolRanked.filter(r => !r.itemNo || !occupiedItemNos.has(r.itemNo));
+    let rows = qualifiedPoolRanked.filter(r => {
+      const appt = r.appointmentStatus || r.appObj?.appointmentStatus;
+      if (appt === 'FOR APPOINTMENT') return false;
+      return !r.itemNo || !occupiedItemNos.has(r.itemNo);
+    });
 
     if (qualSearch) {
       const q = qualSearch.toLowerCase();
@@ -362,7 +368,7 @@ export default function AssessmentPage() {
     
     const areaCount = SCORE_AREAS.filter(sa => hasValue(areaScores[sa.key])).length;
     
-    if (areaCount === SCORE_AREAS.length && compCount === 3) return { label: 'Assessment Completed', badge: 'green' };
+    if (areaCount === SCORE_AREAS.length && compCount === 3) return { label: 'ASSESSMENT COMPLETE', badge: 'green' };
     if (areaCount > 0 || compCount > 0) return { label: 'Assessment Started', badge: 'orange' };
     return { label: 'Assessment Not Started', badge: 'blue' };
   };
@@ -470,7 +476,7 @@ export default function AssessmentPage() {
 
     let computedAssessmentStatus = 'Assessment Not Started';
     if (areaCount === SCORE_AREAS.length && compCount === 3) {
-      computedAssessmentStatus = 'Assessment Completed';
+      computedAssessmentStatus = 'ASSESSMENT COMPLETE';
     } else if (areaCount > 0 || compCount > 0) {
       computedAssessmentStatus = 'Assessment Started';
     }
@@ -534,19 +540,16 @@ export default function AssessmentPage() {
     });
   };
 
-  const handleConfirmAppointment = async (appId, date, passcode) => {
+  const handleConfirmAppointment = async (appId, date, passcode, itemNo) => {
     if (!date) return setToast({ message: 'Please select appointment date', type: 'error' });
+    if (!itemNo) return setToast({ message: 'Please select an item number', type: 'error' });
     if (!passcode) return setToast({ message: 'Please enter your passcode', type: 'error' });
     try {
-      const res = await apiFetch(`/api/applications/${appId}/appointment`, {
+      const res = await apiFetch(`/api/applications/${appId}/flag-appointment`, {
         method: 'POST',
-        body: JSON.stringify({ appointmentDate: date, passcode })
+        body: JSON.stringify({ appointmentDate: date, passcode, itemNo })
       });
-      if (res && res.occupied) {
-        setToast({ message: 'Item No. is occupied. Applicant marked as Not Appointed.', type: 'warning' });
-      } else {
-        setToast({ message: 'Appointment confirmed!', type: 'success' });
-      }
+      setToast({ message: 'Applicant flagged for appointment!', type: 'success' });
       loadAllData();
     } catch (e) {
       setToast({ message: e.message, type: 'error' });
@@ -629,11 +632,23 @@ export default function AssessmentPage() {
 
       <div className="card">
         <h2>Qualified Pool - Comparative Assessments</h2>
-        <div className="table-wrap">
-          <table>
+        <div className="table-wrap" style={{ width: '100%', overflow: 'auto' }}>
+          <table style={{ width: '100%', minWidth: '100%', tableLayout: 'fixed' }}>
+            <colgroup>
+              <col style={{ width: '5%' }} />
+              <col style={{ width: '16%' }} />
+              <col style={{ width: '16%' }} />
+              <col style={{ width: '16%' }} />
+              <col style={{ width: '10%' }} />
+              <col style={{ width: '7%' }} />
+              <col style={{ width: '7%' }} />
+              <col style={{ width: '7%' }} />
+              <col style={{ width: '8%' }} />
+              <col style={{ width: '8%' }} />
+            </colgroup>
             <thead>
               <tr>
-                <th className="row-num">No.</th>
+                <th className="row-num" style={{ width: '100%' }}>No.</th>
                 <th>
                   <button className="th-btn" onClick={() => handleQualSort('applicant')}>
                     Applicant{getQualSortIndicator('applicant')}
@@ -672,17 +687,6 @@ export default function AssessmentPage() {
                   </select>
                 </th>
                 <th>
-                  <button className="th-btn" onClick={() => handleQualSort('itemNo')}>
-                    Item No.{getQualSortIndicator('itemNo')}
-                  </button>
-                  <input
-                    className="column-filter"
-                    placeholder="Filter..."
-                    value={qualColFilters.itemNo || ''}
-                    onChange={e => handleQualColFilterChange('itemNo', e.target.value)}
-                  />
-                </th>
-                <th className="num-col">
                   <button className="th-btn" onClick={() => handleQualSort('fit')}>
                     Overall Score{getQualSortIndicator('fit')}
                   </button>
@@ -819,12 +823,7 @@ export default function AssessmentPage() {
                 }
 
                 return Object.entries(grouped).map(([clusterName, items]) => (
-                  <React.Fragment key={clusterName}>
-                    <tr style={{ backgroundColor: '#f8fafc', fontWeight: 'bold' }}>
-                      <td colSpan={11} style={{ textAlign: 'left', padding: '10px 16px', color: 'var(--navy)', borderLeft: '4px solid var(--blue)' }}>
-                        📂 Vacancy Cluster: {clusterName}
-                      </td>
-                    </tr>
+                  <VacancyClusterAccordion key={clusterName} title={clusterName} colSpan={11}>
                     {items.map((r, i) => {
                       const cs = r.comparativeAssessmentScores || r.appObj?.comparativeAssessmentScores || {};
                       const hasCompScores = ['bei', 'wst', 'we'].every(k => cs[k] !== '' && cs[k] !== null && cs[k] !== undefined && Number.isFinite(Number(cs[k])));
@@ -843,20 +842,19 @@ export default function AssessmentPage() {
 
                       const assessment = getAssessmentStatus(r);
                       
-                      const actionCell = appt === 'appointed' ? (
-                        <span className="badge green">Appointed</span>
-                      ) : appt === 'rejected' ? (
-                        <span className="badge red">Rejected</span>
-                      ) : hasCompScores ? (
+                      const actionCell = appt === 'FOR APPOINTMENT' ? (
+                        <span className="badge green">For Appointment</span>
+                      ) : (appt === 'rejected' || appt === 'not_appointed') ? (
+                        <span className="badge red">Not Appointed</span>
+                      ) : assessment.label === 'ASSESSMENT COMPLETE' ? (
                         <button
                           className="good vac-action"
                           onClick={(e) => {
                             e.stopPropagation();
                             setAppointConfirmApp(r);
                             setAppointDate(new Date().toISOString().slice(0, 10));
-                            const vacCluster = vacancies.find(v => v.jobClusterId === r.vacancyId);
-                            const unfilledItems = vacCluster?.unfilledItemNos ? vacCluster.unfilledItemNos.split(',').map(s => s.trim()).filter(Boolean) : [];
-                            setAppointItemNo(unfilledItems[0] || '');
+                            const clusterItems = vacancies.filter(v => v.jobClusterId === r.vacancyId && v.fillingUpStatus !== 'FILLED');
+                            setAppointItemNo(clusterItems[0]?.itemNo || '');
                             const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
                             const rand = Math.floor(1000 + Math.random() * 9000);
                             setAppointRefCode(`APPT-${today}-${rand}`);
@@ -884,7 +882,6 @@ export default function AssessmentPage() {
                           <td><b>{r.applicant}</b><br/><span className="small">{r.code}</span></td>
                           <td>{r.bachelorDegree || '—'}</td>
                           <td>{r.vacancy}</td>
-                          <td>{r.appointmentItemNo || '—'}</td>
                           <td className="num-col">
                             {allAreasScored && r.fit !== null && r.fit !== undefined ? (
                               <span className={`badge ${r.fit >= 85 ? 'green' : r.fit >= 70 ? 'blue' : r.fit >= 50 ? 'orange' : 'red'}`}>
@@ -902,7 +899,7 @@ export default function AssessmentPage() {
                         </tr>
                       );
                     })}
-                  </React.Fragment>
+                  </VacancyClusterAccordion>
                 ));
               })()}
             </tbody>
@@ -1059,26 +1056,67 @@ export default function AssessmentPage() {
                 </div>
                 <div className="qualified-card-body" style={{ padding: '24px' }}>
                   <div className="qs-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px' }}>
-                    {SCORE_AREAS.map(area => (
-                      <div className="qs-card" key={area.key} style={{ border: '1px solid var(--line)', borderRadius: '16px', padding: '16px' }}>
-                        <h3 style={{ marginBottom: '6px' }}>{area.label}</h3>
-                        <p className="small" style={{ margin: '0 0 12px', minHeight: '36px' }}>{area.description}</p>
-                        <div style={{ marginTop: 'auto', padding: '14px', border: '2px solid var(--line)', borderRadius: '18px', background: 'linear-gradient(135deg,#FFFFFF,#F8FCFF)' }}>
-                          <label style={{ margin: '0 0 8px', display: 'block', fontWeight: 'bold' }}>Score</label>
-                          <input
-                            type="number"
-                            min="0"
-                            max={area.max !== undefined ? area.max : 100}
-                            step="0.01"
-                            value={modalAreaScores[area.key] ?? ''}
-                            onChange={e => handleAreaScoreChange(area.key, e.target.value)}
-                            placeholder={area.max !== undefined ? `0.00 - ${area.max.toFixed(2)}` : "0.00 - 100.00"}
-                            style={{ height: '50px', textAlign: 'center', fontFamily: 'var(--font-heading)', fontSize: '24px', fontWeight: 950, border: '2.5px solid var(--blue-600)', background: 'white', boxShadow: '0 8px 18px rgba(2,132,199,.08)', width: '100%', boxSizing: 'border-box', borderRadius: '8px' }}
-                          />
-                          <div className="small" style={{ marginTop: '8px', fontWeight: 800 }}>Enter a score from 0.00 to {area.max !== undefined ? area.max.toFixed(2) : "100.00"}</div>
+                    {SCORE_AREAS.map(area => {
+                      const DOC_KEY_MAPPING = {
+                        education: 'tor',
+                        experience: 'work_experience',
+                        training: 'training_certificates'
+                      };
+                      const docKey = DOC_KEY_MAPPING[area.key];
+                      const docInfo = availableDocs.find(d => d.key === docKey);
+                      const exists = !!docInfo?.existsInAzure;
+                      
+                      const handleViewDoc = (e) => {
+                        e.stopPropagation();
+                        if (!exists) return;
+                        const apiBaseUrl = import.meta.env.VITE_API_URL || window.location.origin;
+                        const downloadUrl = `${apiBaseUrl}/api/applications/${selectedQualApp.id}/documents/${docKey}/download?token=${localStorage.getItem('agap_token')}`;
+                        window.open(downloadUrl, '_blank');
+                      };
+
+                      return (
+                        <div className="qs-card" key={area.key} style={{ border: '1px solid var(--line)', borderRadius: '16px', padding: '16px', position: 'relative' }}>
+                          <h3 style={{ marginBottom: '6px' }}>{area.label}</h3>
+                          {docKey && (
+                            <button
+                              type="button"
+                              onClick={handleViewDoc}
+                              disabled={!exists}
+                              style={{
+                                position: 'absolute',
+                                top: '16px',
+                                right: '16px',
+                                padding: '4px 8px',
+                                fontSize: '11px',
+                                borderRadius: '8px',
+                                backgroundColor: exists ? 'var(--blue-100)' : '#f1f5f9',
+                                color: exists ? 'var(--blue)' : '#94a3b8',
+                                border: 'none',
+                                cursor: exists ? 'pointer' : 'not-allowed',
+                                fontWeight: 'bold'
+                              }}
+                            >
+                              📄 View Document
+                            </button>
+                          )}
+                          <p className="small" style={{ margin: '0 0 12px', minHeight: '36px' }}>{area.description}</p>
+                          <div style={{ marginTop: 'auto', padding: '14px', border: '2px solid var(--line)', borderRadius: '18px', background: 'linear-gradient(135deg,#FFFFFF,#F8FCFF)' }}>
+                            <label style={{ margin: '0 0 8px', display: 'block', fontWeight: 'bold' }}>Score</label>
+                            <input
+                              type="number"
+                              min="0"
+                              max={area.max !== undefined ? area.max : 100}
+                              step="0.01"
+                              value={modalAreaScores[area.key] ?? ''}
+                              onChange={e => handleAreaScoreChange(area.key, e.target.value)}
+                              placeholder={area.max !== undefined ? `0.00 - ${area.max.toFixed(2)}` : "0.00 - 100.00"}
+                              style={{ height: '50px', textAlign: 'center', fontFamily: 'var(--font-heading)', fontSize: '24px', fontWeight: 950, border: '2.5px solid var(--blue-600)', background: 'white', boxShadow: '0 8px 18px rgba(2,132,199,.08)', width: '100%', boxSizing: 'border-box', borderRadius: '8px' }}
+                            />
+                            <div className="small" style={{ marginTop: '8px', fontWeight: 800 }}>Enter a score from 0.00 to {area.max !== undefined ? area.max.toFixed(2) : "100.00"}</div>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               </div>
@@ -1253,7 +1291,7 @@ export default function AssessmentPage() {
             </div>
             <div style={{ padding: '0 20px' }}>
               <p className="small" style={{ marginTop: '8px' }}>
-                You are about to appoint the following applicant to this item. On confirmation, this applicant will be marked <b>Appointed</b>, and every other applicant who applied to the same item number (<b>{appointConfirmApp.itemNo || '—'}</b>) will be marked <b>Not Appointed</b>. This will be reflected in the Appointment tab.
+                You are about to appoint the following applicant. On confirmation, this applicant's status will become <b>FOR APPOINTMENT</b>, and the selected plantilla item will be filled.
               </p>
             </div>
             <div className="modal-body" style={{ margin: '16px 0', display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -1261,10 +1299,27 @@ export default function AssessmentPage() {
                 <div className="meta-tile"><b>Applicant</b><br/>{appointConfirmApp.applicant}</div>
                 <div className="meta-tile"><b>Applicant number</b><br/>{appointConfirmApp.code}</div>
                 <div className="meta-tile"><b>Position</b><br/>{appointConfirmApp.vacancy}</div>
-                <div className="meta-tile"><b>Item No.</b><br/>{appointConfirmApp.itemNo || '—'}</div>
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div>
+                  <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '6px' }}>Plantilla Item Number</label>
+                  <select
+                    value={appointItemNo}
+                    onChange={e => setAppointItemNo(e.target.value)}
+                    style={{ width: '100%', height: '40px', padding: '0 8px', borderRadius: '8px', border: '1px solid var(--line)', boxSizing: 'border-box' }}
+                  >
+                    <option value="">-- Select Available Item No. --</option>
+                    {vacancies
+                      .filter(v => v.jobClusterId === appointConfirmApp.jobClusterId && v.fillingUpStatus !== 'FILLED')
+                      .map(v => (
+                        <option key={v.id} value={v.itemNo}>
+                          {v.itemNo} — {v.school || v.division}
+                        </option>
+                      ))
+                    }
+                  </select>
+                </div>
                 <div>
                   <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '6px' }}>Appointment Date</label>
                   <input
@@ -1298,7 +1353,7 @@ export default function AssessmentPage() {
             <div className="decision-row" style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
               <button className="secondary" onClick={() => { setShowAppointConfirmModal(false); setAppointConfirmApp(null); }}>Cancel</button>
               <button className="good" onClick={() => {
-                handleConfirmAppointment(appointConfirmApp.id, appointDate, appointPasscode);
+                handleConfirmAppointment(appointConfirmApp.id, appointDate, appointPasscode, appointItemNo);
                 setShowAppointConfirmModal(false);
                 setAppointConfirmApp(null);
               }}>Confirm Appointment</button>

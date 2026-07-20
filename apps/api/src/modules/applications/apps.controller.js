@@ -209,13 +209,13 @@ export async function updatePipeline(req, res) {
   }
 }
 
-export async function confirmAppointment(req, res) {
+async function handleAppointmentAction(req, res, targetStatus) {
   const { id } = req.params;
-  const { appointmentDate, passcode } = req.body;
+  const { appointmentDate, passcode, itemNo } = req.body;
   try {
     // 1. Verify HRMO passcode
     if (!passcode) {
-      return res.status(400).json({ error: 'HRMO passcode is required to confirm appointment.' });
+      return res.status(400).json({ error: 'HRMO passcode is required.' });
     }
 
     const { rows: userRows } = await pool.query('SELECT * FROM users WHERE id = $1', [req.user.id]);
@@ -233,18 +233,11 @@ export async function confirmAppointment(req, res) {
     }
 
     if (!isValid) {
-      return res.status(400).json({ error: 'Invalid passcode. Appointment cannot be confirmed.' });
+      return res.status(400).json({ error: 'Invalid passcode.' });
     }
 
-    // 2. Autogenerate reference code
-    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-    const rand = Math.floor(1000 + Math.random() * 9000);
-    const appointmentReferenceCode = `APPT-${today}-${rand}`;
-
     const { rows } = await pool.query(
-      `SELECT a.* 
-       FROM applications a 
-       WHERE a.id = $1`,
+      `SELECT a.* FROM applications a WHERE a.id = $1`,
       [id]
     );
     const currentApp = rows[0];
@@ -253,48 +246,41 @@ export async function confirmAppointment(req, res) {
       return res.status(404).json({ error: 'Application not found' });
     }
 
-    const selectedItemNo = appointmentItemNo || currentApp.appointment_item_no;
+    const selectedItemNo = itemNo || currentApp.appointment_item_no;
     if (!selectedItemNo) {
       return res.status(400).json({ error: 'A specific plantilla item number must be selected.' });
     }
 
-    const { rows: occupiedRows } = await pool.query(
-      `SELECT a.id FROM applications a
-       WHERE a.appointment_item_no = $1 AND a.appointment_status = 'appointed' AND a.id <> $2 LIMIT 1`,
-      [selectedItemNo, id]
+    // Validate selected item belongs to that cluster
+    const { rows: vacancyRows } = await pool.query(
+      `SELECT * FROM vacancies WHERE item_no = $1 AND job_cluster_id = $2`,
+      [selectedItemNo, currentApp.job_cluster_id]
     );
-    const occupiedApp = occupiedRows[0];
-
-    if (occupiedApp) {
-      await pool.query(
-        `UPDATE applications 
-         SET appointment_status = 'not_appointed', 
-             appointment_date = $1, appointment_item_no = $2, appointment_reference_code = $3, updated_at = NOW()
-         WHERE id = $4`,
-        [
-          appointmentDate ? new Date(appointmentDate) : null,
-          selectedItemNo,
-          appointmentReferenceCode,
-          id
-        ]
-      );
-
-      const historyId = crypto.randomUUID();
-      await pool.query(
-        `INSERT INTO application_history (id, application_id, text) VALUES ($1, $2, $3)`,
-        [historyId, id, `Not Appointed: Item ${selectedItemNo} is already occupied by another appointed applicant.`]
-      );
-
-      return res.json({ success: true, occupied: true });
+    const vacancy = vacancyRows[0];
+    if (!vacancy) {
+      return res.status(400).json({ error: 'Selected item number does not belong to the job cluster of this application.' });
     }
+    
+    // If we are flagging, check if the item is already filled (or if it is filled by the current applicant)
+    if (targetStatus === 'FOR APPOINTMENT' && vacancy.filling_up_status === 'FILLED') {
+      if (currentApp.appointment_item_no !== selectedItemNo) {
+        return res.status(400).json({ error: 'Selected item number is already filled.' });
+      }
+    }
+
+    // Generate reference code
+    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const rand = Math.floor(1000 + Math.random() * 9000);
+    const appointmentReferenceCode = currentApp.appointment_reference_code || `APPT-${today}-${rand}`;
 
     await pool.query(
       `UPDATE applications 
-       SET appointment_status = 'appointed', 
-           appointment_date = $1, appointment_item_no = $2, appointment_reference_code = $3, updated_at = NOW()
-       WHERE id = $4`,
+       SET appointment_status = $1, 
+           appointment_date = $2, appointment_item_no = $3, appointment_reference_code = $4, updated_at = NOW()
+       WHERE id = $5`,
       [
-        new Date(appointmentDate),
+        targetStatus,
+        appointmentDate ? new Date(appointmentDate) : (currentApp.appointment_date || new Date()),
         selectedItemNo,
         appointmentReferenceCode,
         id
@@ -312,7 +298,7 @@ export async function confirmAppointment(req, res) {
     const historyId = crypto.randomUUID();
     await pool.query(
       `INSERT INTO application_history (id, application_id, text) VALUES ($1, $2, $3)`,
-      [historyId, id, `Appointed to item ${selectedItemNo}. Reference: ${appointmentReferenceCode}`]
+      [historyId, id, `Appointment state updated to ${targetStatus} for item ${selectedItemNo}. Reference: ${appointmentReferenceCode}`]
     );
 
     // Check if there are any remaining unfilled items in the cluster
@@ -350,6 +336,14 @@ export async function confirmAppointment(req, res) {
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
+}
+
+export async function confirmAppointment(req, res) {
+  await handleAppointmentAction(req, res, 'appointed');
+}
+
+export async function flagAppointment(req, res) {
+  await handleAppointmentAction(req, res, 'FOR APPOINTMENT');
 }
 
 export async function rollbackAppointment(req, res) {
@@ -397,7 +391,7 @@ export async function rollbackAppointment(req, res) {
 
     const { rows: affectedApps } = await pool.query(
       `SELECT id, appointment_status FROM applications 
-       WHERE job_cluster_id = $1 AND (appointment_status = 'appointed' OR appointment_status = 'not_appointed')`,
+       WHERE job_cluster_id = $1 AND (appointment_status = 'FOR APPOINTMENT' OR appointment_status = 'not_appointed')`,
       [job_cluster_id]
     );
 
@@ -409,8 +403,8 @@ export async function rollbackAppointment(req, res) {
            appointment_reference_code = NULL, 
            reason = NULL,
            updated_at = NOW()
-       WHERE vacancy_id = $1`,
-      [vacancy_id]
+       WHERE id = $1`,
+      [id]
     );
 
     for (const app of affectedApps) {

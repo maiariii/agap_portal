@@ -1,7 +1,8 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useAppData } from '../../../middleware/DataProvider.jsx';
 import { useToast } from '../../../middleware/ToastProvider.jsx';
 import { apiFetch } from '../../../config/api.js';
+import VacancyClusterAccordion from '../../../components/VacancyClusterAccordion.jsx';
 
 export default function AppointmentPage() {
   const { vacancies, applications, loadAllData } = useAppData();
@@ -18,11 +19,97 @@ export default function AppointmentPage() {
   const [rollbackPasscode, setRollbackPasscode] = useState('');
   const [showRollbackConfirmModal, setShowRollbackConfirmModal] = useState(false);
 
-  const [unapptColFilters, setUnapptColFilters] = useState({});
-  const [unapptSortKey, setUnapptSortKey] = useState('');
-  const [unapptSortDir, setUnapptSortDir] = useState('asc');
-  const [unapptPage, setUnapptPage] = useState(1);
-  const [unapptPageSize, setUnapptPageSize] = useState(10);
+  const [confirmApp, setConfirmApp] = useState(null);
+  const [confirmPasscode, setConfirmPasscode] = useState('');
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+
+  // View Documents state
+  const [showDocsModal, setShowDocsModal] = useState(false);
+  const [selectedDocApp, setSelectedDocApp] = useState(null);
+  const [selectedDocKey, setSelectedDocKey] = useState('pds');
+  const [availableDocs, setAvailableDocs] = useState([]);
+  const [docsLoading, setDocsLoading] = useState(false);
+
+  // CSV viewer state
+  const [csvData, setCsvData] = useState(null);
+  const [csvLoading, setCsvLoading] = useState(false);
+  const [csvError, setCsvError] = useState(null);
+
+  useEffect(() => {
+    if (selectedDocApp?.id) {
+      setAvailableDocs([]);
+      setDocsLoading(true);
+      apiFetch(`/api/applications/${selectedDocApp.id}/documents`)
+        .then(data => {
+          setAvailableDocs(data.documents || []);
+        })
+        .catch(err => {
+          console.error('[Azure Storage Fetch ERROR] Failed to fetch documents:', err);
+          setAvailableDocs([]);
+        })
+        .finally(() => setDocsLoading(false));
+    }
+  }, [selectedDocApp]);
+
+  useEffect(() => {
+    const selectedDocInfo = availableDocs.find(d => d.key === selectedDocKey);
+    const existsInAzure = !!selectedDocInfo?.existsInAzure;
+    const isPdf = !!selectedDocInfo?.filename?.toLowerCase().endsWith('.pdf');
+
+    if (existsInAzure && !isPdf && selectedDocApp?.id) {
+      setCsvLoading(true);
+      setCsvError(null);
+      setCsvData(null);
+
+      const apiBaseUrl = import.meta.env.VITE_API_URL || window.location.origin;
+      const downloadUrl = `${apiBaseUrl}/api/applications/${selectedDocApp.id}/documents/${selectedDocKey}/download?token=${localStorage.getItem('agap_token')}`;
+      
+      fetch(downloadUrl)
+        .then(res => {
+          if (!res.ok) throw new Error(`Status ${res.status}`);
+          return res.text();
+        })
+        .then(text => {
+          const rows = [];
+          let currentRow = [];
+          let currentField = '';
+          let inQuotes = false;
+          for (let i = 0; i < text.length; i++) {
+            const char = text[i];
+            const nextChar = text[i+1];
+            if (char === '"') {
+              if (inQuotes && nextChar === '"') {
+                currentField += '"';
+                i++;
+              } else {
+                inQuotes = !inQuotes;
+              }
+            } else if (char === ',' && !inQuotes) {
+               currentRow.push(currentField);
+               currentField = '';
+            } else if ((char === '\r' || char === '\n') && !inQuotes) {
+               if (char === '\r' && nextChar === '\n') i++;
+               currentRow.push(currentField);
+               rows.push(currentRow);
+               currentRow = [];
+               currentField = '';
+            } else {
+               currentField += char;
+            }
+          }
+          if (currentField || currentRow.length > 0) {
+            currentRow.push(currentField);
+            rows.push(currentRow);
+          }
+          setCsvData(rows);
+        })
+        .catch(err => {
+          console.error('[CSV Fetch ERROR]', err);
+          setCsvError(err.message);
+        })
+        .finally(() => setCsvLoading(false));
+    }
+  }, [selectedDocKey, availableDocs, selectedDocApp]);
 
   const downloadCSV = (headers, rows, filename) => {
     const csvContent = "data:text/csv;charset=utf-8," 
@@ -53,14 +140,14 @@ export default function AppointmentPage() {
   const occupiedItemNos = useMemo(() => {
     return new Set(
       applications
-        .filter(a => a.appointmentStatus === 'appointed')
+        .filter(a => a.appointmentStatus === 'FOR APPOINTMENT' || a.appointmentStatus === 'appointed')
         .map(a => a.itemNo)
         .filter(Boolean)
     );
   }, [applications]);
 
   const allAppointments = useMemo(() => {
-    return applications.filter(app => app.appointmentStatus === 'appointed');
+    return applications.filter(app => app.appointmentStatus === 'FOR APPOINTMENT' || app.appointmentStatus === 'appointed');
   }, [applications]);
 
   const filteredAppointments = useMemo(() => {
@@ -103,64 +190,6 @@ export default function AppointmentPage() {
     const start = (apptPage - 1) * apptPageSize;
     return filteredAppointments.slice(start, start + apptPageSize);
   }, [filteredAppointments, apptPage, apptPageSize]);
-
-  const unappointedApps = useMemo(() => {
-    let list = applications.filter(app => {
-      if (app.appointmentStatus === 'appointed') return false;
-      
-      const statusLower = (app.applicationStatus || app.status || '').toLowerCase();
-      const isQualified = ['qualified', 'for_comparative_assessment', 'not_appointed'].includes(statusLower);
-      
-      const isAssessmentCompleted = (app.assessmentStatus || '').toLowerCase() === 'assessment completed';
-      
-      return isQualified && isAssessmentCompleted;
-    });
-
-    if (unapptColFilters.applicant) {
-      const q = unapptColFilters.applicant.toLowerCase();
-      list = list.filter(r => r.applicant?.toLowerCase().includes(q));
-    }
-    if (unapptColFilters.vacancy) {
-      list = list.filter(r => r.vacancy === unapptColFilters.vacancy);
-    }
-    if (unapptColFilters.itemNo) {
-      const q = unapptColFilters.itemNo.toLowerCase();
-      list = list.filter(r => r.itemNo?.toLowerCase().includes(q));
-    }
-    if (unapptColFilters.fit?.min) {
-      list = list.filter(r => r.fit >= Number(unapptColFilters.fit.min));
-    }
-    if (unapptColFilters.fit?.max) {
-      list = list.filter(r => r.fit <= Number(unapptColFilters.fit.max));
-    }
-    if (unapptColFilters.appointmentStatus) {
-      const q = unapptColFilters.appointmentStatus.toLowerCase();
-      list = list.filter(r => (r.appointmentStatus || '').toLowerCase().includes(q));
-    }
-    if (unapptColFilters.appointmentDate) {
-      const q = unapptColFilters.appointmentDate.toLowerCase();
-      list = list.filter(r => (r.appointmentDate ? r.appointmentDate.slice(0, 10) : '').toLowerCase().includes(q));
-    }
-
-    if (unapptSortKey) {
-      const dir = unapptSortDir === 'asc' ? 1 : -1;
-      list = [...list].sort((a, b) => {
-        let av = a[unapptSortKey] ?? '';
-        let bv = b[unapptSortKey] ?? '';
-        if (typeof av === 'number' && typeof bv === 'number') {
-          return (av - bv) * dir;
-        }
-        return String(av).localeCompare(String(bv), undefined, { numeric: true, sensitivity: 'base' }) * dir;
-      });
-    }
-
-    return list;
-  }, [applications, occupiedItemNos, unapptColFilters, unapptSortKey, unapptSortDir]);
-
-  const paginatedUnappointedApps = useMemo(() => {
-    const start = (unapptPage - 1) * unapptPageSize;
-    return unappointedApps.slice(start, start + unapptPageSize);
-  }, [unappointedApps, unapptPage, unapptPageSize]);
 
   const handleDownloadNoticeOfAppointment = (app) => {
     const date = app.appointmentDate ? new Date(app.appointmentDate).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }) : new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
@@ -219,11 +248,30 @@ SDO Manila, Department of Education
     }
   };
 
+  const handleConfirmAppointmentFinal = async (app, passcode) => {
+    if (!passcode) {
+      return setToast({ message: 'HRMO passcode is required', type: 'error' });
+    }
+    try {
+      await apiFetch(`/api/applications/${app.id}/appointment`, {
+        method: 'POST',
+        body: JSON.stringify({ passcode })
+      });
+      setToast({ message: 'Appointment officially confirmed!', type: 'success' });
+      setShowConfirmModal(false);
+      setConfirmApp(null);
+      setConfirmPasscode('');
+      loadAllData();
+    } catch (e) {
+      setToast({ message: e.message, type: 'error' });
+    }
+  };
+
   const appointmentKpiStats = useMemo(() => {
     const totalItems = vacancies.length;
     const filledItemNos = new Set(
       applications
-        .filter(a => a.appointmentStatus === 'appointed')
+        .filter(a => a.appointmentStatus === 'FOR APPOINTMENT' || a.appointmentStatus === 'appointed')
         .map(a => a.itemNo)
         .filter(Boolean)
     );
@@ -241,7 +289,7 @@ SDO Manila, Department of Education
       r.vacancy,
       r.itemNo,
       r.fit.toFixed(2),
-      r.appointmentStatus === 'appointed' ? 'Appointed' : 'Rejected',
+      r.appointmentStatus === 'FOR APPOINTMENT' ? 'For Appointment' : r.appointmentStatus === 'appointed' ? 'Appointed' : 'Rejected',
       r.appointmentDate ? r.appointmentDate.slice(0, 10) : ''
     ]);
     downloadCSV(headers, rows, `appointed-applicants-${new Date().toISOString().slice(0, 10)}.csv`);
@@ -253,15 +301,6 @@ SDO Manila, Department of Education
     } else {
       setApptSortKey(key);
       setApptSortDir('asc');
-    }
-  };
-
-  const handleUnapptSort = (key) => {
-    if (unapptSortKey === key) {
-      setUnapptSortDir(prev => prev === 'asc' ? 'desc' : 'asc');
-    } else {
-      setUnapptSortKey(key);
-      setUnapptSortDir('asc');
     }
   };
 
@@ -295,8 +334,8 @@ SDO Manila, Department of Education
             Download Appointed List
           </button>
         </div>
-        <div className="table-wrap">
-          <table className="appointments-table">
+        <div className="table-wrap" style={{ width: '100%' }}>
+          <table className="appointments-table" style={{ width: '100%', minWidth: '100%', tableLayout: 'fixed' }}>
             <thead>
               <tr>
                 <th className="row-num">No.</th>
@@ -378,6 +417,7 @@ SDO Manila, Department of Education
                     onChange={e => { setApptColFilters({ ...apptColFilters, appointmentStatus: e.target.value }); setApptPage(1); }}
                   >
                     <option value="">All</option>
+                    <option value="FOR APPOINTMENT">For Appointment</option>
                     <option value="appointed">Appointed</option>
                     <option value="rejected">Rejected</option>
                   </select>
@@ -393,74 +433,115 @@ SDO Manila, Department of Education
                     onChange={e => { setApptColFilters({ ...apptColFilters, appointmentDate: e.target.value }); setApptPage(1); }}
                   />
                 </th>
-                <th>Action</th>
+                <th style={{ width: '280px' }}>Action</th>
               </tr>
             </thead>
             <tbody>
-              {paginatedAppointments.map((r, i) => {
-                const isAppointed = r.appointmentStatus === 'appointed';
-                const score = r.fit;
-                return (
-                  <tr key={r.id}>
-                    <td className="row-num">{(apptPage - 1) * apptPageSize + i + 1}</td>
-                    <td><b>{r.applicant}</b><br/><span className="small">{r.code}</span></td>
-                    <td>{r.vacancy}</td>
-                    <td>{r.itemNo}</td>
-                    <td className="num-col">
-                      {score && score > 0 ? (
-                        <span className={`badge ${score >= 85 ? 'green' : score >= 70 ? 'blue' : score >= 50 ? 'orange' : 'red'}`}>
-                          {score.toFixed(2)}%
-                        </span>
-                      ) : '—'}
-                    </td>
-                    <td>
-                      <span className={`badge ${isAppointed ? 'green' : 'red'}`}>
-                        {isAppointed ? 'Appointed' : 'Rejected'}
-                      </span>
-                    </td>
-                    <td><span className="small">{r.appointmentDate ? r.appointmentDate.slice(0, 10) : ''}</span></td>
-                    <td>
-                      {isAppointed ? (
-                        <div style={{ display: 'flex', gap: '8px' }}>
-                          <button
-                            className="good"
-                            onClick={() => handleDownloadNoticeOfAppointment(r)}
-                            style={{ padding: '6px 12px', fontSize: '12px', borderRadius: '8px', fontWeight: 'bold', fontFamily: 'var(--font-heading)' }}
-                          >
-                            Notice of Appointment
-                          </button>
-                          <button
-                            className="danger"
-                            onClick={() => {
-                              setRollbackApp(r);
-                              setRollbackPasscode('');
-                              setShowRollbackConfirmModal(true);
-                            }}
-                            style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '32px', height: '32px', padding: '0', fontSize: '18px', borderRadius: '8px', fontWeight: 'bold', fontFamily: 'var(--font-heading)' }}
-                            title="Withdraw Appointment"
-                          >
-                            ↺
-                          </button>
-                        </div>
-                      ) : '—'}
-                    </td>
-                  </tr>
-                );
-              })}
-              {paginatedAppointments.length === 0 && (
-                <tr>
-                  <td colSpan={8} style={{ textAlign: 'center' }}>No records match the filters.</td>
-                </tr>
-              )}
+              {(() => {
+                const grouped = {};
+                paginatedAppointments.forEach(r => {
+                  const title = r.vacancy || 'Unassigned';
+                  if (!grouped[title]) grouped[title] = [];
+                  grouped[title].push(r);
+                });
+                if (paginatedAppointments.length === 0) {
+                  return (
+                    <tr>
+                      <td colSpan={8} style={{ textAlign: 'center' }}>No records match the filters.</td>
+                    </tr>
+                  );
+                }
+                return Object.entries(grouped).map(([clusterName, items]) => (
+                  <VacancyClusterAccordion key={clusterName} title={clusterName} colSpan={8}>
+                    {items.map((r, i) => {
+                      const isConfirmed = r.appointmentStatus === 'appointed';
+                      const isFlagged = r.appointmentStatus === 'FOR APPOINTMENT';
+                      const score = r.fit;
+                      const hasDocs = r.documents && Object.keys(r.documents).length > 0;
+                      return (
+                        <tr key={r.id}>
+                          <td className="row-num">{(apptPage - 1) * apptPageSize + i + 1}</td>
+                          <td><b>{r.applicant}</b><br/><span className="small">{r.code}</span></td>
+                          <td>{r.vacancy}</td>
+                          <td>{r.itemNo}</td>
+                          <td className="num-col">
+                            {score && score > 0 ? (
+                              <span className={`badge ${score >= 85 ? 'green' : score >= 70 ? 'blue' : score >= 50 ? 'orange' : 'red'}`}>
+                                {score.toFixed(2)}%
+                              </span>
+                            ) : '—'}
+                          </td>
+                          <td>
+                            <span className={`badge ${isConfirmed ? 'green' : isFlagged ? 'orange' : 'red'}`}>
+                              {isConfirmed ? 'Appointed' : isFlagged ? 'For Appointment' : 'Rejected'}
+                            </span>
+                          </td>
+                          <td><span className="small">{r.appointmentDate ? r.appointmentDate.slice(0, 10) : ''}</span></td>
+                          <td>
+                            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                              <button
+                                className="secondary"
+                                onClick={() => {
+                                  setSelectedDocApp(r);
+                                  setSelectedDocKey('pds');
+                                  setShowDocsModal(true);
+                                }}
+                                disabled={!hasDocs}
+                                style={{ padding: '6px 12px', fontSize: '12px', borderRadius: '8px', fontWeight: 'bold', cursor: hasDocs ? 'pointer' : 'not-allowed', opacity: hasDocs ? 1 : 0.5 }}
+                              >
+                                View documents
+                              </button>
+                              {isFlagged && (
+                                <button
+                                  className="good"
+                                  onClick={() => {
+                                    setConfirmApp(r);
+                                    setConfirmPasscode('');
+                                    setShowConfirmModal(true);
+                                  }}
+                                  style={{ padding: '6px 12px', fontSize: '12px', borderRadius: '8px', fontWeight: 'bold' }}
+                                >
+                                  Confirm
+                                </button>
+                              )}
+                              {isConfirmed && (
+                                <button
+                                  className="good"
+                                  onClick={() => handleDownloadNoticeOfAppointment(r)}
+                                  style={{ padding: '6px 12px', fontSize: '12px', borderRadius: '8px', fontWeight: 'bold' }}
+                                >
+                                  Notice of Appointment
+                                </button>
+                              )}
+                              <button
+                                className="danger"
+                                onClick={() => {
+                                  setRollbackApp(r);
+                                  setRollbackPasscode('');
+                                  setShowRollbackConfirmModal(true);
+                                }}
+                                style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '32px', height: '32px', padding: '0', fontSize: '18px', borderRadius: '8px', fontWeight: 'bold' }}
+                                title="Withdraw Appointment"
+                              >
+                                ↺
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </VacancyClusterAccordion>
+                ));
+              })()}
             </tbody>
           </table>
         </div>
 
         <div className="pager-controls" style={{ marginTop: '16px' }}>
           <div className="pager-group">
-            <button className="secondary" onClick={() => setAppPage(p => Math.max(1, p - 1))} disabled={apptPage === 1}>Prev</button>
+            <button className="secondary" onClick={() => setApptPage(p => Math.max(1, p - 1))} disabled={apptPage === 1}>Prev</button>
             <span className="small">Page {apptPage} of {Math.max(1, Math.ceil(filteredAppointments.length / apptPageSize))} · {filteredAppointments.length} record(s)</span>
-            <button className="secondary" onClick={() => setAppPage(p => Math.min(Math.max(1, Math.ceil(filteredAppointments.length / apptPageSize)), p + 1))} disabled={apptPage === Math.max(1, Math.ceil(filteredAppointments.length / apptPageSize))}>Next</button>
+            <button className="secondary" onClick={() => setApptPage(p => Math.min(Math.max(1, Math.ceil(filteredAppointments.length / apptPageSize)), p + 1))} disabled={apptPage === Math.max(1, Math.ceil(filteredAppointments.length / apptPageSize))}>Next</button>
           </div>
           <div className="pager-group">
             <div className="pager-field">
@@ -484,170 +565,6 @@ SDO Manila, Department of Education
         </div>
       </div>
 
-      <div className="card" style={{ marginTop: '20px' }}>
-        <h2>Unappointed Qualified Applicants</h2>
-        <p className="small" style={{ marginBottom: '14px' }}>Confirm appointments or view status of other qualified candidates.</p>
-        <div className="table-wrap">
-          <table className="unappointed-table">
-            <thead>
-              <tr>
-                <th className="row-num">No.</th>
-                <th>
-                  <button className="th-btn" onClick={() => handleUnapptSort('applicant')}>
-                    Applicant {unapptSortKey === 'applicant' ? (unapptSortDir === 'asc' ? ' ▲' : ' ▼') : ''}
-                  </button>
-                  <input
-                    className="column-filter"
-                    placeholder="Filter..."
-                    value={unapptColFilters.applicant || ''}
-                    onChange={e => { setUnapptColFilters({ ...unapptColFilters, applicant: e.target.value }); setUnapptPage(1); }}
-                  />
-                </th>
-                <th>
-                  <button className="th-btn" onClick={() => handleUnapptSort('vacancy')}>
-                    Position {unapptSortKey === 'vacancy' ? (unapptSortDir === 'asc' ? ' ▲' : ' ▼') : ''}
-                  </button>
-                  <select
-                    className="column-filter"
-                    value={unapptColFilters.vacancy || ''}
-                    onChange={e => { setUnapptColFilters({ ...unapptColFilters, vacancy: e.target.value }); setUnapptPage(1); }}
-                  >
-                    <option value="">All</option>
-                    {Array.from(new Set(applications.filter(a => {
-                      if (a.status !== 'not_appointed' && a.appointmentStatus !== 'not_appointed') return false;
-                      const cs = a.appObj?.comparativeAssessmentScores || {};
-                      return ['bei', 'wst', 'we'].every(k => cs[k] !== '' && cs[k] !== null && cs[k] !== undefined && Number.isFinite(Number(cs[k])));
-                    }).map(a => a.vacancy))).map(vac => (
-                      <option key={vac} value={vac}>{vac}</option>
-                    ))}
-                  </select>
-                </th>
-                <th>
-                  <button className="th-btn" onClick={() => handleUnapptSort('itemNo')}>
-                    Item No. {unapptSortKey === 'itemNo' ? (unapptSortDir === 'asc' ? ' ▲' : ' ▼') : ''}
-                  </button>
-                  <input
-                    className="column-filter"
-                    placeholder="Filter..."
-                    value={unapptColFilters.itemNo || ''}
-                    onChange={e => { setUnapptColFilters({ ...unapptColFilters, itemNo: e.target.value }); setUnapptPage(1); }}
-                  />
-                </th>
-                <th className="num-col">
-                  <button className="th-btn" onClick={() => handleUnapptSort('fit')}>
-                    Average Score {unapptSortKey === 'fit' ? (unapptSortDir === 'asc' ? ' ▲' : ' ▼') : ''}
-                  </button>
-                  <div className="column-filter-range" style={{ display: 'flex', gap: '4px' }}>
-                    <input
-                      className="column-filter"
-                      type="number"
-                      placeholder="Min"
-                      value={unapptColFilters.fit?.min || ''}
-                      onChange={e => {
-                        const curr = unapptColFilters.fit || {};
-                        setUnapptColFilters({ ...unapptColFilters, fit: { ...curr, min: e.target.value } });
-                        setUnapptPage(1);
-                      }}
-                      style={{ width: '50%' }}
-                    />
-                    <input
-                      className="column-filter"
-                      type="number"
-                      placeholder="Max"
-                      value={unapptColFilters.fit?.max || ''}
-                      onChange={e => {
-                        const curr = unapptColFilters.fit || {};
-                        setUnapptColFilters({ ...unapptColFilters, fit: { ...curr, max: e.target.value } });
-                        setUnapptPage(1);
-                      }}
-                      style={{ width: '50%' }}
-                    />
-                  </div>
-                </th>
-                <th>
-                  <button className="th-btn" onClick={() => handleUnapptSort('appointmentStatus')}>
-                    Appointment Status {unapptSortKey === 'appointmentStatus' ? (unapptSortDir === 'asc' ? ' ▲' : ' ▼') : ''}
-                  </button>
-                  <select
-                    className="column-filter"
-                    value={unapptColFilters.appointmentStatus || ''}
-                    onChange={e => { setUnapptColFilters({ ...unapptColFilters, appointmentStatus: e.target.value }); setUnapptPage(1); }}
-                  >
-                    <option value="">All</option>
-                    <option value="not_appointed">Not Appointed</option>
-                  </select>
-                </th>
-                <th>
-                  <button className="th-btn" onClick={() => handleUnapptSort('appointmentDate')}>
-                    Date {unapptSortKey === 'appointmentDate' ? (unapptSortDir === 'asc' ? ' ▲' : ' ▼') : ''}
-                  </button>
-                  <input
-                    className="column-filter"
-                    placeholder="Filter..."
-                    value={unapptColFilters.appointmentDate || ''}
-                    onChange={e => { setUnapptColFilters({ ...unapptColFilters, appointmentDate: e.target.value }); setUnapptPage(1); }}
-                  />
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {paginatedUnappointedApps.map((r, i) => {
-                return (
-                  <tr key={r.id}>
-                    <td className="row-num">{(unapptPage - 1) * unapptPageSize + i + 1}</td>
-                    <td><b>{r.applicant}</b></td>
-                    <td>{r.vacancy}</td>
-                    <td>{r.itemNo || '—'}</td>
-                    <td className="num-col">
-                      <span className={`badge ${r.fit >= 85 ? 'green' : r.fit >= 70 ? 'blue' : r.fit >= 50 ? 'orange' : 'red'}`}>
-                        {r.fit.toFixed(2)}%
-                      </span>
-                    </td>
-                    <td>
-                      <span className="badge orange">Not Appointed</span>
-                    </td>
-                    <td>
-                      <span className="small">{r.appointmentDate ? r.appointmentDate.slice(0, 10) : '—'}</span>
-                    </td>
-                  </tr>
-                );
-              })}
-              {paginatedUnappointedApps.length === 0 && (
-                <tr>
-                  <td colSpan={7} style={{ textAlign: 'center' }}>No unappointed applicants match the filters.</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="pager-controls" style={{ marginTop: '14px' }}>
-          <div className="pager-group">
-            <button className="secondary" onClick={() => setUnapptPage(p => Math.max(1, p - 1))} disabled={unapptPage === 1}>Prev</button>
-            <span className="small">Page {unapptPage} of {Math.max(1, Math.ceil(unappointedApps.length / unapptPageSize))} · {unappointedApps.length} records</span>
-            <button className="secondary" onClick={() => setUnapptPage(p => Math.min(Math.max(1, Math.ceil(unappointedApps.length / unapptPageSize)), p + 1))} disabled={unapptPage >= Math.max(1, Math.ceil(unappointedApps.length / unapptPageSize))}>Next</button>
-          </div>
-          <div className="pager-group">
-            <div className="pager-field">
-              <label>Rows</label>
-              <select value={unapptPageSize} onChange={e => { setUnapptPageSize(Number(e.target.value)); setUnapptPage(1); }}>
-                <option value="10">10</option>
-                <option value="25">25</option>
-                <option value="50">50</option>
-                <option value="100">100</option>
-              </select>
-            </div>
-            <div className="pager-field">
-              <label>Go to page</label>
-              <select value={unapptPage} onChange={e => setUnapptPage(Number(e.target.value))}>
-                {Array.from({ length: Math.max(1, Math.ceil(unappointedApps.length / unapptPageSize)) }, (_, i) => (
-                  <option key={i + 1} value={i + 1}>Page {i + 1}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-        </div>
-      </div>
       {/* MODAL: ROLLBACK APPOINTMENT CONFIRMATION */}
       {showRollbackConfirmModal && rollbackApp && (
         <div className="modal open" style={{ zIndex: 1000 }}>
@@ -682,6 +599,275 @@ SDO Manila, Department of Education
               >
                 Withdraw Appointment
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: CONFIRM APPOINTMENT FINAL */}
+      {showConfirmModal && confirmApp && (
+        <div className="modal open" style={{ zIndex: 1000 }}>
+          <div className="modal-box" style={{ width: 'min(500px, 94vw)' }}>
+            <div className="modal-head">
+              <h3>Confirm Appointment — {confirmApp.applicant}</h3>
+            </div>
+            <div style={{ padding: '0 20px' }}>
+              <p className="small" style={{ marginTop: '8px' }}>
+                Confirm the official appointment of <b>{confirmApp.applicant}</b> under item <b>{confirmApp.itemNo || '—'}</b>.
+              </p>
+            </div>
+            <div className="modal-body" style={{ margin: '16px 0', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div>
+                  <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '6px' }}>HRMO Passcode</label>
+                  <input
+                    type="password"
+                    value={confirmPasscode}
+                    onChange={e => setConfirmPasscode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    placeholder="Enter 6-digit passcode"
+                    style={{ width: '100%', height: '40px', padding: '0 8px', borderRadius: '8px', border: '1px solid var(--line)', boxSizing: 'border-box' }}
+                  />
+                </div>
+              </div>
+            </div>
+            <div className="decision-row" style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button className="secondary" onClick={() => { setShowConfirmModal(false); setConfirmApp(null); setConfirmPasscode(''); }}>Cancel</button>
+              <button 
+                className="good" 
+                onClick={() => handleConfirmAppointmentFinal(confirmApp, confirmPasscode)}
+              >
+                Confirm Appointment
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: VIEW DOCUMENTS */}
+      {showDocsModal && selectedDocApp && (
+        <div className="modal open" style={{ zIndex: 100002 }}>
+          <div className="modal-box" style={{ padding: '0 24px 24px', maxHeight: '92vh', overflow: 'auto', width: 'min(1100px, 98vw)' }}>
+            <div className="modal-head" style={{
+              paddingTop: '24px',
+              paddingBottom: '12px',
+              background: 'white',
+              position: 'sticky',
+              top: 0,
+              zIndex: 10,
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              borderBottom: '1px solid var(--line)'
+            }}>
+              <h2 style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: 0 }}>
+                📂 Document Vault — {selectedDocApp.applicant}
+              </h2>
+              <button className="secondary" onClick={() => setShowDocsModal(false)}>Close Vault</button>
+            </div>
+
+            <div className="modal-body" style={{ marginTop: '20px', display: 'grid', gridTemplateColumns: '320px 1fr', gap: '20px', alignItems: 'start' }}>
+              {/* Document Checklist Sidebar */}
+              <div style={{ border: '1px solid var(--line)', borderRadius: '12px', overflow: 'hidden', background: '#F8FAFC' }}>
+                <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)', background: 'white' }}>
+                  <h4 style={{ margin: 0, color: 'var(--navy)', fontSize: '14px' }}>Document Checklist</h4>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', background: 'white' }}>
+                  {[
+                    { key: 'pds', label: 'Personal Data Sheet', required: true },
+                    { key: 'work_experience', label: 'Work Experience Sheet', required: true },
+                    { key: 'eligibility', label: 'Certificate of Eligibility', required: true },
+                    { key: 'tor', label: 'Transcript of Records', required: true },
+                    { key: 'prc', label: 'Updated PRC License/ID', required: true },
+                    { key: 'diploma', label: 'Diploma (optional)', required: false },
+                    { key: 'resume', label: 'Resume', required: true },
+                    { key: 'performance_rating', label: 'Performance Rating', required: false },
+                    { key: 'training_certificates', label: 'Training Certificates', required: false },
+                    { key: 'application_education', label: 'Application of Education', required: false },
+                    { key: 'application_learning', label: 'Application of Learning and Development', required: false }
+                  ].map((doc) => {
+                    const isSelected = selectedDocKey === doc.key;
+                    const isUploaded = availableDocs.find(d => d.key === doc.key)?.existsInAzure;
+                    return (
+                      <div
+                        key={doc.key}
+                        onClick={() => setSelectedDocKey(doc.key)}
+                        style={{
+                          padding: '12px 16px',
+                          cursor: 'pointer',
+                          backgroundColor: isSelected ? 'var(--blue-50)' : 'white',
+                          borderLeft: isSelected ? '4px solid var(--blue-600)' : '4px solid transparent',
+                          borderBottom: '1px solid #F1F5F9',
+                          transition: 'all 0.15s ease',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '2px'
+                        }}
+                      >
+                        <div style={{ fontWeight: 'bold', fontSize: '13px', color: isSelected ? 'var(--blue-800)' : 'var(--navy)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          {doc.label} {doc.required && <span style={{ color: '#EF4444' }}>*</span>} {isUploaded ? '✓' : ''}
+                        </div>
+                        <div style={{ fontSize: '11px', color: isSelected ? 'var(--blue-600)' : '#64748B' }}>
+                          {isUploaded ? 'View Uploaded Document' : 'No document uploaded'}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Document Preview Pane */}
+              <div style={{ border: '1px solid var(--line)', borderRadius: '12px', overflow: 'hidden' }}>
+                <div style={{ padding: '12px 16px', backgroundColor: 'var(--blue-50)', borderBottom: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <b style={{ color: 'var(--blue-900)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <svg 
+                      width="16" 
+                      height="16" 
+                      viewBox="0 0 24 24" 
+                      fill="none" 
+                      stroke="currentColor" 
+                      strokeWidth="2.5" 
+                      strokeLinecap="round" 
+                      strokeLinejoin="round"
+                      style={{ color: 'var(--blue-800)' }}
+                    >
+                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                      <circle cx="12" cy="12" r="3" />
+                    </svg>
+                    Document Viewer: {
+                      selectedDocKey === 'pds' ? 'Personal Data Sheet (PDS)' :
+                      selectedDocKey === 'work_experience' ? 'Work Experience Sheet' :
+                      selectedDocKey === 'eligibility' ? 'Certificate of Eligibility' :
+                      selectedDocKey === 'tor' ? 'Transcript of Records (TOR)' :
+                      selectedDocKey === 'prc' ? 'Updated PRC License/ID' :
+                      selectedDocKey === 'diploma' ? 'Diploma' :
+                      selectedDocKey === 'resume' ? 'Resume' :
+                      selectedDocKey === 'performance_rating' ? 'Performance Rating' :
+                      selectedDocKey === 'training_certificates' ? 'Training Certificates' :
+                      selectedDocKey === 'application_education' ? 'Application of Education' :
+                      selectedDocKey === 'application_learning' ? 'Application of Learning and Development' : ''
+                    }
+                  </b>
+                  <span style={{ fontSize: '12px', color: 'var(--muted)' }}>Page 1 of 1</span>
+                </div>
+                {(() => {
+                  if (docsLoading) {
+                    return (
+                      <div style={{
+                        backgroundColor: '#f8fafc',
+                        minHeight: '400px',
+                        maxHeight: '550px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        gap: '12px',
+                        width: '100%',
+                        color: '#64748B',
+                        padding: '40px',
+                        boxSizing: 'border-box'
+                      }}>
+                        <style>{`
+                          @keyframes spin {
+                            0% { transform: rotate(0deg); }
+                            100% { transform: rotate(360deg); }
+                          }
+                        `}</style>
+                        <div style={{
+                          border: '4px solid #e2e8f0',
+                          borderTop: '4px solid var(--blue)',
+                          borderRadius: '50%',
+                          width: '32px',
+                          height: '32px',
+                          animation: 'spin 1s linear infinite'
+                        }} />
+                        <b style={{ fontSize: '14px' }}>Loading Documents...</b>
+                        <span style={{ fontSize: '12px' }}>Checking file attachments</span>
+                      </div>
+                    );
+                  }
+                  const selectedDocInfo = availableDocs.find(d => d.key === selectedDocKey);
+                  const existsInAzure = !!selectedDocInfo?.existsInAzure;
+                  const isPdf = !!selectedDocInfo?.filename?.toLowerCase().endsWith('.pdf');
+                  return (
+                    <div style={{
+                      padding: (existsInAzure && isPdf) ? '0' : '24px',
+                      backgroundColor: '#f8fafc',
+                      minHeight: '400px',
+                      maxHeight: '550px',
+                      overflowY: (existsInAzure && isPdf) ? 'hidden' : 'auto',
+                      display: 'flex',
+                      justifyContent: 'center',
+                      width: '100%',
+                      alignItems: 'stretch'
+                    }}>
+                      {existsInAzure ? (
+                        isPdf ? (
+                          <iframe
+                            src={`${import.meta.env.VITE_API_URL || window.location.origin}/api/applications/${selectedDocApp.id}/documents/${selectedDocKey}/download?token=${localStorage.getItem('agap_token')}&dpi=98`}
+                            style={{ width: '100%', height: '550px', border: 'none', borderRadius: '0 0 12px 12px' }}
+                            title="Azure Document Viewer"
+                          />
+                        ) : (
+                          <div style={{ width: '100%', display: 'flex', flexDirection: 'column', backgroundColor: 'white', border: '1px solid var(--line)', borderRadius: '12px', overflow: 'hidden' }}>
+                            <div style={{ padding: '12px 16px', borderBottom: '1px solid #e2e8f0', background: '#f8fafc', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <span style={{ fontSize: '12px', color: '#64748B', fontWeight: 'bold' }}>
+                                Previewing Spreadsheet: {selectedDocInfo?.filename}
+                              </span>
+                              <a
+                                href={`${import.meta.env.VITE_API_URL || window.location.origin}/api/applications/${selectedDocApp.id}/documents/${selectedDocKey}/download?token=${localStorage.getItem('agap_token')}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                style={{ fontSize: '12px', color: 'var(--blue-600)', textDecoration: 'underline', fontWeight: 'bold' }}
+                              >
+                                Download Original
+                              </a>
+                            </div>
+                            <div style={{ overflow: 'auto', padding: '16px', boxSizing: 'border-box', maxHeight: '480px' }}>
+                              {csvLoading ? (
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '200px', gap: '8px', color: '#64748B' }}>
+                                  <span style={{ fontSize: '13px' }}>Loading sheet data...</span>
+                                </div>
+                              ) : csvError ? (
+                                <div style={{ color: '#EF4444', padding: '16px', textAlign: 'center', fontSize: '13px' }}>
+                                  Failed to load data: {csvError}
+                                </div>
+                              ) : csvData ? (
+                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', textAlign: 'left', fontFamily: 'sans-serif' }}>
+                                  <thead>
+                                    <tr style={{ backgroundColor: '#f1f5f9', borderBottom: '2px solid #cbd5e1' }}>
+                                      {csvData[0]?.map((cell, idx) => (
+                                        <th key={idx} style={{ padding: '8px 10px', border: '1px solid #e2e8f0', color: '#1e293b', fontWeight: 'bold', whiteSpace: 'nowrap' }}>
+                                          {cell}
+                                        </th>
+                                      ))}
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {csvData.slice(1).map((row, rowIdx) => (
+                                      <tr key={rowIdx} style={{ borderBottom: '1px solid #e2e8f0', backgroundColor: rowIdx % 2 === 0 ? 'white' : '#f8fafc' }}>
+                                        {row.map((cell, cellIdx) => (
+                                          <td key={cellIdx} style={{ padding: '6px 10px', border: '1px solid #e2e8f0', color: '#334155', whiteSpace: 'nowrap' }}>
+                                            {cell}
+                                          </td>
+                                        ))}
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              ) : null}
+                            </div>
+                          </div>
+                        )
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#64748B', gap: '8px' }}>
+                          <span style={{ fontSize: '14px', fontWeight: 'bold' }}>No Preview Available</span>
+                          <span style={{ fontSize: '12px' }}>Please select another document from the checklist</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
             </div>
           </div>
         </div>

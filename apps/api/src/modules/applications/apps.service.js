@@ -16,9 +16,9 @@ export async function getHydratedApplications(vacancyId = null, region = null, d
       ap.eligibility as applicant_eligibility,
       ap.educational_background as applicant_educational_background,
       ap.civil_service_eligibility as applicant_civil_service_eligibility,
-      v.title as vacancy_title,
-      v.item_no as vacancy_item_no,
-      v.division as vacancy_division,
+      p.title as vacancy_title,
+      a.appointment_item_no as vacancy_item_no,
+      jc.division as vacancy_division,
       v.school as vacancy_school,
       v.salary_grade as vacancy_salary_grade,
       v.posting_end as vacancy_posting_end,
@@ -43,12 +43,13 @@ export async function getHydratedApplications(vacancyId = null, region = null, d
       ) as qual_evals
     FROM applicants ap
     INNER JOIN applications a ON a.applicant_id = ap.id
+    LEFT JOIN job_clusters jc ON a.job_cluster_id = jc.id
+    LEFT JOIN positions p ON jc.position_id = p.id
     LEFT JOIN (
       SELECT DISTINCT ON (job_cluster_id) * 
       FROM vacancies 
       ORDER BY job_cluster_id, created_at ASC
     ) v ON a.job_cluster_id = v.job_cluster_id
-    LEFT JOIN positions p ON v.position_id = p.id
   `;
   
   const values = [];
@@ -182,6 +183,8 @@ export async function getHydratedApplications(vacancyId = null, region = null, d
       appointmentReferenceCode: row.appointment_reference_code || null,
       appointmentDate: row.appointment_date ? new Date(row.appointment_date).toISOString() : null,
       vacancyId: row.vacancy_id || null,
+      jobClusterId: row.vacancy_id || null,
+      positionTitle: row.position_title || row.vacancy_title || "—",
       fit: overallFit,
       applicantObj: {
         id: row.applicant_id,
