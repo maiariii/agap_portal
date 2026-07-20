@@ -599,7 +599,7 @@ export default function AssessmentPage() {
               <label>Vacancy</label>
               <select value={qualVacancyFilter} onChange={e => setQualVacancyFilter(e.target.value)}>
                 <option value="">All vacancies</option>
-                {vacancies.map(v => <option key={v.id} value={v.id}>{v.title}</option>)}
+                {vacancies.map(v => <option key={v.id} value={v.jobClusterId}>{v.title}</option>)}
               </select>
             </div>
             <div>
@@ -854,7 +854,7 @@ export default function AssessmentPage() {
                             e.stopPropagation();
                             setAppointConfirmApp(r);
                             setAppointDate(new Date().toISOString().slice(0, 10));
-                            const vacCluster = vacancies.find(v => v.id === r.vacancyId);
+                            const vacCluster = vacancies.find(v => v.jobClusterId === r.vacancyId);
                             const unfilledItems = vacCluster?.unfilledItemNos ? vacCluster.unfilledItemNos.split(',').map(s => s.trim()).filter(Boolean) : [];
                             setAppointItemNo(unfilledItems[0] || '');
                             const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');

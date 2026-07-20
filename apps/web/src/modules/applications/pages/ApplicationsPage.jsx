@@ -472,7 +472,7 @@ export default function ApplicationsPage() {
               <label>Vacancy Item</label>
               <select value={appVacancyFilter} onChange={e => setAppVacancyFilter(e.target.value)}>
                 <option value="">All vacancies</option>
-                {vacancies.map(v => <option key={v.id} value={v.id}>{v.title} — {v.itemNo}</option>)}
+                {vacancies.map(v => <option key={v.id} value={v.jobClusterId}>{v.title} — {v.itemNo}</option>)}
               </select>
             </div>
             <div>

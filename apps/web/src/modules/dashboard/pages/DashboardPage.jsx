@@ -50,11 +50,11 @@ export default function DashboardPage() {
   const dashboardVacancies = useMemo(() => {
     return vacancies.filter(v => {
       if (homeFilters.positionId && v.positionId !== homeFilters.positionId) return false;
-      const isFilled = applications.some(a => a.vacancyId === v.id && a.appointmentStatus === 'appointed');
+      const isFilled = applications.some(a => a.vacancyId === v.jobClusterId && a.appointmentStatus === 'appointed');
       const itemStatusVal = isFilled ? 'filled' : 'unfilled';
       if (homeFilters.itemStatus && itemStatusVal !== homeFilters.itemStatus) return false;
       if (homeFilters.postingStatus && v.status !== homeFilters.postingStatus) return false;
-      if (homeFilters.status && !applications.some(a => a.vacancyId === v.id && a.status === homeFilters.status)) return false;
+      if (homeFilters.status && !applications.some(a => a.vacancyId === v.jobClusterId && a.status === homeFilters.status)) return false;
       return true;
     });
   }, [vacancies, applications, homeFilters]);
@@ -62,7 +62,7 @@ export default function DashboardPage() {
   // Active Dashboard Config selection
   const activeDashboardData = useMemo(() => {
     const isFilledItem = (v) => {
-      return applications.some(a => a.vacancyId === v.id && a.appointmentStatus === 'appointed');
+      return applications.some(a => a.vacancyId === v.jobClusterId && a.appointmentStatus === 'appointed');
     };
 
     if (homeDistributionBy === 'item_status') {

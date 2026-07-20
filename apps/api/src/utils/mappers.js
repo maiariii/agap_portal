@@ -31,6 +31,7 @@ export function mapVacancy(row) {
     postingStart: row.posting_start ? new Date(row.posting_start) : null,
     postingEnd: row.posting_end ? new Date(row.posting_end) : null,
     salaryGrade: row.salary_grade,
+    jobClusterId: row.job_cluster_id,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at)
   };

@@ -49,23 +49,26 @@ export async function getVacancies(req, res) {
 
     const { rows } = await pool.query(`
       SELECT 
-        v.job_cluster_id as id,
+        v.id,
         v.position_id,
-        string_agg(v.item_no, ', ') as item_no,
-        string_agg(v.item_no, ', ') FILTER (WHERE v.filling_up_status = 'UNFILLED') as unfilled_item_nos,
+        v.item_no,
+        v.job_cluster_id,
+        CASE WHEN v.filling_up_status = 'UNFILLED' THEN v.item_no ELSE '' END as unfilled_item_nos,
         v.title,
-        CASE WHEN COUNT(DISTINCT v.school) > 1 THEN 'Multiple Schools' ELSE MAX(v.school) END as school,
+        v.school,
         v.division,
         v.region,
-        CASE WHEN COUNT(*) FILTER (WHERE v.status = 'open') > 0 THEN 'open' ELSE 'closed' END as status,
-        CASE WHEN COUNT(*) FILTER (WHERE v.filling_up_status = 'UNFILLED') > 0 THEN 'UNFILLED' ELSE 'FILLED' END as filling_up_status,
-        MIN(v.posting_start) as posting_start,
-        MAX(v.posting_end) as posting_end,
-        MAX(v.salary_grade) as salary_grade,
-        MIN(v.created_at) as created_at,
-        MAX(v.updated_at) as updated_at,
-        COUNT(*) FILTER (WHERE v.status = 'open' AND v.filling_up_status = 'UNFILLED') as open_slots,
-        COUNT(*) as total_slots,
+        v.status,
+        v.school_level,
+        v.school_id,
+        v.filling_up_status,
+        v.posting_start,
+        v.posting_end,
+        v.salary_grade,
+        v.created_at,
+        v.updated_at,
+        CASE WHEN v.status = 'open' AND v.filling_up_status = 'UNFILLED' THEN 1 ELSE 0 END as open_slots,
+        1 as total_slots,
         p.title as position_title, p.track as position_track,
         p.required_bachelor_degree as position_required_bachelor_degree,
         p.required_degree_keywords as position_required_degree_keywords,
@@ -75,9 +78,6 @@ export async function getVacancies(req, res) {
       FROM vacancies v
       JOIN positions p ON v.position_id = p.id
       WHERE v.region = $1 AND v.division = $2
-      GROUP BY v.job_cluster_id, v.position_id, v.title, v.division, v.region,
-               p.title, p.track, p.required_bachelor_degree, p.required_degree_keywords,
-               p.min_years_experience, p.min_training_hours, p.eligibility_required
     `, [region, division]);
 
     res.json(rows.map(r => ({

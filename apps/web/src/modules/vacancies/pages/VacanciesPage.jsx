@@ -275,7 +275,7 @@ export default function VacanciesPage() {
     if (key === 'itemNo') return v.itemNo || '';
     if (key === 'position') return positions.find(p => p.id === v.positionId)?.title || 'Unmapped position';
     if (key === 'schoolOffice') return v.school || v.division || '';
-    if (key === 'applications') return applications.filter(a => a.vacancyId === v.id).length;
+    if (key === 'applications') return applications.filter(a => a.vacancyId === v.jobClusterId).length;
     if (key === 'deadline') return v.postingEnd || '';
     if (key === 'daysRemaining') {
       if (!v.postingStart || !v.postingEnd) return -999999;
@@ -888,7 +888,7 @@ export default function VacanciesPage() {
             </thead>
             <tbody>
               {paginatedVacancies.map((vac, idx) => {
-                const appCount = applications.filter(a => a.vacancyId === vac.id).length;
+                const appCount = applications.filter(a => a.vacancyId === vac.jobClusterId).length;
                 const today = new Date();
                 today.setHours(0, 0, 0, 0);
                 const start = vac.postingStart ? new Date(vac.postingStart.slice(0, 10) + "T00:00:00") : null;
