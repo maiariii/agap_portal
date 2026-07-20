@@ -48,19 +48,43 @@ export async function getVacancies(req, res) {
     }
 
     const { rows } = await pool.query(`
-      SELECT v.*, p.title as position_title, p.track as position_track,
-             p.required_bachelor_degree as position_required_bachelor_degree,
-             p.required_degree_keywords as position_required_degree_keywords,
-             p.min_years_experience as position_min_years_experience,
-             p.min_training_hours as position_min_training_hours,
-             p.eligibility_required as position_eligibility_required
+      SELECT 
+        v.job_cluster_id as id,
+        v.position_id,
+        string_agg(v.item_no, ', ') as item_no,
+        string_agg(v.item_no, ', ') FILTER (WHERE v.filling_up_status = 'UNFILLED') as unfilled_item_nos,
+        v.title,
+        CASE WHEN COUNT(DISTINCT v.school) > 1 THEN 'Multiple Schools' ELSE MAX(v.school) END as school,
+        v.division,
+        v.region,
+        CASE WHEN COUNT(*) FILTER (WHERE v.status = 'open') > 0 THEN 'open' ELSE 'closed' END as status,
+        CASE WHEN COUNT(*) FILTER (WHERE v.filling_up_status = 'UNFILLED') > 0 THEN 'UNFILLED' ELSE 'FILLED' END as filling_up_status,
+        MIN(v.posting_start) as posting_start,
+        MAX(v.posting_end) as posting_end,
+        MAX(v.salary_grade) as salary_grade,
+        MIN(v.created_at) as created_at,
+        MAX(v.updated_at) as updated_at,
+        COUNT(*) FILTER (WHERE v.status = 'open' AND v.filling_up_status = 'UNFILLED') as open_slots,
+        COUNT(*) as total_slots,
+        p.title as position_title, p.track as position_track,
+        p.required_bachelor_degree as position_required_bachelor_degree,
+        p.required_degree_keywords as position_required_degree_keywords,
+        p.min_years_experience as position_min_years_experience,
+        p.min_training_hours as position_min_training_hours,
+        p.eligibility_required as position_eligibility_required
       FROM vacancies v
       JOIN positions p ON v.position_id = p.id
       WHERE v.region = $1 AND v.division = $2
+      GROUP BY v.job_cluster_id, v.position_id, v.title, v.division, v.region,
+               p.title, p.track, p.required_bachelor_degree, p.required_degree_keywords,
+               p.min_years_experience, p.min_training_hours, p.eligibility_required
     `, [region, division]);
 
     res.json(rows.map(r => ({
       ...mapVacancy(r),
+      openSlots: r.open_slots ? parseInt(r.open_slots) : 0,
+      totalSlots: r.total_slots ? parseInt(r.total_slots) : 0,
+      unfilledItemNos: r.unfilled_item_nos || '',
       position: {
         id: r.position_id,
         title: r.position_title,
@@ -88,10 +112,18 @@ export async function createVacancy(req, res) {
     const region = user.region || 'NCR';
     const division = user.division || bodyDivision || 'SDO Manila';
 
+    const jobClusterId = crypto.createHash('md5').update(`${positionId}|${division}|${region}`).digest('hex');
+    await pool.query(
+      `INSERT INTO job_clusters (id, position_id, division, region)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (id) DO NOTHING`,
+      [jobClusterId, positionId, division, region]
+    );
+
     const id = crypto.randomUUID();
     const { rows } = await pool.query(
-      `INSERT INTO vacancies (id, position_id, item_no, title, school, division, region, status, posting_start, posting_end, salary_grade)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      `INSERT INTO vacancies (id, position_id, item_no, title, school, division, region, status, posting_start, posting_end, salary_grade, job_cluster_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        RETURNING *`,
       [
         id,
@@ -104,7 +136,8 @@ export async function createVacancy(req, res) {
         'open',
         postingStart ? new Date(postingStart) : null,
         postingEnd ? new Date(postingEnd) : null,
-        salaryGrade ? parseInt(salaryGrade) : null
+        salaryGrade ? parseInt(salaryGrade) : null,
+        jobClusterId
       ]
     );
     res.json(mapVacancy(rows[0]));
@@ -364,10 +397,18 @@ export async function importNosca(req, res) {
         finalSchoolId = null;
       }
 
+      const jobClusterId = crypto.createHash('md5').update(`${positionId}|${division}|${region}`).digest('hex');
+      await pool.query(
+        `INSERT INTO job_clusters (id, position_id, division, region)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (id) DO NOTHING`,
+        [jobClusterId, positionId, division, region]
+      );
+
       const id = crypto.randomUUID();
       const { rows: vacRows } = await pool.query(
-        `INSERT INTO vacancies (id, position_id, item_no, title, school, division, region, status, school_level, school_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+        `INSERT INTO vacancies (id, position_id, item_no, title, school, division, region, status, school_level, school_id, job_cluster_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
         [
           id,
           positionId,
@@ -378,7 +419,8 @@ export async function importNosca(req, res) {
           region,
           'closed',
           finalSchoolLevel,
-          finalSchoolId
+          finalSchoolId,
+          jobClusterId
         ]
       );
       createdList.push(mapVacancy(vacRows[0]));

@@ -800,88 +800,111 @@ export default function AssessmentPage() {
               </tr>
             </thead>
             <tbody>
-              {paginatedQualified.map((r, i) => {
-                const cs = r.comparativeAssessmentScores || r.appObj?.comparativeAssessmentScores || {};
-                const hasCompScores = ['bei', 'wst', 'we'].every(k => cs[k] !== '' && cs[k] !== null && cs[k] !== undefined && Number.isFinite(Number(cs[k])));
-                const compAvgValue = hasCompScores ? (['bei', 'wst', 'we'].reduce((sum, k) => sum + Number(cs[k]), 0) / 3) : null;
-                const appt = r.appointmentStatus || r.appObj?.appointmentStatus;
-                
-                const areaScores = r.latestEval?.areaScores || {};
-                const hasValue = v => v !== "" && v !== null && v !== undefined && Number.isFinite(Number(v));
-                const areaCount = Object.keys(areaScores).filter(k => SCORE_AREAS.some(sa => sa.key === k)).map(k => hasValue(areaScores[k])).filter(Boolean).length;
-                const allAreasScored = areaCount === SCORE_AREAS.length;
+              {(() => {
+                const grouped = {};
+                paginatedQualified.forEach(item => {
+                  const groupKey = item.vacancy || 'Unspecified Cluster';
+                  if (!grouped[groupKey]) {
+                    grouped[groupKey] = [];
+                  }
+                  grouped[groupKey].push(item);
+                });
 
+                if (paginatedQualified.length === 0) {
+                  return (
+                    <tr>
+                      <td colSpan={11} style={{ textAlign: 'center' }}>No qualified personnel match the filters.</td>
+                    </tr>
+                  );
+                }
 
-                const fmtScore = (v) => (v !== '' && v !== null && v !== undefined && Number.isFinite(Number(v))) ? (
-                  <span className={`badge ${Number(v) >= 85 ? 'green' : Number(v) >= 70 ? 'blue' : Number(v) >= 50 ? 'orange' : 'red'}`}>
-                    {Number(v).toFixed(2)}%
-                  </span>
-                ) : '—';
+                return Object.entries(grouped).map(([clusterName, items]) => (
+                  <React.Fragment key={clusterName}>
+                    <tr style={{ backgroundColor: '#f8fafc', fontWeight: 'bold' }}>
+                      <td colSpan={11} style={{ textAlign: 'left', padding: '10px 16px', color: 'var(--navy)', borderLeft: '4px solid var(--blue)' }}>
+                        📂 Vacancy Cluster: {clusterName}
+                      </td>
+                    </tr>
+                    {items.map((r, i) => {
+                      const cs = r.comparativeAssessmentScores || r.appObj?.comparativeAssessmentScores || {};
+                      const hasCompScores = ['bei', 'wst', 'we'].every(k => cs[k] !== '' && cs[k] !== null && cs[k] !== undefined && Number.isFinite(Number(cs[k])));
+                      const appt = r.appointmentStatus || r.appObj?.appointmentStatus;
+                      
+                      const areaScores = r.latestEval?.areaScores || {};
+                      const hasValue = v => v !== "" && v !== null && v !== undefined && Number.isFinite(Number(v));
+                      const areaCount = Object.keys(areaScores).filter(k => SCORE_AREAS.some(sa => sa.key === k)).map(k => hasValue(areaScores[k])).filter(Boolean).length;
+                      const allAreasScored = areaCount === SCORE_AREAS.length;
 
-                const assessment = getAssessmentStatus(r);
-                
-                const actionCell = appt === 'appointed' ? (
-                  <span className="badge green">Appointed</span>
-                ) : appt === 'rejected' ? (
-                  <span className="badge red">Rejected</span>
-                ) : hasCompScores ? (
-                  <button
-                    className="good vac-action"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setAppointConfirmApp(r);
-                      setAppointDate(new Date().toISOString().slice(0, 10));
-                      // Autogenerate appointment reference number instead
-                      const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-                      const rand = Math.floor(1000 + Math.random() * 9000);
-                      setAppointRefCode(`APPT-${today}-${rand}`);
-                      setAppointPasscode('');
-                      setShowSdsReminderModal(true);
-                    }}
-                  >
-                    Appoint
-                  </button>
-                ) : (
-                  <button
-                    className="secondary vac-action incomplete"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setShowIncompleteAppointModal(true);
-                    }}
-                  >
-                    Appoint
-                  </button>
-                );
-
-                return (
-                  <tr key={r.id} className="clickable-row" onClick={() => openQualifiedScoringModal(r)}>
-                    <td className="row-num">{((qualPage - 1) * qualPageSize) + i + 1}</td>
-                    <td><b>{r.applicant}</b><br/><span className="small">{r.code}</span></td>
-                    <td>{r.bachelorDegree || '—'}</td>
-                    <td>{r.vacancy}</td>
-                    <td>{r.itemNo || '—'}</td>
-                    <td className="num-col">
-                      {allAreasScored && r.fit !== null && r.fit !== undefined ? (
-                        <span className={`badge ${r.fit >= 85 ? 'green' : r.fit >= 70 ? 'blue' : r.fit >= 50 ? 'orange' : 'red'}`}>
-                          {Number(r.fit).toFixed(2)}
+                      const fmtScore = (v) => (v !== '' && v !== null && v !== undefined && Number.isFinite(Number(v))) ? (
+                        <span className={`badge ${Number(v) >= 85 ? 'green' : Number(v) >= 70 ? 'blue' : Number(v) >= 50 ? 'orange' : 'red'}`}>
+                          {Number(v).toFixed(2)}%
                         </span>
-                      ) : '—'}
-                    </td>
-                    <td className="num-col">{fmtScore(cs.bei)}</td>
-                    <td className="num-col">{fmtScore(cs.wst)}</td>
-                    <td className="num-col">{fmtScore(cs.we)}</td>
-                    <td>
-                      <span className={`badge ${assessment.badge}`}>{assessment.label}</span>
-                    </td>
-                    <td>{actionCell}</td>
-                  </tr>
-                );
-              })}
-              {paginatedQualified.length === 0 && (
-                <tr>
-                  <td colSpan={11} style={{ textAlign: 'center' }}>No qualified personnel match the filters.</td>
-                </tr>
-              )}
+                      ) : '—';
+
+                      const assessment = getAssessmentStatus(r);
+                      
+                      const actionCell = appt === 'appointed' ? (
+                        <span className="badge green">Appointed</span>
+                      ) : appt === 'rejected' ? (
+                        <span className="badge red">Rejected</span>
+                      ) : hasCompScores ? (
+                        <button
+                          className="good vac-action"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setAppointConfirmApp(r);
+                            setAppointDate(new Date().toISOString().slice(0, 10));
+                            const vacCluster = vacancies.find(v => v.id === r.vacancyId);
+                            const unfilledItems = vacCluster?.unfilledItemNos ? vacCluster.unfilledItemNos.split(',').map(s => s.trim()).filter(Boolean) : [];
+                            setAppointItemNo(unfilledItems[0] || '');
+                            const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+                            const rand = Math.floor(1000 + Math.random() * 9000);
+                            setAppointRefCode(`APPT-${today}-${rand}`);
+                            setAppointPasscode('');
+                            setShowSdsReminderModal(true);
+                          }}
+                        >
+                          Appoint
+                        </button>
+                      ) : (
+                        <button
+                          className="secondary vac-action incomplete"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setShowIncompleteAppointModal(true);
+                          }}
+                        >
+                          Appoint
+                        </button>
+                      );
+
+                      return (
+                        <tr key={r.id} className="clickable-row" onClick={() => openQualifiedScoringModal(r)}>
+                          <td className="row-num">{((qualPage - 1) * qualPageSize) + i + 1}</td>
+                          <td><b>{r.applicant}</b><br/><span className="small">{r.code}</span></td>
+                          <td>{r.bachelorDegree || '—'}</td>
+                          <td>{r.vacancy}</td>
+                          <td>{r.appointmentItemNo || '—'}</td>
+                          <td className="num-col">
+                            {allAreasScored && r.fit !== null && r.fit !== undefined ? (
+                              <span className={`badge ${r.fit >= 85 ? 'green' : r.fit >= 70 ? 'blue' : r.fit >= 50 ? 'orange' : 'red'}`}>
+                                {Number(r.fit).toFixed(2)}
+                              </span>
+                            ) : '—'}
+                          </td>
+                          <td className="num-col">{fmtScore(cs.bei)}</td>
+                          <td className="num-col">{fmtScore(cs.wst)}</td>
+                          <td className="num-col">{fmtScore(cs.we)}</td>
+                          <td>
+                            <span className={`badge ${assessment.badge}`}>{assessment.label}</span>
+                          </td>
+                          <td>{actionCell}</td>
+                        </tr>
+                      );
+                    })}
+                  </React.Fragment>
+                ));
+              })()}
             </tbody>
           </table>
         </div>

@@ -112,7 +112,7 @@ export async function postIer(req, res) {
   const { vacancyId } = req.body;
   try {
     const { rows: apps } = await pool.query(
-      "SELECT id FROM applications WHERE vacancy_id = $1 AND LOWER(status) = 'qualified'",
+      "SELECT id FROM applications WHERE job_cluster_id = $1 AND LOWER(status) = 'qualified'",
       [vacancyId]
     );
 
@@ -242,9 +242,8 @@ export async function confirmAppointment(req, res) {
     const appointmentReferenceCode = `APPT-${today}-${rand}`;
 
     const { rows } = await pool.query(
-      `SELECT a.*, v.item_no as vacancy_item_no 
+      `SELECT a.* 
        FROM applications a 
-       JOIN vacancies v ON a.vacancy_id = v.id 
        WHERE a.id = $1`,
       [id]
     );
@@ -254,11 +253,15 @@ export async function confirmAppointment(req, res) {
       return res.status(404).json({ error: 'Application not found' });
     }
 
+    const selectedItemNo = appointmentItemNo || currentApp.appointment_item_no;
+    if (!selectedItemNo) {
+      return res.status(400).json({ error: 'A specific plantilla item number must be selected.' });
+    }
+
     const { rows: occupiedRows } = await pool.query(
       `SELECT a.id FROM applications a
-       JOIN vacancies v ON a.vacancy_id = v.id
-       WHERE v.item_no = $1 AND a.appointment_status = 'appointed' AND a.id <> $2 LIMIT 1`,
-      [currentApp.vacancy_item_no, id]
+       WHERE a.appointment_item_no = $1 AND a.appointment_status = 'appointed' AND a.id <> $2 LIMIT 1`,
+      [selectedItemNo, id]
     );
     const occupiedApp = occupiedRows[0];
 
@@ -270,7 +273,7 @@ export async function confirmAppointment(req, res) {
          WHERE id = $4`,
         [
           appointmentDate ? new Date(appointmentDate) : null,
-          currentApp.vacancy_item_no,
+          selectedItemNo,
           appointmentReferenceCode,
           id
         ]
@@ -279,7 +282,7 @@ export async function confirmAppointment(req, res) {
       const historyId = crypto.randomUUID();
       await pool.query(
         `INSERT INTO application_history (id, application_id, text) VALUES ($1, $2, $3)`,
-        [historyId, id, `Not Appointed: Item ${currentApp.vacancy_item_no} is already occupied by another appointed applicant.`]
+        [historyId, id, `Not Appointed: Item ${selectedItemNo} is already occupied by another appointed applicant.`]
       );
 
       return res.json({ success: true, occupied: true });
@@ -292,46 +295,55 @@ export async function confirmAppointment(req, res) {
        WHERE id = $4`,
       [
         new Date(appointmentDate),
-        currentApp.vacancy_item_no,
+        selectedItemNo,
         appointmentReferenceCode,
         id
       ]
     );
 
-    // Update vacancy status to closed and filling_up_status to FILLED
+    // Update vacancy status to closed and filling_up_status to FILLED for the specific item
     await pool.query(
       `UPDATE vacancies 
        SET status = 'closed', filling_up_status = 'FILLED', updated_at = NOW() 
-       WHERE id = $1`,
-      [currentApp.vacancy_id]
+       WHERE item_no = $1 AND job_cluster_id = $2`,
+      [selectedItemNo, currentApp.job_cluster_id]
     );
 
     const historyId = crypto.randomUUID();
     await pool.query(
       `INSERT INTO application_history (id, application_id, text) VALUES ($1, $2, $3)`,
-      [historyId, id, `Appointed to item ${currentApp.vacancy_item_no}. Reference: ${appointmentReferenceCode}`]
+      [historyId, id, `Appointed to item ${selectedItemNo}. Reference: ${appointmentReferenceCode}`]
     );
 
-    const { rows: otherApps } = await pool.query(
-      `SELECT id FROM applications 
-       WHERE vacancy_id = $1 AND id <> $2 AND LOWER(status) IN ('qualified', 'for_comparative_assessment', 'not_appointed')`,
-      [currentApp.vacancy_id, id]
+    // Check if there are any remaining unfilled items in the cluster
+    const { rows: unfilledItems } = await pool.query(
+      `SELECT id FROM vacancies WHERE job_cluster_id = $1 AND filling_up_status = 'UNFILLED'`,
+      [currentApp.job_cluster_id]
     );
 
-    for (const otherApp of otherApps) {
-      await pool.query(
-        `UPDATE applications 
-         SET appointment_status = 'not_appointed', 
-             reason = $1, updated_at = NOW()
-         WHERE id = $2`,
-        [`Item ${currentApp.vacancy_item_no} filled by another applicant`, otherApp.id]
+    // If no more unfilled items exist in this cluster, mark all other qualified candidates as not_appointed
+    if (unfilledItems.length === 0) {
+      const { rows: otherApps } = await pool.query(
+        `SELECT id FROM applications 
+         WHERE job_cluster_id = $1 AND id <> $2 AND LOWER(status) IN ('qualified', 'for_comparative_assessment', 'not_appointed')`,
+        [currentApp.job_cluster_id, id]
       );
 
-      const otherHistoryId = crypto.randomUUID();
-      await pool.query(
-        `INSERT INTO application_history (id, application_id, text) VALUES ($1, $2, $3)`,
-        [otherHistoryId, otherApp.id, `Not Appointed: Item ${currentApp.vacancy_item_no} filled by another applicant`]
-      );
+      for (const otherApp of otherApps) {
+        await pool.query(
+          `UPDATE applications 
+           SET appointment_status = 'not_appointed', 
+               reason = $1, updated_at = NOW()
+           WHERE id = $2`,
+          [`All items in the job cluster have been filled`, otherApp.id]
+        );
+
+        const otherHistoryId = crypto.randomUUID();
+        await pool.query(
+          `INSERT INTO application_history (id, application_id, text) VALUES ($1, $2, $3)`,
+          [otherHistoryId, otherApp.id, `Not Appointed: All items in the job cluster have been filled.`]
+        );
+      }
     }
 
     res.json({ success: true, occupied: false, appointmentReferenceCode });
@@ -366,25 +378,27 @@ export async function rollbackAppointment(req, res) {
       return res.status(400).json({ error: 'Invalid passcode. Appointment cannot be rolled back.' });
     }
 
-    const { rows } = await pool.query('SELECT vacancy_id FROM applications WHERE id = $1', [id]);
+    const { rows } = await pool.query('SELECT job_cluster_id, appointment_item_no FROM applications WHERE id = $1', [id]);
     const currentApp = rows[0];
     if (!currentApp) {
       return res.status(404).json({ error: 'Application not found' });
     }
 
-    const { vacancy_id } = currentApp;
+    const { job_cluster_id, appointment_item_no } = currentApp;
 
-    await pool.query(
-      `UPDATE vacancies 
-       SET status = 'open', filling_up_status = 'UNFILLED', updated_at = NOW() 
-       WHERE id = $1`,
-      [vacancy_id]
-    );
+    if (appointment_item_no) {
+      await pool.query(
+        `UPDATE vacancies 
+         SET status = 'open', filling_up_status = 'UNFILLED', updated_at = NOW() 
+         WHERE item_no = $1 AND job_cluster_id = $2`,
+        [appointment_item_no, job_cluster_id]
+      );
+    }
 
     const { rows: affectedApps } = await pool.query(
       `SELECT id, appointment_status FROM applications 
-       WHERE vacancy_id = $1 AND (appointment_status = 'appointed' OR appointment_status = 'not_appointed')`,
-      [vacancy_id]
+       WHERE job_cluster_id = $1 AND (appointment_status = 'appointed' OR appointment_status = 'not_appointed')`,
+      [job_cluster_id]
     );
 
     await pool.query(

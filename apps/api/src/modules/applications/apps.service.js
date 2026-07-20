@@ -5,6 +5,7 @@ export async function getHydratedApplications(vacancyId = null, region = null, d
   let query = `
     SELECT 
       a.*,
+      a.job_cluster_id as vacancy_id,
       COALESCE(ap.name, ap.first_name || ' ' || ap.surname) as applicant_name,
       COALESCE(ap.code, ap.applicant_number) as applicant_code,
       ap.local_resident as applicant_local_resident,
@@ -42,7 +43,11 @@ export async function getHydratedApplications(vacancyId = null, region = null, d
       ) as qual_evals
     FROM applicants ap
     INNER JOIN applications a ON a.applicant_id = ap.id
-    LEFT JOIN vacancies v ON a.vacancy_id = v.id
+    LEFT JOIN (
+      SELECT DISTINCT ON (job_cluster_id) * 
+      FROM vacancies 
+      ORDER BY job_cluster_id, created_at ASC
+    ) v ON a.job_cluster_id = v.job_cluster_id
     LEFT JOIN positions p ON v.position_id = p.id
   `;
   
@@ -50,7 +55,7 @@ export async function getHydratedApplications(vacancyId = null, region = null, d
   const clauses = [];
   if (vacancyId) {
     values.push(vacancyId);
-    clauses.push(`a.vacancy_id = $${values.length}`);
+    clauses.push(`a.job_cluster_id = $${values.length}`);
   }
   if (region) {
     values.push(region);

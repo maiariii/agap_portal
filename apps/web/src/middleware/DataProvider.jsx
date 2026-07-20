@@ -25,7 +25,7 @@ export function DataProvider({ children }) {
       setApplications(appList);
     } catch (e) {
       console.error(e);
-      if (e.message.includes('token') || e.message.includes('Authorization')) {
+      if (e.message.includes('token') || e.message.includes('Authorization') || e.message.includes('User not found')) {
         handleLogout();
       }
     } finally {

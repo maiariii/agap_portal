@@ -42,7 +42,7 @@ async function main() {
     await pool.query('SET search_path TO public;');
     
     console.log("Dropping existing tables to clean up schema...");
-    await pool.query('DROP TABLE IF EXISTS public.notifications, public.qual_evals, public.application_history, public.stored_files, public.sessions, public.applications, public.vacancies, public.positions, public.applicants, public.users CASCADE;');
+    await pool.query('DROP TABLE IF EXISTS public.notifications, public.qual_evals, public.application_history, public.stored_files, public.sessions, public.applications, public.vacancies, public.positions, public.applicants, public.users, public.job_clusters CASCADE;');
     console.log("Creating tables...");
     
     // Create tables in order of dependencies
@@ -88,6 +88,16 @@ async function main() {
     `);
 
     await pool.query(`
+      CREATE TABLE IF NOT EXISTS job_clusters (
+        id TEXT PRIMARY KEY,
+        position_id TEXT NOT NULL REFERENCES positions(id) ON DELETE CASCADE,
+        division TEXT,
+        region TEXT,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    await pool.query(`
       CREATE TABLE IF NOT EXISTS vacancies (
         id TEXT PRIMARY KEY,
         position_id TEXT NOT NULL REFERENCES positions(id) ON DELETE CASCADE,
@@ -98,6 +108,9 @@ async function main() {
         region TEXT,
         status TEXT NOT NULL DEFAULT 'open',
         filling_up_status VARCHAR(50) NOT NULL DEFAULT 'UNFILLED',
+        job_cluster_id TEXT REFERENCES job_clusters(id) ON DELETE SET NULL,
+        school_level TEXT,
+        school_id INTEGER,
         posting_start TIMESTAMP,
         posting_end TIMESTAMP,
         salary_grade INTEGER,
@@ -175,7 +188,7 @@ async function main() {
       CREATE TABLE IF NOT EXISTS applications (
         id TEXT PRIMARY KEY,
         application_number TEXT UNIQUE NOT NULL,
-        vacancy_id TEXT NOT NULL REFERENCES vacancies(id) ON DELETE CASCADE,
+        job_cluster_id TEXT NOT NULL REFERENCES job_clusters(id) ON DELETE CASCADE,
         applicant_id INTEGER NOT NULL REFERENCES applicants(id) ON DELETE CASCADE,
         status TEXT NOT NULL DEFAULT 'Application Submitted',
         application_status TEXT NOT NULL DEFAULT 'Application Submitted',
@@ -192,7 +205,7 @@ async function main() {
         appointment_reference_code TEXT,
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(applicant_id, vacancy_id)
+        UNIQUE(applicant_id, job_cluster_id)
       );
     `);
 
@@ -243,6 +256,7 @@ async function main() {
     await pool.query('DELETE FROM applications');
     await pool.query('DELETE FROM applicants');
     await pool.query('DELETE FROM vacancies');
+    await pool.query('DELETE FROM job_clusters');
     await pool.query('DELETE FROM positions');
     await pool.query('DELETE FROM users');
 
@@ -294,12 +308,20 @@ async function main() {
 
     for (const vac of vacanciesData) {
       const pos = positionsData.find(p => p.title === vac.positionKey);
+      const jobClusterId = crypto.createHash('md5').update(`${pos.id}|${vac.division || ''}|${vac.region || ''}`).digest('hex');
       await pool.query(
-        `INSERT INTO vacancies (id, position_id, item_no, title, school, division, region, status, posting_start, posting_end, salary_grade)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-        [vac.id, pos.id, vac.itemNo, vac.title, vac.school, vac.division, vac.region, vac.status, vac.postingStart, vac.postingEnd, vac.salaryGrade]
+        `INSERT INTO job_clusters (id, position_id, division, region)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (id) DO NOTHING`,
+        [jobClusterId, pos.id, vac.division, vac.region]
+      );
+      await pool.query(
+        `INSERT INTO vacancies (id, position_id, item_no, title, school, division, region, status, posting_start, posting_end, salary_grade, job_cluster_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+        [vac.id, pos.id, vac.itemNo, vac.title, vac.school, vac.division, vac.region, vac.status, vac.postingStart, vac.postingEnd, vac.salaryGrade, jobClusterId]
       );
       vac.positionId = pos.id; // Map positionId for applicant generation
+      vac.jobClusterId = jobClusterId;
     }
 
     const addDays = (date, days) => {
@@ -338,12 +360,12 @@ async function main() {
 
       const applicationId = crypto.randomUUID();
       await pool.query(
-        `INSERT INTO applications (id, application_number, vacancy_id, applicant_id, status, date_applied, documents)
+        `INSERT INTO applications (id, application_number, job_cluster_id, applicant_id, status, date_applied, documents)
          VALUES ($1, $2, $3, $4, $5, $6, $7)`,
         [
           applicationId,
           `APP-${String(i).padStart(3, "0")}`,
-          vacancy.id,
+          vacancy.jobClusterId,
           applicantId,
           status,
           dateApplied,
