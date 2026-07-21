@@ -19,6 +19,22 @@ function getPortalJwtSecret() {
   return process.env.JWT_SECRET || 'super-secret-jwt-key-change-in-production';
 }
 
+function getAuthorizedHqEmail() {
+  const email = process.env.AGAP_PORTAL_SSO_EMAIL?.trim().toLowerCase();
+  if (!email) {
+    throw new HqSsoConfigurationError('AGAP_PORTAL_SSO_EMAIL is required');
+  }
+  return email;
+}
+
+function getMappedPortalUsername() {
+  const username = process.env.AGAP_PORTAL_SSO_USERNAME?.trim();
+  if (!username) {
+    throw new HqSsoConfigurationError('AGAP_PORTAL_SSO_USERNAME is required');
+  }
+  return username;
+}
+
 function isUnixTimestamp(value) {
   return typeof value === 'number' && Number.isInteger(value);
 }
@@ -40,9 +56,9 @@ function verifyHandoffToken(token, now = Math.floor(Date.now() / 1000)) {
   if (
     typeof claims !== 'object' ||
     claims.type !== 'hq_sso' ||
-    typeof claims.username !== 'string' ||
-    !claims.username.trim() ||
-    claims.sub !== claims.username ||
+    typeof claims.email !== 'string' ||
+    !claims.email.trim() ||
+    claims.sub !== claims.email ||
     typeof claims.jti !== 'string' ||
     !claims.jti ||
     !isUnixTimestamp(claims.iat) ||
@@ -54,11 +70,17 @@ function verifyHandoffToken(token, now = Math.floor(Date.now() / 1000)) {
     throw new HqSsoAuthenticationError('Invalid HQ sign-in token payload');
   }
 
-  return claims.username.trim();
+  const email = claims.email.trim().toLowerCase();
+  if (email !== getAuthorizedHqEmail()) {
+    throw new HqSsoAuthenticationError('This HQ account is not authorized for AGAP Portal access');
+  }
+
+  return email;
 }
 
 export async function exchangeHqSsoToken(token) {
-  const username = verifyHandoffToken(token);
+  verifyHandoffToken(token);
+  const username = getMappedPortalUsername();
   const { rows } = await pool.query(
     `SELECT id, username, role, full_name, status, locked_until
      FROM users
