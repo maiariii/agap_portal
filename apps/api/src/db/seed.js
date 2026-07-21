@@ -29,6 +29,17 @@ const degreePool = [
 ];
 
 async function main() {
+  if (!process.argv.includes('--force-destructive-reset')) {
+    console.error("=========================================================================");
+    console.error("ERROR: SEED SCRIPT IS RUNNING IN DESTRUCTIVE MODE!");
+    console.error("This script drops and truncates all database tables, deleting active data.");
+    console.error("To proceed, you must execute the script with the explicit safety flag:");
+    console.error("  node src/db/seed.js --force-destructive-reset");
+    console.error("  or: npm run db:seed -- --force-destructive-reset");
+    console.error("=========================================================================");
+    process.exit(1);
+  }
+
   console.log("Connecting to PostgreSQL database...");
   const pool = new pg.Pool({
     connectionString: process.env.DATABASE_URL,
@@ -42,7 +53,7 @@ async function main() {
     await pool.query('SET search_path TO public;');
     
     console.log("Dropping existing tables to clean up schema...");
-    await pool.query('DROP TABLE IF EXISTS public.notifications, public.qual_evals, public.application_history, public.stored_files, public.sessions, public.applications, public.vacancies, public.positions, public.applicants, public.users CASCADE;');
+    await pool.query('DROP TABLE IF EXISTS public.notifications, public.qual_evals, public.application_history, public.stored_files, public.sessions, public.applications, public.vacancies, public.positions, public.applicants, public.users, public.job_clusters CASCADE;');
     console.log("Creating tables...");
     
     // Create tables in order of dependencies
@@ -88,16 +99,29 @@ async function main() {
     `);
 
     await pool.query(`
+      CREATE TABLE IF NOT EXISTS job_clusters (
+        id TEXT PRIMARY KEY,
+        position_id TEXT NOT NULL REFERENCES positions(id) ON DELETE CASCADE,
+        division TEXT,
+        region TEXT,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    await pool.query(`
       CREATE TABLE IF NOT EXISTS vacancies (
         id TEXT PRIMARY KEY,
         position_id TEXT NOT NULL REFERENCES positions(id) ON DELETE CASCADE,
         item_no TEXT UNIQUE NOT NULL,
         title TEXT NOT NULL,
         school TEXT,
-        location TEXT,
+        division TEXT,
         region TEXT,
         status TEXT NOT NULL DEFAULT 'open',
         filling_up_status VARCHAR(50) NOT NULL DEFAULT 'UNFILLED',
+        job_cluster_id TEXT REFERENCES job_clusters(id) ON DELETE SET NULL,
+        school_level TEXT,
+        school_id INTEGER,
         posting_start TIMESTAMP,
         posting_end TIMESTAMP,
         salary_grade INTEGER,
@@ -175,7 +199,7 @@ async function main() {
       CREATE TABLE IF NOT EXISTS applications (
         id TEXT PRIMARY KEY,
         application_number TEXT UNIQUE NOT NULL,
-        vacancy_id TEXT NOT NULL REFERENCES vacancies(id) ON DELETE CASCADE,
+        job_cluster_id TEXT NOT NULL REFERENCES job_clusters(id) ON DELETE CASCADE,
         applicant_id INTEGER NOT NULL REFERENCES applicants(id) ON DELETE CASCADE,
         status TEXT NOT NULL DEFAULT 'Application Submitted',
         application_status TEXT NOT NULL DEFAULT 'Application Submitted',
@@ -192,7 +216,7 @@ async function main() {
         appointment_reference_code TEXT,
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(applicant_id, vacancy_id)
+        UNIQUE(applicant_id, job_cluster_id)
       );
     `);
 
@@ -243,6 +267,7 @@ async function main() {
     await pool.query('DELETE FROM applications');
     await pool.query('DELETE FROM applicants');
     await pool.query('DELETE FROM vacancies');
+    await pool.query('DELETE FROM job_clusters');
     await pool.query('DELETE FROM positions');
     await pool.query('DELETE FROM users');
 
@@ -252,16 +277,16 @@ async function main() {
 
     const adminId = crypto.randomUUID();
     await pool.query(
-      `INSERT INTO users (id, username, email, full_name, password_hash, passcode_hash, role, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [adminId, "admin", "admin@deped.gov.ph", "System Administrator", passwordHash, passcodeHash, "admin", "active"]
+      `INSERT INTO users (id, username, email, full_name, region, division, password_hash, passcode_hash, role, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      [adminId, "admin", "admin@deped.gov.ph", "System Administrator", "NCR", "SDO Manila", passwordHash, passcodeHash, "admin", "active"]
     );
 
     const hrOfficerId = crypto.randomUUID();
     await pool.query(
-      `INSERT INTO users (id, username, email, full_name, password_hash, passcode_hash, role, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [hrOfficerId, "hr_officer", "hr@deped.gov.ph", "HR Officer", passwordHash, passcodeHash, "hr_officer", "active"]
+      `INSERT INTO users (id, username, email, full_name, region, division, password_hash, passcode_hash, role, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      [hrOfficerId, "hr_officer", "hr@deped.gov.ph", "HR Officer", "NCR", "SDO Manila", passwordHash, passcodeHash, "hr_officer", "active"]
     );
 
     console.log("Seeding positions...");
@@ -284,22 +309,30 @@ async function main() {
 
     console.log("Seeding vacancies...");
     const vacanciesData = [
-      { id: crypto.randomUUID(), positionKey: "Teacher I", itemNo: "TCH1-001", title: "Teacher I - Elementary", school: "Rizal ES", location: "SDO Manila", region: "NCR", status: "open", postingStart: new Date("2026-07-01"), postingEnd: new Date("2026-08-15"), salaryGrade: 11 },
-      { id: crypto.randomUUID(), positionKey: "Master Teacher I", itemNo: "MT1-002", title: "Master Teacher I", school: "Manila Science HS", location: "SDO Manila", region: "NCR", status: "open", postingStart: new Date("2026-07-01"), postingEnd: new Date("2026-08-20"), salaryGrade: 18 },
-      { id: crypto.randomUUID(), positionKey: "Head Teacher I", itemNo: "HT1-003", title: "Head Teacher I", school: "Bonifacio ES", location: "SDO Manila", region: "NCR", status: "open", postingStart: new Date("2026-07-03"), postingEnd: new Date("2026-08-25"), salaryGrade: 14 },
-      { id: crypto.randomUUID(), positionKey: "Administrative Officer II", itemNo: "AO2-004", title: "Administrative Officer II", school: "SDO Manila", location: "Division Office", region: "NCR", status: "open", postingStart: new Date("2026-07-05"), postingEnd: new Date("2026-08-18"), salaryGrade: 11 },
-      { id: crypto.randomUUID(), positionKey: "Guidance Counselor I", itemNo: "GC1-005", title: "Guidance Counselor I", school: "Manila Integrated School", location: "SDO Manila", region: "NCR", status: "open", postingStart: new Date("2026-07-06"), postingEnd: new Date("2026-08-22"), salaryGrade: 11 },
-      { id: crypto.randomUUID(), positionKey: "School Nurse II", itemNo: "NUR2-006", title: "School Nurse II", school: "Tondo HS", location: "SDO Manila", region: "NCR", status: "open", postingStart: new Date("2026-07-07"), postingEnd: new Date("2026-08-28"), salaryGrade: 15 }
+      { id: crypto.randomUUID(), positionKey: "Teacher I", itemNo: "TCH1-001", title: "Teacher I - Elementary", school: "Rizal ES", division: "SDO Manila", region: "NCR", status: "open", postingStart: new Date("2026-07-01"), postingEnd: new Date("2026-08-15"), salaryGrade: 11 },
+      { id: crypto.randomUUID(), positionKey: "Master Teacher I", itemNo: "MT1-002", title: "Master Teacher I", school: "Manila Science HS", division: "SDO Manila", region: "NCR", status: "open", postingStart: new Date("2026-07-01"), postingEnd: new Date("2026-08-20"), salaryGrade: 18 },
+      { id: crypto.randomUUID(), positionKey: "Head Teacher I", itemNo: "HT1-003", title: "Head Teacher I", school: "Bonifacio ES", division: "SDO Manila", region: "NCR", status: "open", postingStart: new Date("2026-07-03"), postingEnd: new Date("2026-08-25"), salaryGrade: 14 },
+      { id: crypto.randomUUID(), positionKey: "Administrative Officer II", itemNo: "AO2-004", title: "Administrative Officer II", school: "SDO Manila", division: "Division Office", region: "NCR", status: "open", postingStart: new Date("2026-07-05"), postingEnd: new Date("2026-08-18"), salaryGrade: 11 },
+      { id: crypto.randomUUID(), positionKey: "Guidance Counselor I", itemNo: "GC1-005", title: "Guidance Counselor I", school: "Manila Integrated School", division: "SDO Manila", region: "NCR", status: "open", postingStart: new Date("2026-07-06"), postingEnd: new Date("2026-08-22"), salaryGrade: 11 },
+      { id: crypto.randomUUID(), positionKey: "School Nurse II", itemNo: "NUR2-006", title: "School Nurse II", school: "Tondo HS", division: "SDO Manila", region: "NCR", status: "open", postingStart: new Date("2026-07-07"), postingEnd: new Date("2026-08-28"), salaryGrade: 15 }
     ];
 
     for (const vac of vacanciesData) {
       const pos = positionsData.find(p => p.title === vac.positionKey);
+      const jobClusterId = crypto.createHash('md5').update(`${pos.id}|${vac.division || ''}|${vac.region || ''}`).digest('hex');
       await pool.query(
-        `INSERT INTO vacancies (id, position_id, item_no, title, school, location, region, status, posting_start, posting_end, salary_grade)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-        [vac.id, pos.id, vac.itemNo, vac.title, vac.school, vac.location, vac.region, vac.status, vac.postingStart, vac.postingEnd, vac.salaryGrade]
+        `INSERT INTO job_clusters (id, position_id, division, region)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (id) DO NOTHING`,
+        [jobClusterId, pos.id, vac.division, vac.region]
+      );
+      await pool.query(
+        `INSERT INTO vacancies (id, position_id, item_no, title, school, division, region, status, posting_start, posting_end, salary_grade, job_cluster_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+        [vac.id, pos.id, vac.itemNo, vac.title, vac.school, vac.division, vac.region, vac.status, vac.postingStart, vac.postingEnd, vac.salaryGrade, jobClusterId]
       );
       vac.positionId = pos.id; // Map positionId for applicant generation
+      vac.jobClusterId = jobClusterId;
     }
 
     const addDays = (date, days) => {
@@ -338,12 +371,12 @@ async function main() {
 
       const applicationId = crypto.randomUUID();
       await pool.query(
-        `INSERT INTO applications (id, application_number, vacancy_id, applicant_id, status, date_applied, documents)
+        `INSERT INTO applications (id, application_number, job_cluster_id, applicant_id, status, date_applied, documents)
          VALUES ($1, $2, $3, $4, $5, $6, $7)`,
         [
           applicationId,
           `APP-${String(i).padStart(3, "0")}`,
-          vacancy.id,
+          vacancy.jobClusterId,
           applicantId,
           status,
           dateApplied,

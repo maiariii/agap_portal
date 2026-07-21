@@ -25,13 +25,15 @@ REMOTE_USER  = get_env_var("SSH_USER", "Administrator1")
 REMOTE_HOST  = get_env_var("SSH_HOST", "20.24.58.49")
 REMOTE_ROOT  = "/mnt/agap-portal-staging"
 SSH_KEY_PATH = get_env_var("SSH_KEY_PATH", os.path.expanduser("~/.ssh/id_rsa")).replace("\\", "/")
+# Check if key file exists locally, otherwise omit -i from SSH commands
+SSH_KEY_OPT = f'-i "{SSH_KEY_PATH}"' if os.path.exists(SSH_KEY_PATH) else ""
 ARCHIVE_NAME = "agap-portal-deploy.tar.gz"
 ECOSYSTEM_CONFIG = "ecosystem.agap-portal-staging.config.cjs"
 PM2_NAME     = "agap-portal-staging-backend"
 
 def run_ssh(command: str, timeout=120):
     """Run commands over SSH with strict host key checking bypassed."""
-    ssh_cmd = f'ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i "{SSH_KEY_PATH}" {REMOTE_USER}@{REMOTE_HOST} "{command}"'
+    ssh_cmd = f'ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 {SSH_KEY_OPT} {REMOTE_USER}@{REMOTE_HOST} "{command}"'
     try:
         return subprocess.run(ssh_cmd, shell=True, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -88,7 +90,8 @@ def main():
     try:
         # Prepare remote directory with sudo, then transfer
         run_ssh(f"sudo mkdir -p {REMOTE_ROOT} && sudo chown -R {REMOTE_USER}:{REMOTE_USER} {REMOTE_ROOT}")
-        subprocess.run(f'scp -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i "{SSH_KEY_PATH}" {ARCHIVE_NAME} {REMOTE_USER}@{REMOTE_HOST}:{REMOTE_ROOT}/', shell=True, check=True)
+        scp_cmd = f'scp -o StrictHostKeyChecking=no -o ConnectTimeout=10 {SSH_KEY_OPT} {ARCHIVE_NAME} {REMOTE_USER}@{REMOTE_HOST}:{REMOTE_ROOT}/'
+        subprocess.run(scp_cmd, shell=True, check=True)
     except subprocess.CalledProcessError:
         print("  [ERROR] SCP upload failed!")
         sys.exit(1)
@@ -98,11 +101,12 @@ def main():
     remote_script = (
         f"cd {REMOTE_ROOT} && "
         f"pm2 stop {PM2_NAME} 2>/dev/null || true && "
-        f"rm -rf apps packages dist && "
+        f"sudo rm -rf apps packages && "
+        f"mkdir -p dist && sudo rm -rf dist/* && "
         f"tar -xzf {ARCHIVE_NAME} && "
         f"sudo chown -R {REMOTE_USER}:{REMOTE_USER} {REMOTE_ROOT} && "
-        # Move web static files to dist/
-        f"mv apps/web/dist dist && "
+        # Move web static files inside dist/ instead of renaming directory (prevents Nginx locks)
+        f"mv apps/web/dist/* dist/ && "
         f"rm -rf apps/web && "
         # Install workspace dependencies in production mode
         f"echo '       → Installing production npm packages...' && "
@@ -115,7 +119,7 @@ def main():
         f"rm -f {ARCHIVE_NAME}"
     )
 
-    ssh_cmd = f'ssh -t -o StrictHostKeyChecking=no -i "{SSH_KEY_PATH}" -o ConnectTimeout=10 {REMOTE_USER}@{REMOTE_HOST} "{remote_script}"'
+    ssh_cmd = f'ssh -t -o StrictHostKeyChecking=no {SSH_KEY_OPT} -o ConnectTimeout=10 {REMOTE_USER}@{REMOTE_HOST} "{remote_script}"'
     try:
         subprocess.run(ssh_cmd, shell=True, check=True)
     except subprocess.CalledProcessError as e:

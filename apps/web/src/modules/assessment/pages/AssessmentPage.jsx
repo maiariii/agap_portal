@@ -1,8 +1,9 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useAppData } from '../../../middleware/DataProvider.jsx';
 import { useToast } from '../../../middleware/ToastProvider.jsx';
 import { apiFetch } from '../../../config/api.js';
 import { computeOverallAreaScore, scoreTone, SCORE_AREAS } from '@agap/shared';
+import VacancyClusterAccordion from '../../../components/VacancyClusterAccordion.jsx';
 
 const QUAL_NOT_SELECTED = { key: "not_selected", phase: 2, label: "Not Selected", badge: "red", next: "Did not advance past HRMPSB deliberation" };
 
@@ -44,12 +45,118 @@ export default function AssessmentPage() {
   const [pipeSelectedKey, setPipeSelectedKey] = useState(null);
   const [pipeOriginalKey, setPipeOriginalKey] = useState(null);
 
+  // View Documents state
+  const [showDocsModal, setShowDocsModal] = useState(false);
+  const [selectedDocKey, setSelectedDocKey] = useState('pds');
+  const [availableDocs, setAvailableDocs] = useState([]);
+  const [docsLoading, setDocsLoading] = useState(false);
+
+  useEffect(() => {
+    if (selectedQualApp?.id) {
+      setAvailableDocs([]);
+      setDocsLoading(true);
+      console.log(`[Azure Storage] Requesting documents for applicant ID "${selectedQualApp.applicantId || 'AGAP-0001'}" in folder "staging-agap"...`);
+      apiFetch(`/api/applications/${selectedQualApp.id}/documents`)
+        .then(data => {
+          console.log(`%c[Azure Storage Fetch SUCCESS]`, 'color: green; font-weight: bold; font-size: 14px;');
+          console.log('Azure Folder Name:', data.azureFolder);
+          console.log('Sample Hash Reference:', data.sampleHash);
+          console.log('Retrieved Documents Checklist:', data.documents);
+          setAvailableDocs(data.documents || []);
+        })
+        .catch(err => {
+          console.error('[Azure Storage Fetch ERROR] Failed to fetch documents:', err);
+          setAvailableDocs([]);
+        })
+        .finally(() => setDocsLoading(false));
+    }
+  }, [selectedQualApp]);
+
+  // CSV viewer state & auto-fetcher
+  const [csvData, setCsvData] = useState(null);
+  const [csvLoading, setCsvLoading] = useState(false);
+  const [csvError, setCsvError] = useState(null);
+
+  useEffect(() => {
+    const selectedDocInfo = availableDocs.find(d => d.key === selectedDocKey);
+    const existsInAzure = !!selectedDocInfo?.existsInAzure;
+    const isPdf = !!selectedDocInfo?.filename?.toLowerCase().endsWith('.pdf');
+
+    if (existsInAzure && !isPdf && selectedQualApp?.id) {
+      setCsvLoading(true);
+      setCsvError(null);
+      setCsvData(null);
+
+      const apiBaseUrl = import.meta.env.VITE_API_URL || window.location.origin;
+      const downloadUrl = `${apiBaseUrl}/api/applications/${selectedQualApp.id}/documents/${selectedDocKey}/download?token=${localStorage.getItem('agap_token')}`;
+      
+      fetch(downloadUrl)
+        .then(res => {
+          if (!res.ok) throw new Error(`Status ${res.status}`);
+          return res.text();
+        })
+        .then(text => {
+          const rows = [];
+          let currentRow = [];
+          let currentField = '';
+          let insideQuotes = false;
+
+          for (let i = 0; i < text.length; i++) {
+            const char = text[i];
+            const nextChar = text[i+1];
+
+            if (char === '"') {
+              if (insideQuotes && nextChar === '"') {
+                currentField += '"';
+                i++;
+              } else {
+                insideQuotes = !insideQuotes;
+              }
+            } else if (char === ',' && !insideQuotes) {
+              currentRow.push(currentField.trim());
+              currentField = '';
+            } else if ((char === '\r' || char === '\n') && !insideQuotes) {
+              if (char === '\r' && nextChar === '\n') {
+                i++;
+              }
+              currentRow.push(currentField.trim());
+              if (currentRow.some(cell => cell !== '')) {
+                rows.push(currentRow);
+              }
+              currentRow = [];
+              currentField = '';
+            } else {
+              currentField += char;
+            }
+          }
+          if (currentField || currentRow.length > 0) {
+            currentRow.push(currentField.trim());
+            rows.push(currentRow);
+          }
+
+          setCsvData(rows);
+          setCsvLoading(false);
+        })
+        .catch(err => {
+          console.error('[CSV Load Error]', err);
+          setCsvError(err.message);
+          setCsvLoading(false);
+        });
+    } else {
+      setCsvData(null);
+      setCsvLoading(false);
+      setCsvError(null);
+    }
+  }, [selectedDocKey, availableDocs, selectedQualApp, showDocsModal]);
+
   // Appointment confirmation state
   const [showAppointConfirmModal, setShowAppointConfirmModal] = useState(false);
   const [showSdsReminderModal, setShowSdsReminderModal] = useState(false);
   const [appointConfirmApp, setAppointConfirmApp] = useState(null);
   const [appointDate, setAppointDate] = useState('');
   const [appointRefCode, setAppointRefCode] = useState('');
+  const [appointPasscode, setAppointPasscode] = useState('');
+  const [appointItemNo, setAppointItemNo] = useState('');
   const [showIncompleteAppointModal, setShowIncompleteAppointModal] = useState(false);
 
   const titleCase = (str) => {
@@ -172,7 +279,11 @@ export default function AssessmentPage() {
   };
 
   const qualifiedApps = useMemo(() => {
-    let rows = qualifiedPoolRanked.filter(r => !r.itemNo || !occupiedItemNos.has(r.itemNo));
+    let rows = qualifiedPoolRanked.filter(r => {
+      const appt = r.appointmentStatus || r.appObj?.appointmentStatus;
+      if (appt === 'FOR APPOINTMENT') return false;
+      return !r.itemNo || !occupiedItemNos.has(r.itemNo);
+    });
 
     if (qualSearch) {
       const q = qualSearch.toLowerCase();
@@ -255,10 +366,9 @@ export default function AssessmentPage() {
     const compChecks = [csObj.bei, csObj.wst, csObj.we].map(hasValue);
     const compCount = compChecks.filter(Boolean).length;
     
-    const areaChecks = Object.values(areaScores).map(hasValue);
-    const areaCount = areaChecks.filter(Boolean).length;
+    const areaCount = SCORE_AREAS.filter(sa => hasValue(areaScores[sa.key])).length;
     
-    if (areaCount === 10 && compCount === 3) return { label: 'Assessment Completed', badge: 'green' };
+    if (areaCount === SCORE_AREAS.length && compCount === 3) return { label: 'ASSESSMENT COMPLETE', badge: 'green' };
     if (areaCount > 0 || compCount > 0) return { label: 'Assessment Started', badge: 'orange' };
     return { label: 'Assessment Not Started', badge: 'blue' };
   };
@@ -359,16 +469,14 @@ export default function AssessmentPage() {
     const overall = allAreasScored ? computeOverallAreaScore(modalAreaScores) : null;
     const nextStatus = ['qualified', 'Qualified', 'ier_posted'].includes(pipeSelectedKey) ? 'Qualified' : 'for_comparative_assessment';
 
-    // Calculate computed assessment status based on updated scores
     const hasValue = v => v !== "" && v !== null && v !== undefined && Number.isFinite(Number(v));
-    const areaChecks = Object.values(modalAreaScores).map(hasValue);
-    const areaCount = areaChecks.filter(Boolean).length;
+    const areaCount = SCORE_AREAS.filter(sa => hasValue(modalAreaScores[sa.key])).length;
     const compChecks = [modalCompScores.bei, modalCompScores.wst, modalCompScores.we].map(hasValue);
     const compCount = compChecks.filter(Boolean).length;
 
     let computedAssessmentStatus = 'Assessment Not Started';
-    if (areaCount === 10 && compCount === 3) {
-      computedAssessmentStatus = 'Assessment Completed';
+    if (areaCount === SCORE_AREAS.length && compCount === 3) {
+      computedAssessmentStatus = 'ASSESSMENT COMPLETE';
     } else if (areaCount > 0 || compCount > 0) {
       computedAssessmentStatus = 'Assessment Started';
     }
@@ -387,7 +495,7 @@ export default function AssessmentPage() {
       setQualModalDirty(false);
       setPipeOriginalKey(pipeSelectedKey);
       setShowQualModal(false);
-      setToast({ message: 'Qualified scoring and pipeline stage saved successfully!', type: 'success' });
+      setToast({ message: 'Changes saved successfully!', type: 'success' });
       loadAllData();
     } catch (e) {
       setToast({ message: e.message, type: 'error' });
@@ -405,7 +513,20 @@ export default function AssessmentPage() {
 
   const handleAreaScoreChange = (key, val) => {
     setModalAreaScores(prev => {
-      const updated = { ...prev, [key]: val === '' ? '' : Math.max(0, Math.min(100, Number(val))) };
+      const area = SCORE_AREAS.find(a => a.key === key);
+      const maxVal = area && area.max !== undefined ? area.max : 100;
+      let finalVal = val;
+      if (val !== '') {
+        const num = Number(val);
+        if (!isNaN(num)) {
+          if (num > maxVal) {
+            finalVal = maxVal.toString();
+          } else if (num < 0) {
+            finalVal = '0';
+          }
+        }
+      }
+      const updated = { ...prev, [key]: finalVal };
       setQualModalDirty(true);
       return updated;
     });
@@ -419,26 +540,24 @@ export default function AssessmentPage() {
     });
   };
 
-  const handleConfirmAppointment = async (appId, date, refCode) => {
-    if (!date || !refCode) return setToast({ message: 'Please enter appointment details', type: 'error' });
+  const handleConfirmAppointment = async (appId, date, passcode, itemNo) => {
+    if (!date) return setToast({ message: 'Please select appointment date', type: 'error' });
+    if (!itemNo) return setToast({ message: 'Please select an item number', type: 'error' });
+    if (!passcode) return setToast({ message: 'Please enter your passcode', type: 'error' });
     try {
-      const res = await apiFetch(`/api/applications/${appId}/appointment`, {
+      const res = await apiFetch(`/api/applications/${appId}/flag-appointment`, {
         method: 'POST',
-        body: JSON.stringify({ appointmentDate: date, appointmentReferenceCode: refCode })
+        body: JSON.stringify({ appointmentDate: date, passcode, itemNo })
       });
-      if (res && res.occupied) {
-        setToast({ message: 'Item No. is occupied. Applicant marked as Not Appointed.', type: 'warning' });
-      } else {
-        setToast({ message: 'Appointment confirmed!', type: 'success' });
-      }
+      setToast({ message: 'Applicant flagged for appointment!', type: 'success' });
       loadAllData();
     } catch (e) {
       setToast({ message: e.message, type: 'error' });
     }
   };
 
-  const scoredAreaCount = Object.values(modalAreaScores).filter(v => v !== '' && v !== null && v !== undefined).length;
-  const allAreasScored = scoredAreaCount === 10;
+  const scoredAreaCount = SCORE_AREAS.filter(sa => modalAreaScores[sa.key] !== '' && modalAreaScores[sa.key] !== null && modalAreaScores[sa.key] !== undefined).length;
+  const allAreasScored = scoredAreaCount === SCORE_AREAS.length;
   const overallScorefit = allAreasScored ? computeOverallAreaScore(modalAreaScores) : 0;
   const overallTone = scoreTone(overallScorefit);
 
@@ -483,7 +602,7 @@ export default function AssessmentPage() {
               <label>Vacancy</label>
               <select value={qualVacancyFilter} onChange={e => setQualVacancyFilter(e.target.value)}>
                 <option value="">All vacancies</option>
-                {vacancies.map(v => <option key={v.id} value={v.id}>{v.title}</option>)}
+                {vacancies.map(v => <option key={v.id} value={v.jobClusterId}>{v.title}</option>)}
               </select>
             </div>
             <div>
@@ -513,11 +632,23 @@ export default function AssessmentPage() {
 
       <div className="card">
         <h2>Qualified Pool - Comparative Assessments</h2>
-        <div className="table-wrap">
-          <table>
+        <div className="table-wrap" style={{ width: '100%', overflow: 'auto' }}>
+          <table style={{ width: '100%', minWidth: '100%', tableLayout: 'fixed' }}>
+            <colgroup>
+              <col style={{ width: '5%' }} />
+              <col style={{ width: '16%' }} />
+              <col style={{ width: '16%' }} />
+              <col style={{ width: '16%' }} />
+              <col style={{ width: '10%' }} />
+              <col style={{ width: '7%' }} />
+              <col style={{ width: '7%' }} />
+              <col style={{ width: '7%' }} />
+              <col style={{ width: '8%' }} />
+              <col style={{ width: '8%' }} />
+            </colgroup>
             <thead>
               <tr>
-                <th className="row-num">No.</th>
+                <th className="row-num" style={{ width: '100%' }}>No.</th>
                 <th>
                   <button className="th-btn" onClick={() => handleQualSort('applicant')}>
                     Applicant{getQualSortIndicator('applicant')}
@@ -556,19 +687,8 @@ export default function AssessmentPage() {
                   </select>
                 </th>
                 <th>
-                  <button className="th-btn" onClick={() => handleQualSort('itemNo')}>
-                    Item No.{getQualSortIndicator('itemNo')}
-                  </button>
-                  <input
-                    className="column-filter"
-                    placeholder="Filter..."
-                    value={qualColFilters.itemNo || ''}
-                    onChange={e => handleQualColFilterChange('itemNo', e.target.value)}
-                  />
-                </th>
-                <th className="num-col">
                   <button className="th-btn" onClick={() => handleQualSort('fit')}>
-                    Average Score{getQualSortIndicator('fit')}
+                    Overall Score{getQualSortIndicator('fit')}
                   </button>
                   <div className="column-filter-range">
                     <input
@@ -684,83 +804,104 @@ export default function AssessmentPage() {
               </tr>
             </thead>
             <tbody>
-              {paginatedQualified.map((r, i) => {
-                const cs = r.comparativeAssessmentScores || r.appObj?.comparativeAssessmentScores || {};
-                const hasCompScores = ['bei', 'wst', 'we'].every(k => cs[k] !== '' && cs[k] !== null && cs[k] !== undefined && Number.isFinite(Number(cs[k])));
-                const compAvgValue = hasCompScores ? (['bei', 'wst', 'we'].reduce((sum, k) => sum + Number(cs[k]), 0) / 3) : null;
-                const appt = r.appointmentStatus || r.appObj?.appointmentStatus;
-                
-                const areaScores = r.latestEval?.areaScores || {};
-                const hasValue = v => v !== "" && v !== null && v !== undefined && Number.isFinite(Number(v));
-                const areaCount = Object.values(areaScores).map(hasValue).filter(Boolean).length;
-                const allAreasScored = areaCount === 10;
+              {(() => {
+                const grouped = {};
+                paginatedQualified.forEach(item => {
+                  const groupKey = item.vacancy || 'Unspecified Cluster';
+                  if (!grouped[groupKey]) {
+                    grouped[groupKey] = [];
+                  }
+                  grouped[groupKey].push(item);
+                });
 
-                const fmtScore = (v) => (v !== '' && v !== null && v !== undefined && Number.isFinite(Number(v))) ? (
-                  <span className={`badge ${Number(v) >= 85 ? 'green' : Number(v) >= 70 ? 'blue' : Number(v) >= 50 ? 'orange' : 'red'}`}>
-                    {Number(v).toFixed(2)}%
-                  </span>
-                ) : '—';
+                if (paginatedQualified.length === 0) {
+                  return (
+                    <tr>
+                      <td colSpan={11} style={{ textAlign: 'center' }}>No qualified personnel match the filters.</td>
+                    </tr>
+                  );
+                }
 
-                const assessment = getAssessmentStatus(r);
-                
-                const actionCell = appt === 'appointed' ? (
-                  <span className="badge green">Appointed</span>
-                ) : appt === 'rejected' ? (
-                  <span className="badge red">Rejected</span>
-                ) : hasCompScores ? (
-                  <button
-                    className="good vac-action"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setAppointConfirmApp(r);
-                      setAppointDate(new Date().toISOString().slice(0, 10));
-                      setAppointRefCode(r.code);
-                      setShowSdsReminderModal(true);
-                    }}
-                  >
-                    Appoint
-                  </button>
-                ) : (
-                  <button
-                    className="secondary vac-action incomplete"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setShowIncompleteAppointModal(true);
-                    }}
-                  >
-                    Appoint
-                  </button>
-                );
+                return Object.entries(grouped).map(([clusterName, items]) => (
+                  <VacancyClusterAccordion key={clusterName} title={clusterName} colSpan={11}>
+                    {items.map((r, i) => {
+                      const cs = r.comparativeAssessmentScores || r.appObj?.comparativeAssessmentScores || {};
+                      const hasCompScores = ['bei', 'wst', 'we'].every(k => cs[k] !== '' && cs[k] !== null && cs[k] !== undefined && Number.isFinite(Number(cs[k])));
+                      const appt = r.appointmentStatus || r.appObj?.appointmentStatus;
+                      
+                      const areaScores = r.latestEval?.areaScores || {};
+                      const hasValue = v => v !== "" && v !== null && v !== undefined && Number.isFinite(Number(v));
+                      const areaCount = Object.keys(areaScores).filter(k => SCORE_AREAS.some(sa => sa.key === k)).map(k => hasValue(areaScores[k])).filter(Boolean).length;
+                      const allAreasScored = areaCount === SCORE_AREAS.length;
 
-                return (
-                  <tr key={r.id} className="clickable-row" onClick={() => openQualifiedScoringModal(r)}>
-                    <td className="row-num">{((qualPage - 1) * qualPageSize) + i + 1}</td>
-                    <td><b>{r.applicant}</b><br/><span className="small">{r.code}</span></td>
-                    <td>{r.bachelorDegree || '—'}</td>
-                    <td>{r.vacancy}</td>
-                    <td>{r.itemNo || '—'}</td>
-                    <td className="num-col">
-                      {allAreasScored && r.fit !== null && r.fit !== undefined ? (
-                        <span className={`badge ${r.fit >= 85 ? 'green' : r.fit >= 70 ? 'blue' : r.fit >= 50 ? 'orange' : 'red'}`}>
-                          {Number(r.fit).toFixed(2)}%
+                      const fmtScore = (v) => (v !== '' && v !== null && v !== undefined && Number.isFinite(Number(v))) ? (
+                        <span className={`badge ${Number(v) >= 85 ? 'green' : Number(v) >= 70 ? 'blue' : Number(v) >= 50 ? 'orange' : 'red'}`}>
+                          {Number(v).toFixed(2)}%
                         </span>
-                      ) : '—'}
-                    </td>
-                    <td className="num-col">{fmtScore(cs.bei)}</td>
-                    <td className="num-col">{fmtScore(cs.wst)}</td>
-                    <td className="num-col">{fmtScore(cs.we)}</td>
-                    <td>
-                      <span className={`badge ${assessment.badge}`}>{assessment.label}</span>
-                    </td>
-                    <td>{actionCell}</td>
-                  </tr>
-                );
-              })}
-              {paginatedQualified.length === 0 && (
-                <tr>
-                  <td colSpan={11} style={{ textAlign: 'center' }}>No qualified personnel match the filters.</td>
-                </tr>
-              )}
+                      ) : '—';
+
+                      const assessment = getAssessmentStatus(r);
+                      
+                      const actionCell = appt === 'FOR APPOINTMENT' ? (
+                        <span className="badge green">For Appointment</span>
+                      ) : (appt === 'rejected' || appt === 'not_appointed') ? (
+                        <span className="badge red">Not Appointed</span>
+                      ) : assessment.label === 'ASSESSMENT COMPLETE' ? (
+                        <button
+                          className="good vac-action"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setAppointConfirmApp(r);
+                            setAppointDate(new Date().toISOString().slice(0, 10));
+                            const clusterItems = vacancies.filter(v => v.jobClusterId === r.vacancyId && v.fillingUpStatus !== 'FILLED');
+                            setAppointItemNo(clusterItems[0]?.itemNo || '');
+                            const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+                            const rand = Math.floor(1000 + Math.random() * 9000);
+                            setAppointRefCode(`APPT-${today}-${rand}`);
+                            setAppointPasscode('');
+                            setShowSdsReminderModal(true);
+                          }}
+                        >
+                          Appoint
+                        </button>
+                      ) : (
+                        <button
+                          className="secondary vac-action incomplete"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setShowIncompleteAppointModal(true);
+                          }}
+                        >
+                          Appoint
+                        </button>
+                      );
+
+                      return (
+                        <tr key={r.id} className="clickable-row" onClick={() => openQualifiedScoringModal(r)}>
+                          <td className="row-num">{((qualPage - 1) * qualPageSize) + i + 1}</td>
+                          <td><b>{r.applicant}</b><br/><span className="small">{r.code}</span></td>
+                          <td>{r.bachelorDegree || '—'}</td>
+                          <td>{r.vacancy}</td>
+                          <td className="num-col">
+                            {allAreasScored && r.fit !== null && r.fit !== undefined ? (
+                              <span className={`badge ${r.fit >= 85 ? 'green' : r.fit >= 70 ? 'blue' : r.fit >= 50 ? 'orange' : 'red'}`}>
+                                {Number(r.fit).toFixed(2)}
+                              </span>
+                            ) : '—'}
+                          </td>
+                          <td className="num-col">{fmtScore(cs.bei)}</td>
+                          <td className="num-col">{fmtScore(cs.wst)}</td>
+                          <td className="num-col">{fmtScore(cs.we)}</td>
+                          <td>
+                            <span className={`badge ${assessment.badge}`}>{assessment.label}</span>
+                          </td>
+                          <td>{actionCell}</td>
+                        </tr>
+                      );
+                    })}
+                  </VacancyClusterAccordion>
+                ));
+              })()}
             </tbody>
           </table>
         </div>
@@ -810,7 +951,33 @@ export default function AssessmentPage() {
               borderBottom: '1px solid var(--line)'
             }}>
               <h2>Qualification Standards Matrix — {selectedQualApp.applicant}</h2>
-              <button className="secondary" onClick={handleCloseQualModal}>Close</button>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <button 
+                  className="primary" 
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                  onClick={() => {
+                    setSelectedDocKey('pds');
+                    setShowDocsModal(true);
+                  }}
+                >
+                  <svg 
+                    width="16" 
+                    height="16" 
+                    viewBox="0 0 24 24" 
+                    fill="none" 
+                    stroke="currentColor" 
+                    strokeWidth="2.5" 
+                    strokeLinecap="round" 
+                    strokeLinejoin="round"
+                    style={{ display: 'inline-block' }}
+                  >
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                  View Documents
+                </button>
+                <button className="secondary" onClick={handleCloseQualModal}>Close</button>
+              </div>
             </div>
 
             <div className="modal-body" style={{ marginTop: '20px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
@@ -859,11 +1026,6 @@ export default function AssessmentPage() {
                           <td style={{ padding: '12px 8px' }}>{selectedQualApp.trainingHours} hour(s)</td>
                           <td style={{ padding: '12px 8px' }}>{selectedQualApp.positionObj?.minTrainingHours || 0} minimum hour(s)</td>
                         </tr>
-                        <tr style={{ borderBottom: '1px solid var(--line)' }}>
-                          <td style={{ padding: '12px 8px' }}>Eligibility</td>
-                          <td style={{ padding: '12px 8px' }}>{selectedQualApp.applicantObj?.eligibility || '—'}</td>
-                          <td style={{ padding: '12px 8px' }}>{selectedQualApp.positionObj?.eligibilityRequired || 'Not specified'}</td>
-                        </tr>
                       </tbody>
                     </table>
                   </div>
@@ -879,8 +1041,8 @@ export default function AssessmentPage() {
                   </div>
                   <div className="qs-matrix-summary" style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
                     <div className={`qs-score-card ${allAreasScored ? overallTone.color : ''}`} style={{ padding: '12px 20px', border: '2px solid var(--line)', borderRadius: '16px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-                      <span className="qs-score-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 800 }}>Overall Scorefit</span>
-                      <span className="qs-score-value" style={{ fontSize: '24px', fontWeight: 900, color: 'var(--navy)' }}>{allAreasScored ? `${overallScorefit.toFixed(2)}%` : '—'}</span>
+                      <span className="qs-score-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 800 }}>Overall Score</span>
+                      <span className="qs-score-value" style={{ fontSize: '24px', fontWeight: 900, color: 'var(--navy)' }}>{allAreasScored ? `${overallScorefit.toFixed(2)}` : '—'}</span>
                       <span className="qs-score-caption" style={{ fontSize: '11px', color: 'var(--muted)' }}>{allAreasScored ? 'All areas scored' : `${scoredAreaCount} of ${SCORE_AREAS.length} area(s) scored`}</span>
                     </div>
                     <button
@@ -894,26 +1056,67 @@ export default function AssessmentPage() {
                 </div>
                 <div className="qualified-card-body" style={{ padding: '24px' }}>
                   <div className="qs-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px' }}>
-                    {SCORE_AREAS.map(area => (
-                      <div className="qs-card" key={area.key} style={{ border: '1px solid var(--line)', borderRadius: '16px', padding: '16px' }}>
-                        <h3 style={{ marginBottom: '6px' }}>{area.label}</h3>
-                        <p className="small" style={{ margin: '0 0 12px', minHeight: '36px' }}>{area.description}</p>
-                        <div style={{ marginTop: 'auto', padding: '14px', border: '2px solid var(--line)', borderRadius: '18px', background: 'linear-gradient(135deg,#FFFFFF,#F8FCFF)' }}>
-                          <label style={{ margin: '0 0 8px', display: 'block', fontWeight: 'bold' }}>Score</label>
-                          <input
-                            type="number"
-                            min="0"
-                            max="100"
-                            step="0.01"
-                            value={modalAreaScores[area.key] ?? ''}
-                            onChange={e => handleAreaScoreChange(area.key, e.target.value)}
-                            placeholder="0.00 - 100.00"
-                            style={{ height: '50px', textAlign: 'center', fontFamily: 'var(--font-heading)', fontSize: '24px', fontWeight: 950, border: '2.5px solid var(--blue-600)', background: 'white', boxShadow: '0 8px 18px rgba(2,132,199,.08)', width: '100%', boxSizing: 'border-box', borderRadius: '8px' }}
-                          />
-                          <div className="small" style={{ marginTop: '8px', fontWeight: 800 }}>Enter a score from 0.00 to 100.00</div>
+                    {SCORE_AREAS.map(area => {
+                      const DOC_KEY_MAPPING = {
+                        education: 'tor',
+                        experience: 'work_experience',
+                        training: 'training_certificates'
+                      };
+                      const docKey = DOC_KEY_MAPPING[area.key];
+                      const docInfo = availableDocs.find(d => d.key === docKey);
+                      const exists = !!docInfo?.existsInAzure;
+                      
+                      const handleViewDoc = (e) => {
+                        e.stopPropagation();
+                        if (!exists) return;
+                        const apiBaseUrl = import.meta.env.VITE_API_URL || window.location.origin;
+                        const downloadUrl = `${apiBaseUrl}/api/applications/${selectedQualApp.id}/documents/${docKey}/download?token=${localStorage.getItem('agap_token')}`;
+                        window.open(downloadUrl, '_blank');
+                      };
+
+                      return (
+                        <div className="qs-card" key={area.key} style={{ border: '1px solid var(--line)', borderRadius: '16px', padding: '16px', position: 'relative' }}>
+                          <h3 style={{ marginBottom: '6px' }}>{area.label}</h3>
+                          {docKey && (
+                            <button
+                              type="button"
+                              onClick={handleViewDoc}
+                              disabled={!exists}
+                              style={{
+                                position: 'absolute',
+                                top: '16px',
+                                right: '16px',
+                                padding: '4px 8px',
+                                fontSize: '11px',
+                                borderRadius: '8px',
+                                backgroundColor: exists ? 'var(--blue-100)' : '#f1f5f9',
+                                color: exists ? 'var(--blue)' : '#94a3b8',
+                                border: 'none',
+                                cursor: exists ? 'pointer' : 'not-allowed',
+                                fontWeight: 'bold'
+                              }}
+                            >
+                              📄 View Document
+                            </button>
+                          )}
+                          <p className="small" style={{ margin: '0 0 12px', minHeight: '36px' }}>{area.description}</p>
+                          <div style={{ marginTop: 'auto', padding: '14px', border: '2px solid var(--line)', borderRadius: '18px', background: 'linear-gradient(135deg,#FFFFFF,#F8FCFF)' }}>
+                            <label style={{ margin: '0 0 8px', display: 'block', fontWeight: 'bold' }}>Score</label>
+                            <input
+                              type="number"
+                              min="0"
+                              max={area.max !== undefined ? area.max : 100}
+                              step="0.01"
+                              value={modalAreaScores[area.key] ?? ''}
+                              onChange={e => handleAreaScoreChange(area.key, e.target.value)}
+                              placeholder={area.max !== undefined ? `0.00 - ${area.max.toFixed(2)}` : "0.00 - 100.00"}
+                              style={{ height: '50px', textAlign: 'center', fontFamily: 'var(--font-heading)', fontSize: '24px', fontWeight: 950, border: '2.5px solid var(--blue-600)', background: 'white', boxShadow: '0 8px 18px rgba(2,132,199,.08)', width: '100%', boxSizing: 'border-box', borderRadius: '8px' }}
+                            />
+                            <div className="small" style={{ marginTop: '8px', fontWeight: 800 }}>Enter a score from 0.00 to {area.max !== undefined ? area.max.toFixed(2) : "100.00"}</div>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               </div>
@@ -1088,7 +1291,7 @@ export default function AssessmentPage() {
             </div>
             <div style={{ padding: '0 20px' }}>
               <p className="small" style={{ marginTop: '8px' }}>
-                You are about to appoint the following applicant to this item. On confirmation, this applicant will be marked <b>Appointed</b>, and every other applicant who applied to the same item number (<b>{appointConfirmApp.itemNo || '—'}</b>) will be marked <b>Not Appointed</b>. This will be reflected in the Appointment tab.
+                You are about to appoint the following applicant. On confirmation, this applicant's status will become <b>FOR APPOINTMENT</b>, and the selected plantilla item will be filled.
               </p>
             </div>
             <div className="modal-body" style={{ margin: '16px 0', display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -1096,10 +1299,27 @@ export default function AssessmentPage() {
                 <div className="meta-tile"><b>Applicant</b><br/>{appointConfirmApp.applicant}</div>
                 <div className="meta-tile"><b>Applicant number</b><br/>{appointConfirmApp.code}</div>
                 <div className="meta-tile"><b>Position</b><br/>{appointConfirmApp.vacancy}</div>
-                <div className="meta-tile"><b>Item No.</b><br/>{appointConfirmApp.itemNo || '—'}</div>
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div>
+                  <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '6px' }}>Plantilla Item Number</label>
+                  <select
+                    value={appointItemNo}
+                    onChange={e => setAppointItemNo(e.target.value)}
+                    style={{ width: '100%', height: '40px', padding: '0 8px', borderRadius: '8px', border: '1px solid var(--line)', boxSizing: 'border-box' }}
+                  >
+                    <option value="">-- Select Available Item No. --</option>
+                    {vacancies
+                      .filter(v => v.jobClusterId === appointConfirmApp.jobClusterId && v.fillingUpStatus !== 'FILLED')
+                      .map(v => (
+                        <option key={v.id} value={v.itemNo}>
+                          {v.itemNo} — {v.school || v.division}
+                        </option>
+                      ))
+                    }
+                  </select>
+                </div>
                 <div>
                   <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '6px' }}>Appointment Date</label>
                   <input
@@ -1110,12 +1330,21 @@ export default function AssessmentPage() {
                   />
                 </div>
                 <div>
-                  <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '6px' }}>Appointment Reference Code</label>
+                  <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '6px' }}>Appointment Reference Code (Autogenerated)</label>
                   <input
                     type="text"
                     value={appointRefCode}
-                    onChange={e => setAppointRefCode(e.target.value)}
-                    placeholder="Enter Reference Code"
+                    disabled
+                    style={{ width: '100%', height: '40px', padding: '0 8px', borderRadius: '8px', border: '1px solid var(--line)', boxSizing: 'border-box', backgroundColor: '#f1f5f9', color: '#64748b', cursor: 'not-allowed' }}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '6px' }}>Confirm with HRMO Passcode</label>
+                  <input
+                    type="password"
+                    value={appointPasscode}
+                    onChange={e => setAppointPasscode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    placeholder="Enter 6-digit passcode"
                     style={{ width: '100%', height: '40px', padding: '0 8px', borderRadius: '8px', border: '1px solid var(--line)', boxSizing: 'border-box' }}
                   />
                 </div>
@@ -1124,7 +1353,7 @@ export default function AssessmentPage() {
             <div className="decision-row" style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
               <button className="secondary" onClick={() => { setShowAppointConfirmModal(false); setAppointConfirmApp(null); }}>Cancel</button>
               <button className="good" onClick={() => {
-                handleConfirmAppointment(appointConfirmApp.id, appointDate, appointRefCode);
+                handleConfirmAppointment(appointConfirmApp.id, appointDate, appointPasscode, appointItemNo);
                 setShowAppointConfirmModal(false);
                 setAppointConfirmApp(null);
               }}>Confirm Appointment</button>
@@ -1153,6 +1382,246 @@ export default function AssessmentPage() {
             </div>
             <div className="decision-row" style={{ display: 'flex', justifyContent: 'flex-end' }}>
               <button className="secondary" onClick={() => setShowIncompleteAppointModal(false)}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: VIEW DOCUMENTS */}
+      {showDocsModal && selectedQualApp && (
+        <div className="modal open" style={{ zIndex: 100002 }}>
+          <div className="modal-box" style={{ padding: '0 24px 24px', maxHeight: '92vh', overflow: 'auto', width: 'min(1100px, 98vw)' }}>
+            <div className="modal-head" style={{
+              paddingTop: '24px',
+              paddingBottom: '12px',
+              background: 'white',
+              position: 'sticky',
+              top: 0,
+              zIndex: 10,
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              borderBottom: '1px solid var(--line)'
+            }}>
+              <h2 style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: 0 }}>
+                📂 Document Vault — {selectedQualApp.applicant}
+              </h2>
+              <button className="secondary" onClick={() => setShowDocsModal(false)}>Close Vault</button>
+            </div>
+
+            <div className="modal-body" style={{ marginTop: '20px', display: 'grid', gridTemplateColumns: '320px 1fr', gap: '20px', alignItems: 'start' }}>
+              {/* Document Checklist Sidebar */}
+              <div style={{ border: '1px solid var(--line)', borderRadius: '12px', overflow: 'hidden', background: '#F8FAFC' }}>
+                <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)', background: 'white' }}>
+                  <h4 style={{ margin: 0, color: 'var(--navy)', fontSize: '14px' }}>Document Checklist</h4>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', background: 'white' }}>
+                  {[
+                    { key: 'pds', label: 'Personal Data Sheet', required: true },
+                    { key: 'work_experience', label: 'Work Experience Sheet', required: true },
+                    { key: 'eligibility', label: 'Certificate of Eligibility', required: true },
+                    { key: 'tor', label: 'Transcript of Records', required: true },
+                    { key: 'prc', label: 'Updated PRC License/ID', required: true },
+                    { key: 'diploma', label: 'Diploma (optional)', required: false },
+                    { key: 'resume', label: 'Resume', required: true },
+                    { key: 'performance_rating', label: 'Performance Rating', required: false },
+                    { key: 'training_certificates', label: 'Training Certificates', required: false },
+                    { key: 'application_education', label: 'Application of Education', required: false },
+                    { key: 'application_learning', label: 'Application of Learning and Development', required: false }
+                  ].map((doc) => {
+                    const isSelected = selectedDocKey === doc.key;
+                    const isUploaded = availableDocs.find(d => d.key === doc.key)?.existsInAzure;
+                    return (
+                      <div
+                        key={doc.key}
+                        onClick={() => setSelectedDocKey(doc.key)}
+                        style={{
+                          padding: '12px 16px',
+                          cursor: 'pointer',
+                          backgroundColor: isSelected ? 'var(--blue-50)' : 'white',
+                          borderLeft: isSelected ? '4px solid var(--blue-600)' : '4px solid transparent',
+                          borderBottom: '1px solid #F1F5F9',
+                          transition: 'all 0.15s ease',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '2px'
+                        }}
+                      >
+                        <div style={{ fontWeight: 'bold', fontSize: '13px', color: isSelected ? 'var(--blue-800)' : 'var(--navy)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          {doc.label} {doc.required && <span style={{ color: '#EF4444' }}>*</span>} {isUploaded ? '✓' : ''}
+                        </div>
+                        <div style={{ fontSize: '11px', color: isSelected ? 'var(--blue-600)' : '#64748B' }}>
+                          {isUploaded ? 'View Uploaded Document' : 'No document uploaded'}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Document Preview Pane */}
+              <div style={{ border: '1px solid var(--line)', borderRadius: '12px', overflow: 'hidden' }}>
+                <div style={{ padding: '12px 16px', backgroundColor: 'var(--blue-50)', borderBottom: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <b style={{ color: 'var(--blue-900)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <svg 
+                      width="16" 
+                      height="16" 
+                      viewBox="0 0 24 24" 
+                      fill="none" 
+                      stroke="currentColor" 
+                      strokeWidth="2.5" 
+                      strokeLinecap="round" 
+                      strokeLinejoin="round"
+                      style={{ color: 'var(--blue-800)' }}
+                    >
+                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                      <circle cx="12" cy="12" r="3" />
+                    </svg>
+                    Document Viewer: {
+                      selectedDocKey === 'pds' ? 'Personal Data Sheet (PDS)' :
+                      selectedDocKey === 'work_experience' ? 'Work Experience Sheet' :
+                      selectedDocKey === 'eligibility' ? 'Certificate of Eligibility' :
+                      selectedDocKey === 'tor' ? 'Transcript of Records (TOR)' :
+                      selectedDocKey === 'prc' ? 'Updated PRC License/ID' :
+                      selectedDocKey === 'diploma' ? 'Diploma' :
+                      selectedDocKey === 'resume' ? 'Resume' :
+                      selectedDocKey === 'performance_rating' ? 'Performance Rating' :
+                      selectedDocKey === 'training_certificates' ? 'Training Certificates' :
+                      selectedDocKey === 'application_education' ? 'Application of Education' :
+                      selectedDocKey === 'application_learning' ? 'Application of Learning and Development' : ''
+                    }
+                  </b>
+                  <span style={{ fontSize: '12px', color: 'var(--muted)' }}>Page 1 of 1</span>
+                </div>
+                {(() => {
+                  if (docsLoading) {
+                    return (
+                      <div style={{
+                        backgroundColor: '#f8fafc',
+                        minHeight: '400px',
+                        maxHeight: '550px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        gap: '12px',
+                        width: '100%',
+                        color: '#64748B',
+                        padding: '40px',
+                        boxSizing: 'border-box'
+                      }}>
+                        <style>{`
+                          @keyframes spin {
+                            0% { transform: rotate(0deg); }
+                            100% { transform: rotate(360deg); }
+                          }
+                        `}</style>
+                        <div style={{
+                          border: '4px solid #e2e8f0',
+                          borderTop: '4px solid var(--blue)',
+                          borderRadius: '50%',
+                          width: '32px',
+                          height: '32px',
+                          animation: 'spin 1s linear infinite'
+                        }} />
+                        <b style={{ fontSize: '14px' }}>Loading Documents...</b>
+                        <span style={{ fontSize: '12px' }}>Checking file attachments</span>
+                      </div>
+                    );
+                  }
+                  const selectedDocInfo = availableDocs.find(d => d.key === selectedDocKey);
+                  const existsInAzure = !!selectedDocInfo?.existsInAzure;
+                  const isPdf = !!selectedDocInfo?.filename?.toLowerCase().endsWith('.pdf');
+                  return (
+                    <div style={{
+                      padding: (existsInAzure && isPdf) ? '0' : '24px',
+                      backgroundColor: '#f8fafc',
+                      minHeight: '400px',
+                      maxHeight: '550px',
+                      overflowY: (existsInAzure && isPdf) ? 'hidden' : 'auto',
+                      display: 'flex',
+                      justifyContent: 'center',
+                      width: '100%',
+                      alignItems: 'stretch'
+                    }}>
+                      {existsInAzure ? (
+                        isPdf ? (
+                          <iframe
+                            src={`${import.meta.env.VITE_API_URL || window.location.origin}/api/applications/${selectedQualApp.id}/documents/${selectedDocKey}/download?token=${localStorage.getItem('agap_token')}&dpi=98`}
+                            style={{ width: '100%', height: '550px', border: 'none', borderRadius: '0 0 12px 12px' }}
+                            title="Azure Document Viewer"
+                          />
+                        ) : (
+                          <div style={{ width: '100%', display: 'flex', flexDirection: 'column', backgroundColor: 'white', border: '1px solid var(--line)', borderRadius: '12px', overflow: 'hidden' }}>
+                            <div style={{ padding: '12px 16px', borderBottom: '1px solid #e2e8f0', background: '#f8fafc', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <span style={{ fontSize: '12px', color: '#64748B', fontWeight: 'bold' }}>
+                                Previewing Spreadsheet: {selectedDocInfo?.filename}
+                              </span>
+                              <a
+                                href={`${import.meta.env.VITE_API_URL || window.location.origin}/api/applications/${selectedQualApp.id}/documents/${selectedDocKey}/download?token=${localStorage.getItem('agap_token')}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                style={{ fontSize: '12px', color: 'var(--blue-600)', textDecoration: 'underline', fontWeight: 'bold' }}
+                              >
+                                Download Original
+                              </a>
+                            </div>
+                            <div style={{ overflow: 'auto', padding: '16px', boxSizing: 'border-box', maxHeight: '480px' }}>
+                              {csvLoading ? (
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '200px', gap: '8px', color: '#64748B' }}>
+                                  <span style={{ fontSize: '13px' }}>Loading sheet data...</span>
+                                </div>
+                              ) : csvError ? (
+                                <div style={{ color: '#EF4444', padding: '16px', textAlign: 'center', fontSize: '13px' }}>
+                                  Failed to load data: {csvError}
+                                </div>
+                              ) : csvData ? (
+                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', textAlign: 'left', fontFamily: 'sans-serif' }}>
+                                  <thead>
+                                    <tr style={{ backgroundColor: '#f1f5f9', borderBottom: '2px solid #cbd5e1' }}>
+                                      {csvData[0]?.map((cell, idx) => (
+                                        <th key={idx} style={{ padding: '8px 10px', border: '1px solid #e2e8f0', color: '#1e293b', fontWeight: 'bold', whiteSpace: 'nowrap' }}>
+                                          {cell}
+                                        </th>
+                                      ))}
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {csvData.slice(1).map((row, rowIdx) => (
+                                      <tr key={rowIdx} style={{ borderBottom: '1px solid #e2e8f0', backgroundColor: rowIdx % 2 === 0 ? 'white' : '#f8fafc' }}>
+                                        {row.map((cell, cellIdx) => (
+                                          <td key={cellIdx} style={{ padding: '6px 10px', border: '1px solid #e2e8f0', color: '#334155', whiteSpace: 'nowrap' }}>
+                                            {cell}
+                                          </td>
+                                        ))}
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              ) : (
+                                <div style={{ color: '#64748B', textAlign: 'center', padding: '20px' }}>No data to display.</div>
+                              )}
+                            </div>
+                          </div>
+                        )
+                      ) : (
+                        <div style={{ textAlign: 'center', color: '#64748B', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '40px', backgroundColor: '#f8fafc', width: '100%', boxSizing: 'border-box' }}>
+                          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ color: '#94A3B8' }}>
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                            <polyline points="14 2 14 8 20 8" />
+                            <line x1="9" y1="15" x2="15" y2="15" />
+                            <line x1="12" y1="12" x2="12" y2="18" />
+                          </svg>
+                          <b style={{ fontSize: '14px' }}>No Document Uploaded</b>
+                          <span style={{ fontSize: '12px', maxWidth: '240px' }}>
+                            The applicant has not uploaded a file for this requirement type.
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
             </div>
           </div>
         </div>

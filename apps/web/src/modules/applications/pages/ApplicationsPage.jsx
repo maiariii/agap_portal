@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { useAppData } from '../../../middleware/DataProvider.jsx';
 import { useToast } from '../../../middleware/ToastProvider.jsx';
 import { apiFetch } from '../../../config/api.js';
+import VacancyClusterAccordion from '../../../components/VacancyClusterAccordion.jsx';
 
 const DOC_REQUIREMENTS = [
   { key: "loi", label: "Letter of intent addressed to the Head of Office or highest human resource officer" },
@@ -16,6 +17,29 @@ const DOC_REQUIREMENTS = [
   { key: "cav", label: "Checklist of Requirements and Omnibus Sworn Statement on the CAV of documents submitted and Data Privacy Consent Form" },
   { key: "other", label: "Other documents as may be required for comparative assessment (e.g. MOVs, or Performance Rating from relevant work experience)" }
 ];
+
+const getAdaptiveFontSize = (val) => {
+  let text = '';
+  if (typeof val === 'string') {
+    text = val;
+  } else if (React.isValidElement(val)) {
+    const extractText = (node) => {
+      if (!node) return '';
+      if (typeof node === 'string' || typeof node === 'number') return String(node);
+      if (Array.isArray(node)) return node.map(extractText).join('');
+      if (node.props && node.props.children) return extractText(node.props.children);
+      return '';
+    };
+    text = extractText(val);
+  } else {
+    return 'inherit';
+  }
+  const len = text.length;
+  if (len > 300) return '10.5px';
+  if (len > 150) return '11.5px';
+  if (len > 80) return '12.5px';
+  return 'inherit';
+};
 
 export default function ApplicationsPage() {
   const { vacancies, applications, loadAllData } = useAppData();
@@ -38,6 +62,41 @@ export default function ApplicationsPage() {
   const [reviewDecisions, setReviewDecisions] = useState({});
   const [reviewDirty, setReviewDirty] = useState(false);
   const [showUnsavedPrompt, setShowUnsavedPrompt] = useState(false);
+
+  // Document Vault modal states in evaluation modal
+  const [showReviewDocsVault, setShowReviewDocsVault] = useState(false);
+  const [availableDocs, setAvailableDocs] = useState([]);
+  const [selectedDocKey, setSelectedDocKey] = useState('pds');
+  const [docsLoading, setDocsLoading] = useState(false);
+
+  React.useEffect(() => {
+    const handleTourUpdate = () => {
+      if (window.agap_tour_open_review) {
+        if (applications && applications.length > 0) {
+          const app = applications[0];
+          setReviewId(app.id);
+          setReviewApp(app);
+          
+          const isAlreadyQualifiedStatus = app.status?.toLowerCase() === 'qualified' || app.status?.toLowerCase() === 'disqualified';
+          const docChecklist = app.docChecklist || app.appObj?.docChecklist || app.documents || {};
+          const checklistState = {};
+          DOC_REQUIREMENTS.forEach((req) => {
+            const k = req.key;
+            checklistState[k] = docChecklist[k] ?? isAlreadyQualifiedStatus;
+          });
+          setReviewDocs(checklistState);
+        }
+      } else if (window.agap_tour_open_review === false) {
+        setReviewId(null);
+        setReviewApp(null);
+      }
+    };
+    window.addEventListener('agap-tour-update', handleTourUpdate);
+    if (window.agap_tour_open_review && applications && applications.length > 0) {
+      handleTourUpdate();
+    }
+    return () => window.removeEventListener('agap-tour-update', handleTourUpdate);
+  }, [applications]);
 
   const cls = (str) => {
     if (!str) return '';
@@ -270,6 +329,19 @@ export default function ApplicationsPage() {
     setReviewId(appRow.id);
     setReviewApp(appRow);
     setRemarks(appRow.reason || appRow.appObj?.reason || '');
+    
+    setAvailableDocs([]);
+    setSelectedDocKey('pds');
+    setShowReviewDocsVault(false);
+    if (appRow.id) {
+      setDocsLoading(true);
+      apiFetch(`/api/applications/${appRow.id}/documents`)
+        .then(data => {
+          setAvailableDocs(data.documents || []);
+        })
+        .catch(err => console.error('Error fetching documents:', err))
+        .finally(() => setDocsLoading(false));
+    }
 
     const docChecklist = appRow.docChecklist || appRow.appObj?.docChecklist || appRow.documents || {};
     const statusLower = appRow.status ? appRow.status.toLowerCase() : '';
@@ -304,22 +376,8 @@ export default function ApplicationsPage() {
   const docsComplete = Object.values(reviewDocs).every(Boolean);
 
   const isAlreadyQualified = useMemo(() => {
-    if (!reviewApp) return false;
-    const statusLower = reviewApp.status ? reviewApp.status.toLowerCase() : '';
-    const apptLower = (reviewApp.appointmentStatus || reviewApp.appObj?.appointmentStatus || '').toLowerCase();
-    const assessStatus = reviewApp.assessmentStatus || reviewApp.appObj?.assessmentStatus || '';
-    
-    if (apptLower === 'appointed' || apptLower === 'rejected' || apptLower === 'not appointed' || apptLower === 'not_appointed') {
-      return true;
-    }
-    if (assessStatus === 'Assessment Started' || assessStatus === 'Assessment Completed') {
-      return true;
-    }
-    if (statusLower === 'appointed') {
-      return true;
-    }
     return false;
-  }, [reviewApp]);
+  }, []);
 
   const calculatedResult = useMemo(() => {
     const decisions = Object.values(reviewDecisions);
@@ -415,7 +473,9 @@ export default function ApplicationsPage() {
               <label>Vacancy Item</label>
               <select value={appVacancyFilter} onChange={e => setAppVacancyFilter(e.target.value)}>
                 <option value="">All vacancies</option>
-                {vacancies.map(v => <option key={v.id} value={v.id}>{v.title} — {v.itemNo}</option>)}
+                {Array.from(new Map(vacancies.map(v => [v.jobClusterId, v])).values()).map(v => (
+                  <option key={v.id} value={v.jobClusterId}>{v.title}</option>
+                ))}
               </select>
             </div>
             <div>
@@ -451,7 +511,7 @@ export default function ApplicationsPage() {
           }}>Multi-sort: {multiSort ? 'On' : 'Off'}</button>
         </div>
         <div className="table-wrap">
-          <table>
+          <table style={{ width: '100%', tableLayout: 'fixed' }}>
             <thead>
               <tr>
                 <th className="row-num">No.</th>
@@ -572,19 +632,6 @@ export default function ApplicationsPage() {
                 </th>
                 <th>
                   <div className="th-content">
-                    <button className="th-btn" onClick={() => handleSortClick('itemNo')}>
-                      Item No.{getSortIndicator('itemNo')}
-                    </button>
-                    <input
-                      className="column-filter"
-                      placeholder="Filter..."
-                      value={appColFilters.itemNo || ''}
-                      onChange={e => handleAppColFilterChange('itemNo', e.target.value)}
-                    />
-                  </div>
-                </th>
-                <th>
-                  <div className="th-content">
                     <button className="th-btn" onClick={() => handleSortClick('status')}>
                       Application Status{getSortIndicator('status')}
                     </button>
@@ -605,33 +652,46 @@ export default function ApplicationsPage() {
               </tr>
             </thead>
             <tbody>
-              {paginatedApps.map((r, i) => (
-                <tr key={r.id} className="clickable-row" onClick={() => handleOpenReview(r)}>
-                  <td className="row-num">{((appPage - 1) * appPageSize) + i + 1}</td>
-                  <td><b>{r.applicant}</b><br/><span className="small">{r.code}</span></td>
-                  <td>{r.dateApplied}</td>
-                  <td>{r.deadline}</td>
-                  <td>{r.bachelorDegree}</td>
-                  <td className="num-col">
-                    <span className={`qs-number ${r.fitObj?.experienceScore >= 60 ? 'qs-pass' : 'qs-fail'}`}>
-                      {r.yearsExperience}
-                    </span>
-                  </td>
-                  <td className="num-col">
-                    <span className={`qs-number ${r.fitObj?.trainingScore >= 60 ? 'qs-pass' : 'qs-fail'}`}>
-                      {r.trainingHours}
-                    </span>
-                  </td>
-                  <td>{r.vacancy}</td>
-                  <td>{r.itemNo || '—'}</td>
-                  <td><span className={`badge ${cls(getApplicationDisplayStatus(r))}`}>{getApplicationDisplayStatus(r)}</span></td>
-                </tr>
-              ))}
-              {paginatedApps.length === 0 && (
-                <tr>
-                  <td colSpan={10} style={{ textAlign: 'center' }}>No applications match the filters.</td>
-                </tr>
-              )}
+              {(() => {
+                const grouped = {};
+                paginatedApps.forEach(r => {
+                  const title = r.vacancy || 'Unassigned';
+                  if (!grouped[title]) grouped[title] = [];
+                  grouped[title].push(r);
+                });
+                if (paginatedApps.length === 0) {
+                  return (
+                    <tr>
+                      <td colSpan={9} style={{ textAlign: 'center' }}>No applications match the filters.</td>
+                    </tr>
+                  );
+                }
+                return Object.entries(grouped).map(([clusterName, items]) => (
+                  <VacancyClusterAccordion key={clusterName} title={clusterName} colSpan={9}>
+                    {items.map((r, i) => (
+                      <tr key={r.id} className="clickable-row" onClick={() => handleOpenReview(r)}>
+                        <td className="row-num">{((appPage - 1) * appPageSize) + i + 1}</td>
+                        <td><b>{r.applicant}</b><br/><span className="small">{r.code}</span></td>
+                        <td>{r.dateApplied}</td>
+                        <td>{r.deadline}</td>
+                        <td>{r.bachelorDegree}</td>
+                        <td className="num-col">
+                          <span className={`qs-number ${r.fitObj?.experienceScore >= 60 ? 'qs-pass' : 'qs-fail'}`}>
+                            {r.yearsExperience}
+                          </span>
+                        </td>
+                        <td className="num-col">
+                          <span className={`qs-number ${r.fitObj?.trainingScore >= 60 ? 'qs-pass' : 'qs-fail'}`}>
+                            {r.trainingHours}
+                          </span>
+                        </td>
+                        <td>{r.vacancy}</td>
+                        <td><span className={`badge ${cls(getApplicationDisplayStatus(r))}`}>{getApplicationDisplayStatus(r)}</span></td>
+                      </tr>
+                    ))}
+                  </VacancyClusterAccordion>
+                ));
+              })()}
             </tbody>
           </table>
         </div>
@@ -667,7 +727,7 @@ export default function ApplicationsPage() {
       {/* MODAL: INITIAL EVALUATION REVIEW */}
       {reviewId && reviewApp && (
         <div className="modal open">
-          <div className="modal-box" style={{ padding: '0 24px 24px', maxHeight: '92vh', overflow: 'auto' }}>
+          <div className="modal-box" style={{ width: 'min(960px, 96vw)', padding: '0 24px 24px', maxHeight: '92vh', overflow: 'auto' }}>
             <div className="modal-head" style={{
               paddingTop: '24px',
               paddingBottom: '12px',
@@ -684,7 +744,12 @@ export default function ApplicationsPage() {
               alignItems: 'center'
             }}>
               <h2 style={{ margin: 0 }}>Initial Evaluation Review — {reviewApp.applicant}</h2>
-              <button className="secondary" onClick={handleCloseReviewModal}>Close</button>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button type="button" className="secondary" onClick={() => setShowReviewDocsVault(!showReviewDocsVault)}>
+                  {showReviewDocsVault ? 'Hide Documents' : '📂 View Documents'}
+                </button>
+                <button className="secondary" onClick={handleCloseReviewModal}>Close</button>
+              </div>
             </div>
 
             <div className="qs-matrix-wrap">
@@ -716,10 +781,9 @@ export default function ApplicationsPage() {
                       <td>
                         {reviewApp.applicantObj.bachelorDegree || '—'}
                         {reviewApp.applicantObj.major && (
-                          <>
-                            <br />
-                            <span className="small">{reviewApp.applicantObj.major}</span>
-                          </>
+                          <div className="small" style={{ marginTop: '4px', color: 'var(--muted)', fontSize: '11px', fontWeight: 'normal' }}>
+                            {reviewApp.applicantObj.major}
+                          </div>
                         )}
                       </td>
                       <td>{reviewApp.qsDegree || 'No minimum specified'}</td>
@@ -784,18 +848,38 @@ export default function ApplicationsPage() {
                 </div>
                 <div className="qs-grid">
                   {[
-                    { key: 'crit_degree', label: 'Bachelor\'s Degree', appVal: <>{reviewApp.bachelorDegree}{reviewApp.applicantObj.major && <><br /><span className="small">{reviewApp.applicantObj.major}</span></>}</>, reqVal: reviewApp.qsDegree || 'No minimum specified' },
+                    { key: 'crit_degree', label: 'Bachelor\'s Degree', appVal: <>{reviewApp.bachelorDegree}{reviewApp.applicantObj.major && <div className="small" style={{ marginTop: '4px', color: 'var(--muted)', fontSize: '11px', fontWeight: 'normal' }}>{reviewApp.applicantObj.major}</div>}</>, reqVal: reviewApp.qsDegree || 'No minimum specified' },
                     { key: 'crit_experience', label: 'Years of Experience', appVal: `${reviewApp.yearsExperience} year(s)`, reqVal: reviewApp.qsExperience || '0 minimum year(s)' },
                     { key: 'crit_training', label: 'Hours of Training', appVal: `${reviewApp.trainingHours} hour(s)`, reqVal: reviewApp.qsTraining || '0 minimum hour(s)' },
                     { key: 'crit_eligibility', label: 'Eligibility', appVal: reviewApp.applicantObj.eligibility || '—', reqVal: reviewApp.qsEligibility || 'Not specified' }
                   ].map(c => (
                     <div className="qs-card" key={c.key}>
                       <h3>{c.label}</h3>
-                      <div className="compare">
-                        <div className="compare-box"><b>Applicant</b><br/>{c.appVal}</div>
-                        <div className="compare-box"><b>Qualification Standard</b><br/>{c.reqVal}</div>
+                      <div className="compare" style={{ marginBottom: '12px' }}>
+                        <div className="compare-box">
+                          <b>Applicant</b>
+                          <div style={{
+                            whiteSpace: 'pre-line',
+                            fontSize: getAdaptiveFontSize(c.appVal),
+                            lineHeight: '1.4',
+                            marginTop: '4px'
+                          }}>
+                            {c.appVal}
+                          </div>
+                        </div>
+                        <div className="compare-box">
+                          <b>Qualification Standard</b>
+                          <div style={{
+                            whiteSpace: 'pre-line',
+                            fontSize: getAdaptiveFontSize(c.reqVal),
+                            lineHeight: '1.4',
+                            marginTop: '4px'
+                          }}>
+                            {c.reqVal}
+                          </div>
+                        </div>
                       </div>
-                       <div className="toggle-group">
+                       <div className="toggle-group" style={{ marginTop: 'auto' }}>
                         <button className={`secondary ${reviewDecisions[c.key] === 'pass' ? 'good' : ''}`} onClick={() => { if (isAlreadyQualified) return; setReviewDecisions({ ...reviewDecisions, [c.key]: reviewDecisions[c.key] === 'pass' ? null : 'pass' }); setReviewDirty(true); }} style={isAlreadyQualified ? { cursor: 'not-allowed', opacity: 0.8 } : {}}>Meet the QS</button>
                         <button className={`secondary ${reviewDecisions[c.key] === 'fail' ? 'danger' : ''}`} onClick={() => { if (isAlreadyQualified) return; setReviewDecisions({ ...reviewDecisions, [c.key]: reviewDecisions[c.key] === 'fail' ? null : 'fail' }); setReviewDirty(true); }} style={isAlreadyQualified ? { cursor: 'not-allowed', opacity: 0.8 } : {}}>Did not Meet the QS</button>
                       </div>
@@ -872,6 +956,210 @@ export default function ApplicationsPage() {
               </div>
             </div>
           </div>
+
+      {/* SUB-MODAL: DOCUMENT VAULT PREVIEW */}
+      {showReviewDocsVault && reviewApp && (
+        <div className="modal open" style={{ zIndex: 100002 }}>
+          <div className="modal-box" style={{ padding: '0 24px 24px', maxHeight: '92vh', overflow: 'auto', width: 'min(1100px, 98vw)' }}>
+            <div className="modal-head" style={{
+              paddingTop: '24px',
+              paddingBottom: '12px',
+              background: 'white',
+              position: 'sticky',
+              top: 0,
+              zIndex: 10,
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              borderBottom: '1px solid var(--line)'
+            }}>
+              <h2 style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: 0 }}>
+                📂 Document Vault — {reviewApp.applicant}
+              </h2>
+              <button className="secondary" onClick={() => setShowReviewDocsVault(false)}>Close Vault</button>
+            </div>
+
+            <div className="modal-body" style={{ marginTop: '20px', display: 'grid', gridTemplateColumns: '320px 1fr', gap: '20px', alignItems: 'start' }}>
+              {/* Document Checklist Sidebar */}
+              <div style={{ border: '1px solid var(--line)', borderRadius: '12px', overflow: 'hidden', background: '#F8FAFC' }}>
+                <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)', background: 'white' }}>
+                  <h4 style={{ margin: 0, color: 'var(--navy)', fontSize: '14px' }}>Document Checklist</h4>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', background: 'white' }}>
+                  {[
+                    { key: 'pds', label: 'Personal Data Sheet', required: true },
+                    { key: 'work_experience', label: 'Work Experience Sheet', required: true },
+                    { key: 'eligibility', label: 'Certificate of Eligibility', required: true },
+                    { key: 'tor', label: 'Transcript of Records', required: true },
+                    { key: 'prc', label: 'Updated PRC License/ID', required: true },
+                    { key: 'diploma', label: 'Diploma (optional)', required: false },
+                    { key: 'resume', label: 'Resume', required: true },
+                    { key: 'performance_rating', label: 'Performance Rating', required: false },
+                    { key: 'training_certificates', label: 'Training Certificates', required: false },
+                    { key: 'application_education', label: 'Application of Education', required: false },
+                    { key: 'application_learning', label: 'Application of Learning and Development', required: false }
+                  ].map((doc) => {
+                    const isSelected = selectedDocKey === doc.key;
+                    const isUploaded = availableDocs.find(d => d.key === doc.key)?.existsInAzure;
+                    return (
+                      <div
+                        key={doc.key}
+                        onClick={() => setSelectedDocKey(doc.key)}
+                        style={{
+                          padding: '12px 16px',
+                          cursor: 'pointer',
+                          backgroundColor: isSelected ? 'var(--blue-50)' : 'white',
+                          borderLeft: isSelected ? '4px solid var(--blue-600)' : '4px solid transparent',
+                          borderBottom: '1px solid #F1F5F9',
+                          transition: 'all 0.15s ease',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '2px'
+                        }}
+                      >
+                        <div style={{ fontWeight: 'bold', fontSize: '13px', color: isSelected ? 'var(--blue-800)' : 'var(--navy)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          {doc.label} {doc.required && <span style={{ color: '#EF4444' }}>*</span>} {isUploaded ? '✓' : ''}
+                        </div>
+                        <div style={{ fontSize: '11px', color: isSelected ? 'var(--blue-600)' : '#64748B' }}>
+                          {isUploaded ? 'View Uploaded Document' : 'No document uploaded'}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Document Preview Pane */}
+              <div style={{ border: '1px solid var(--line)', borderRadius: '12px', overflow: 'hidden' }}>
+                <div style={{ padding: '12px 16px', backgroundColor: 'var(--blue-50)', borderBottom: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <b style={{ color: 'var(--blue-900)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <svg 
+                      width="16" 
+                      height="16" 
+                      viewBox="0 0 24 24" 
+                      fill="none" 
+                      stroke="currentColor" 
+                      strokeWidth="2.5" 
+                      strokeLinecap="round" 
+                      strokeLinejoin="round"
+                      style={{ color: 'var(--blue-800)' }}
+                    >
+                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                      <circle cx="12" cy="12" r="3" />
+                    </svg>
+                    Document Viewer: {
+                      selectedDocKey === 'pds' ? 'Personal Data Sheet (PDS)' :
+                      selectedDocKey === 'work_experience' ? 'Work Experience Sheet' :
+                      selectedDocKey === 'eligibility' ? 'Certificate of Eligibility' :
+                      selectedDocKey === 'tor' ? 'Transcript of Records (TOR)' :
+                      selectedDocKey === 'prc' ? 'Updated PRC License/ID' :
+                      selectedDocKey === 'diploma' ? 'Diploma' :
+                      selectedDocKey === 'resume' ? 'Resume' :
+                      selectedDocKey === 'performance_rating' ? 'Performance Rating' :
+                      selectedDocKey === 'training_certificates' ? 'Training Certificates' :
+                      selectedDocKey === 'application_education' ? 'Application of Education' :
+                      selectedDocKey === 'application_learning' ? 'Application of Learning and Development' : ''
+                    }
+                  </b>
+                  <span style={{ fontSize: '12px', color: 'var(--muted)' }}>Page 1 of 1</span>
+                </div>
+                {(() => {
+                  if (docsLoading) {
+                    return (
+                      <div style={{
+                        backgroundColor: '#f8fafc',
+                        minHeight: '400px',
+                        maxHeight: '600px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        gap: '12px',
+                        width: '100%',
+                        color: '#64748B',
+                        padding: '40px',
+                        boxSizing: 'border-box'
+                      }}>
+                        <style>{`
+                          @keyframes spin {
+                            0% { transform: rotate(0deg); }
+                            100% { transform: rotate(360deg); }
+                          }
+                        `}</style>
+                        <div style={{
+                          border: '4px solid #e2e8f0',
+                          borderTop: '4px solid var(--blue)',
+                          borderRadius: '50%',
+                          width: '32px',
+                          height: '32px',
+                          animation: 'spin 1s linear infinite'
+                        }} />
+                        <b style={{ fontSize: '14px' }}>Loading Documents...</b>
+                        <span style={{ fontSize: '12px' }}>Checking file attachments</span>
+                      </div>
+                    );
+                  }
+                  const selectedDocInfo = availableDocs.find(d => d.key === selectedDocKey);
+                  const existsInAzure = !!selectedDocInfo?.existsInAzure;
+                  const isPdf = !!selectedDocInfo?.filename?.toLowerCase().endsWith('.pdf');
+                  return (
+                    <div style={{
+                      padding: (existsInAzure && isPdf) ? '0' : '24px',
+                      backgroundColor: '#f8fafc',
+                      minHeight: '400px',
+                      maxHeight: '600px',
+                      overflowY: (existsInAzure && isPdf) ? 'hidden' : 'auto',
+                      display: 'flex',
+                      justifyContent: 'center',
+                      width: '100%',
+                      alignItems: 'stretch'
+                    }}>
+                      {existsInAzure ? (
+                        isPdf ? (
+                          <iframe
+                            src={`${import.meta.env.VITE_API_URL || window.location.origin}/api/applications/${reviewApp.id}/documents/${selectedDocKey}/download?token=${localStorage.getItem('agap_token')}&dpi=98`}
+                            style={{ width: '100%', height: '600px', border: 'none', borderRadius: '0 0 12px 12px' }}
+                            title="Azure Document Viewer"
+                          />
+                        ) : (
+                          <div style={{ width: '100%', display: 'flex', flexDirection: 'column', backgroundColor: 'white', border: '1px solid var(--line)', borderRadius: '12px', overflow: 'hidden' }}>
+                            <div style={{ padding: '12px 16px', borderBottom: '1px solid #e2e8f0', background: '#f8fafc', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <span style={{ fontSize: '12px', color: '#64748B', fontWeight: 'bold' }}>
+                                Previewing Spreadsheet: {selectedDocInfo?.filename}
+                              </span>
+                              <a
+                                href={`${import.meta.env.VITE_API_URL || window.location.origin}/api/applications/${reviewApp.id}/documents/${selectedDocKey}/download?token=${localStorage.getItem('agap_token')}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                style={{ fontSize: '12px', color: 'var(--blue-600)', textDecoration: 'underline', fontWeight: 'bold' }}
+                              >
+                                Download Original
+                              </a>
+                            </div>
+                          </div>
+                        )
+                      ) : (
+                        <div style={{ textAlign: 'center', color: '#64748B', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ color: '#94A3B8' }}>
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                            <polyline points="14 2 14 8 20 8" />
+                            <line x1="9" y1="15" x2="15" y2="15" />
+                            <line x1="12" y1="12" x2="12" y2="18" />
+                          </svg>
+                          <b style={{ fontSize: '14px' }}>No Document Uploaded</b>
+                          <span style={{ fontSize: '12px', maxWidth: '240px' }}>
+                            The applicant has not uploaded a file for this requirement type.
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
         </div>
       )}
 

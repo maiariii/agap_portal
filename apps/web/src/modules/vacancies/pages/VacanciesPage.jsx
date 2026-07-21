@@ -2,13 +2,14 @@ import React, { useState, useMemo } from 'react';
 import { useAppData } from '../../../middleware/DataProvider.jsx';
 import { useToast } from '../../../middleware/ToastProvider.jsx';
 import { apiFetch } from '../../../config/api.js';
+import VacancyClusterAccordion from '../../../components/VacancyClusterAccordion.jsx';
 
 function isValidItemNo(itemNo) {
   if (!itemNo) return false;
   if (itemNo.toUpperCase().includes('UNKNOWN')) return false;
   if (/\s/.test(itemNo)) return false;
   if (/[a-z]/.test(itemNo)) return false;
-  return /^(?:OSEC-)?[A-Z0-9]+-[A-Z0-9\-]+-[0-9]+-20\d\d$/.test(itemNo);
+  return /^(?:OSEC-)?[A-Z0-9\-]+-[0-9]+-20\d\d$/.test(itemNo);
 }
 
 function isCharInvalidAtIndex(char, index, fullString) {
@@ -26,184 +27,155 @@ function isCharInvalidAtIndex(char, index, fullString) {
   return false;
 }
 
-function NOSCAItemEditor({ itemIndex, value, onChange }) {
-  const chars = value.split('');
+function NOSCAItemEditor({
+  itemIndex,
+  value,
+  onChange,
+  schoolLevel,
+  onSchoolLevelChange,
+  schoolSearchQuery,
+  onSchoolSearchQueryChange,
+  onSchoolSelect
+}) {
+  const [searchResults, setSearchResults] = React.useState([]);
+  const [showDropdown, setShowDropdown] = React.useState(false);
 
-  const handleCharChange = (charIdx, newVal) => {
-    const char = newVal.slice(-1).toUpperCase();
-    const newChars = [...chars];
-    newChars[charIdx] = char || ' ';
-    const newValue = newChars.join('');
-    onChange(newValue);
-
-    if (char && charIdx < chars.length - 1) {
-      let nextIdx = charIdx + 1;
-      while (nextIdx < chars.length && chars[nextIdx] === '-') {
-        nextIdx++;
-      }
-      if (nextIdx < chars.length) {
-        document.getElementById(`char-input-${itemIndex}-${nextIdx}`)?.focus();
-      }
+  React.useEffect(() => {
+    if (!schoolSearchQuery || !schoolSearchQuery.trim()) {
+      setSearchResults([]);
+      return;
     }
-  };
-
-  const handleKeyDown = (charIdx, e) => {
-    if (e.key === 'Backspace') {
-      e.preventDefault();
-      const newChars = [...chars];
-      newChars[charIdx] = ' ';
-      onChange(newChars.join(''));
-
-      let prevIdx = charIdx - 1;
-      while (prevIdx >= 0 && chars[prevIdx] === '-') {
-        prevIdx--;
+    const delayDebounce = setTimeout(async () => {
+      try {
+        const data = await apiFetch(`/api/vacancies/schools/autocomplete?q=${encodeURIComponent(schoolSearchQuery)}`);
+        setSearchResults(data || []);
+      } catch (err) {
+        console.error('Error fetching schools:', err);
       }
-      if (prevIdx >= 0) {
-        document.getElementById(`char-input-${itemIndex}-${prevIdx}`)?.focus();
-      }
-    } else if (e.key === 'ArrowLeft') {
-      e.preventDefault();
-      let prevIdx = charIdx - 1;
-      while (prevIdx >= 0 && chars[prevIdx] === '-') {
-        prevIdx--;
-      }
-      if (prevIdx >= 0) {
-        document.getElementById(`char-input-${itemIndex}-${prevIdx}`)?.focus();
-      }
-    } else if (e.key === 'ArrowRight') {
-      e.preventDefault();
-      let nextIdx = charIdx + 1;
-      while (nextIdx < chars.length && chars[nextIdx] === '-') {
-        nextIdx++;
-      }
-      if (nextIdx < chars.length) {
-        document.getElementById(`char-input-${itemIndex}-${nextIdx}`)?.focus();
-      }
-    }
-  };
+    }, 300);
+    return () => clearTimeout(delayDebounce);
+  }, [schoolSearchQuery]);
 
-  const handlePaste = (e) => {
-    e.preventDefault();
-    const pastedText = e.clipboardData.getData('text').toUpperCase().replace(/\s+/g, '');
-    if (pastedText) {
-      onChange(pastedText);
-    }
-  };
-
-  const handleAddChar = () => {
-    onChange(value + ' ');
-  };
-
-  const handleRemoveChar = () => {
-    if (value.length > 0) {
-      onChange(value.slice(0, -1));
-    }
-  };
-
-  const handleChangePrefixToSca = () => {
-    if (value.includes('-')) {
-      const parts = value.split('-');
-      parts[0] = 'SCAI';
-      onChange(parts.join('-'));
-    } else {
-      onChange('SCAI-' + value);
-    }
-  };
+  const isInvalid = !isValidItemNo(value);
 
   return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px', alignItems: 'center', marginTop: '6px' }}>
-       {chars.map((char, charIdx) => {
-        const isSeparator = char === '-';
-        const isCharInvalid = isCharInvalidAtIndex(char, charIdx, value);
-        return (
-          <input
-            key={charIdx}
-            id={`char-input-${itemIndex}-${charIdx}`}
-            type="text"
-            value={char === ' ' ? '' : char}
-            onChange={(e) => handleCharChange(charIdx, e.target.value)}
-            onKeyDown={(e) => handleKeyDown(charIdx, e)}
-            onPaste={handlePaste}
-            maxLength={1}
-            style={{
-              width: '20px',
-              height: '26px',
-              textAlign: 'center',
-              fontSize: '11px',
-              fontWeight: '900',
-              fontFamily: 'monospace',
-              border: isSeparator ? 'none' : (isCharInvalid ? '1px solid #EF4444' : '1px solid var(--line)'),
-              borderRadius: '4px',
-              background: isSeparator ? 'transparent' : (isCharInvalid ? '#FEF2F2' : '#F8FAFC'),
-              color: isSeparator ? 'var(--muted)' : (isCharInvalid ? '#EF4444' : 'var(--navy)'),
-              outline: 'none',
-              padding: 0,
-              boxShadow: isSeparator ? 'none' : 'inset 0 1px 2px rgba(0,0,0,0.05)'
-            }}
-            disabled={isSeparator}
-          />
-        );
-      })}
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center', marginTop: '6px' }}>
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value.toUpperCase().replace(/\s+/g, ''))}
+        placeholder="Enter Item Number"
+        style={{
+          padding: '4px 10px',
+          fontSize: '12px',
+          fontWeight: '800',
+          fontFamily: 'monospace',
+          border: isInvalid ? '1.5px solid #EF4444' : '1.5px solid var(--line)',
+          borderRadius: '8px',
+          background: isInvalid ? '#FEF2F2' : '#F8FAFC',
+          color: isInvalid ? '#EF4444' : 'var(--navy)',
+          outline: 'none',
+          height: '28px',
+          width: '240px',
+          boxSizing: 'border-box'
+        }}
+      />
       
-      <div style={{ display: 'flex', gap: '2px', marginLeft: '4px' }}>
-        <button
-          type="button"
-          onClick={handleAddChar}
-          title="Add character box"
+      <div style={{ display: 'flex', gap: '2px', marginLeft: '4px', alignItems: 'center' }}>
+        <select
+          value={schoolLevel || ''}
+          onChange={(e) => onSchoolLevelChange(e.target.value)}
           style={{
-            padding: '2px 6px',
+            padding: '0 8px',
             fontSize: '11px',
-            minHeight: '22px',
-            borderRadius: '4px',
-            border: '1px solid var(--line)',
-            background: '#F1F5F9',
-            color: '#475569',
-            cursor: 'pointer',
-            fontWeight: 'bold'
-          }}
-        >
-          +
-        </button>
-        {value.length > 0 && (
-          <button
-            type="button"
-            onClick={handleRemoveChar}
-            title="Remove last box"
-            style={{
-              padding: '2px 6px',
-              fontSize: '11px',
-              minHeight: '22px',
-              borderRadius: '4px',
-              border: '1px solid var(--line)',
-              background: '#F1F5F9',
-              color: '#475569',
-              cursor: 'pointer',
-              fontWeight: 'bold'
-            }}
-          >
-            -
-          </button>
-        )}
-        <button
-          type="button"
-          onClick={handleChangePrefixToSca}
-          title="Convert prefix to SCAI"
-          style={{
-            padding: '2px 8px',
-            fontSize: '11px',
-            minHeight: '22px',
-            borderRadius: '4px',
-            border: '1px solid var(--blue)',
+            height: '28px',
+            borderRadius: '8px',
+            border: '1.5px solid var(--blue)',
             background: 'var(--blue-50)',
             color: 'var(--blue-600)',
-            cursor: 'pointer',
             fontWeight: 'bold',
-            marginLeft: '4px'
+            marginLeft: '4px',
+            cursor: 'pointer',
+            outline: 'none',
+            whiteSpace: 'nowrap',
+            boxSizing: 'border-box',
+            display: 'inline-flex',
+            alignItems: 'center'
           }}
         >
-          Use SCAI Prefix
-        </button>
+          <option value="">Select School Level</option>
+          <option value="ES">ES</option>
+          <option value="JHS">JHS</option>
+          <option value="SHS">SHS</option>
+        </select>
       </div>
+
+      {schoolLevel === 'JHS' && (
+        <div style={{ width: '100%', marginTop: '6px', position: 'relative' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ fontSize: '10.5px', fontWeight: 'bold', color: 'var(--navy)' }}>School ID:</span>
+            <div style={{ position: 'relative', flex: 1 }}>
+              <input
+                type="text"
+                value={schoolSearchQuery || ''}
+                onChange={(e) => {
+                  onSchoolSearchQueryChange(e.target.value);
+                  setShowDropdown(true);
+                }}
+                onFocus={() => setShowDropdown(true)}
+                placeholder="Type School ID or Name..."
+                style={{
+                  width: '100%',
+                  padding: '4px 8px',
+                  borderRadius: '6px',
+                  border: '1px solid var(--line)',
+                  fontSize: '11.5px',
+                  height: '24px'
+                }}
+              />
+              {showDropdown && searchResults.length > 0 && (
+                <div style={{
+                  position: 'absolute',
+                  top: '100%',
+                  left: 0,
+                  right: 0,
+                  background: 'white',
+                  border: '1px solid var(--line)',
+                  borderRadius: '6px',
+                  boxShadow: '0 4px 8px rgba(0, 0, 0, 0.1)',
+                  zIndex: 999,
+                  maxHeight: '120px',
+                  overflowY: 'auto',
+                  marginTop: '2px'
+                }}>
+                  {searchResults.map((sch) => (
+                    <div
+                      key={sch.schoolId}
+                      onClick={() => {
+                        onSchoolSelect(sch);
+                        setShowDropdown(false);
+                      }}
+                      style={{
+                        padding: '6px 8px',
+                        fontSize: '11px',
+                        cursor: 'pointer',
+                        userSelect: 'none',
+                        borderBottom: '1px solid #F1F5F9'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.background = '#F8FAFC'}
+                      onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                    >
+                      <span style={{ pointerEvents: 'none' }}>
+                        <b>{sch.schoolId}</b> - {sch.schoolName}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -237,13 +209,61 @@ export default function VacanciesPage() {
   const [detectedItems, setDetectedItems] = useState([]);
   const [selectedNoscaItemNos, setSelectedNoscaItemNos] = useState([]);
 
-  // Close Warning Override states
+  // Manual Add Form states
+  const [showManualFields, setShowManualFields] = useState(false);
+  const [manualPositionId, setManualPositionId] = useState('');
+  const [manualItemNo, setManualItemNo] = useState('SCA1-00000-2026');
+  const [manualSchoolLevel, setManualSchoolLevel] = useState('');
+  const [manualSchoolId, setManualSchoolId] = useState(null);
+  const [manualSchoolName, setManualSchoolName] = useState('');
+  const [manualSchoolSearchQuery, setManualSchoolSearchQuery] = useState('');
+  const [manualSearchResults, setManualSearchResults] = useState([]);
+  const [showManualDropdown, setShowManualDropdown] = useState(false);
+
+  React.useEffect(() => {
+    if (!manualSchoolSearchQuery || !manualSchoolSearchQuery.trim()) {
+      setManualSearchResults([]);
+      return;
+    }
+    const delayDebounce = setTimeout(async () => {
+      try {
+        const data = await apiFetch(`/api/vacancies/schools/autocomplete?q=${encodeURIComponent(manualSchoolSearchQuery)}`);
+        setManualSearchResults(data || []);
+      } catch (err) {
+        console.error('Error fetching schools:', err);
+      }
+    }, 300);
+    return () => clearTimeout(delayDebounce);
+  }, [manualSchoolSearchQuery]);
+
+
+  React.useEffect(() => {
+    const handleTourUpdate = () => {
+      if (window.agap_tour_open_nosca) {
+        setShowNosca(true);
+      } else if (window.agap_tour_open_nosca === false) {
+        setShowNosca(false);
+      }
+    };
+    window.addEventListener('agap-tour-update', handleTourUpdate);
+    if (window.agap_tour_open_nosca) {
+      setShowNosca(true);
+    }
+    return () => window.removeEventListener('agap-tour-update', handleTourUpdate);
+  }, []);
+
   const [showCloseWarning, setShowCloseWarning] = useState(false);
   const [closeWarningVac, setCloseWarningVac] = useState(null);
   const [closeReason, setCloseReason] = useState('');
   const [closeReasonOther, setCloseReasonOther] = useState('');
   const [closePasscode, setClosePasscode] = useState('');
   const [passcodeError, setPasscodeError] = useState('');
+
+  // Delete Confirmation States
+  const [showDeleteConfirmModal, setShowDeleteConfirmModal] = useState(false);
+  const [deleteConfirmVac, setDeleteConfirmVac] = useState(null);
+  const [deletePasscode, setDeletePasscode] = useState('');
+  const [deletePasscodeError, setDeletePasscodeError] = useState('');
 
   const vacanciesKpiStats = useMemo(() => {
     const total = vacancies.length;
@@ -255,8 +275,8 @@ export default function VacanciesPage() {
   const getVacancyCellValue = (v, key) => {
     if (key === 'itemNo') return v.itemNo || '';
     if (key === 'position') return positions.find(p => p.id === v.positionId)?.title || 'Unmapped position';
-    if (key === 'schoolOffice') return v.school || v.location || '';
-    if (key === 'applications') return applications.filter(a => a.vacancyId === v.id).length;
+    if (key === 'schoolOffice') return v.school || v.division || '';
+    if (key === 'applications') return applications.filter(a => a.vacancyId === v.jobClusterId).length;
     if (key === 'deadline') return v.postingEnd || '';
     if (key === 'daysRemaining') {
       if (!v.postingStart || !v.postingEnd) return -999999;
@@ -265,7 +285,7 @@ export default function VacanciesPage() {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       if (v.status === 'closed' || today < start || today > end) return -999999;
-      return Math.round((end - today) / 86400000);
+      return Math.round((end - today) / 86400000) + 1;
     }
     if (key === 'postingStatus') {
       const today = new Date();
@@ -288,7 +308,7 @@ export default function VacanciesPage() {
       list = list.filter(v => 
         (v.itemNo || '').toLowerCase().includes(q) || 
         (positions.find(p => p.id === v.positionId)?.title || '').toLowerCase().includes(q) ||
-        (v.school || v.location || '').toLowerCase().includes(q)
+        (v.school || v.division || '').toLowerCase().includes(q)
       );
     }
     if (vacPosFilter) list = list.filter(v => v.positionId === vacPosFilter);
@@ -392,6 +412,35 @@ export default function VacanciesPage() {
     }
   };
 
+  const handleInitiateDeleteVacancy = (vac) => {
+    setDeleteConfirmVac(vac);
+    setDeletePasscode('');
+    setDeletePasscodeError('');
+    setShowDeleteConfirmModal(true);
+  };
+
+  const handleConfirmDeleteVacancy = async () => {
+    if (!deletePasscode) {
+      setDeletePasscodeError("Please enter your passcode.");
+      return;
+    }
+    try {
+      await apiFetch('/api/auth/verify-passcode', {
+        method: 'POST',
+        body: JSON.stringify({ passcode: deletePasscode })
+      });
+      await apiFetch(`/api/vacancies/${deleteConfirmVac.id}`, {
+        method: 'DELETE'
+      });
+      setToast({ message: 'Vacancy deleted successfully.', type: 'success' });
+      setShowDeleteConfirmModal(false);
+      setDeleteConfirmVac(null);
+      loadAllData();
+    } catch (e) {
+      setDeletePasscodeError(e.message || "Incorrect passcode. Deletion is not allowed.");
+    }
+  };
+
   const handleConfirmOverrideClose = async () => {
     let finalReason = closeReason;
     if (closeReason === '__other__') {
@@ -464,7 +513,11 @@ export default function VacanciesPage() {
           const items = response.items.map(itemNo => ({
             itemNo,
             title: positionName,
-            positionId: positionId || ''
+            positionId: positionId || '',
+            schoolLevel: '',
+            schoolId: null,
+            schoolName: '',
+            schoolSearchQuery: ''
           }));
 
           setDetectedItems(items);
@@ -490,8 +543,31 @@ export default function VacanciesPage() {
   const handleAddNoscaVacancies = async () => {
     const toAdd = detectedItems.filter(it => selectedNoscaItemNos.includes(it.itemNo));
     if (!toAdd.length) return setToast({ message: 'Please tick at least one item to add', type: 'error' });
+    
+    // Check validation per item
+    for (const it of toAdd) {
+      if (!it.schoolLevel) {
+        return setToast({ message: `Please select a School Level for item ${it.itemNo}.`, type: 'error' });
+      }
+      if (it.schoolLevel === 'JHS' && !it.schoolId) {
+        return setToast({ message: `Please select a valid JHS school ID for item ${it.itemNo}.`, type: 'error' });
+      }
+    }
+
+    const payloadItems = toAdd.map(item => ({
+      itemNo: item.itemNo,
+      title: item.title,
+      positionId: item.positionId,
+      schoolLevel: item.schoolLevel,
+      schoolId: item.schoolLevel === 'JHS' ? item.schoolId : null,
+      schoolName: item.schoolLevel === 'JHS' ? item.schoolName : ''
+    }));
+
     try {
-      await apiFetch('/api/vacancies/import-nosca', { method: 'POST', body: JSON.stringify({ items: toAdd }) });
+      await apiFetch('/api/vacancies/import-nosca', { 
+        method: 'POST', 
+        body: JSON.stringify({ items: payloadItems }) 
+      });
       setToast({ message: 'Vacancies added successfully!', type: 'success' });
       setShowNosca(false);
       setDetectedItems([]);
@@ -500,6 +576,66 @@ export default function VacanciesPage() {
     } catch (e) {
       setToast({ message: e.message, type: 'error' });
     }
+  };
+
+  const handleConfirmAddManual = async () => {
+    if (!manualPositionId) {
+      setToast({ message: 'Please select a position.', type: 'error' });
+      return;
+    }
+    if (!isValidItemNo(manualItemNo)) {
+      setToast({ message: 'Item number format must be like OSEC-DEPEDB-ADO2-540033-2026 or SCA1-00000-2026.', type: 'error' });
+      return;
+    }
+    if (!manualSchoolLevel) {
+      setToast({ message: 'Please select a school level.', type: 'error' });
+      return;
+    }
+    if (manualSchoolLevel === 'JHS' && !manualSchoolId) {
+      setToast({ message: 'Please select a school ID for JHS.', type: 'error' });
+      return;
+    }
+
+    const pos = positions.find(p => p.id === manualPositionId);
+    const newItem = {
+      itemNo: manualItemNo,
+      title: pos.title,
+      positionId: manualPositionId,
+      schoolLevel: manualSchoolLevel,
+      schoolId: manualSchoolLevel === 'JHS' ? manualSchoolId : null,
+      schoolName: manualSchoolLevel === 'JHS' ? manualSchoolName : ''
+    };
+
+    try {
+      await apiFetch('/api/vacancies/import-nosca', {
+        method: 'POST',
+        body: JSON.stringify({ items: [newItem] })
+      });
+      setToast({ message: 'Vacancy created successfully!', type: 'success' });
+      setShowNosca(false);
+      setShowManualFields(false);
+      setManualPositionId('');
+      setManualItemNo('SCA1-00000-2026');
+      setManualSchoolLevel('');
+      setManualSchoolId(null);
+      setManualSchoolName('');
+      setManualSchoolSearchQuery('');
+      loadAllData();
+    } catch (e) {
+      setToast({ message: e.message, type: 'error' });
+    }
+  };
+
+  const handleAddManually = () => {
+    const positionName = "School Counselor Associate I";
+    const positionId = positions.find(p => p.title.toLowerCase() === positionName.toLowerCase())?.id || '';
+    setManualPositionId(positionId);
+    setManualItemNo('SCA1-00000-2026');
+    setManualSchoolLevel('');
+    setManualSchoolId(null);
+    setManualSchoolName('');
+    setManualSchoolSearchQuery('');
+    setShowManualFields(true);
   };
 
   const selectCalDate = (iso) => {
@@ -537,7 +673,7 @@ export default function VacanciesPage() {
     if (!startIso || !endIso) return 0;
     const start = new Date(startIso + "T00:00:00");
     const end = new Date(endIso + "T00:00:00");
-    return Math.max(0, Math.round((end - start) / 86400000) + 1);
+    return Math.max(0, Math.round((end - start) / 86400000));
   };
 
   const getCalSummaryText = () => {
@@ -608,7 +744,7 @@ export default function VacanciesPage() {
       <div className="card">
         <h2>Vacancy Postings</h2>
         <div className="table-wrap">
-          <table style={{ minWidth: '1000px' }}>
+          <table style={{ width: '100%', tableLayout: 'fixed' }}>
             <thead>
               <tr>
                 <th className="row-num">No.</th>
@@ -652,33 +788,7 @@ export default function VacanciesPage() {
                     }}
                   />
                 </th>
-                <th className="num-col">
-                  <button className="th-btn" onClick={() => handleVSortClick('applications')}>Applications {vSortKey === 'applications' ? (vSortDir === 'asc' ? '▲' : '▼') : ''}</button>
-                  <div className="column-filter-range" style={{ display: 'flex', gap: '4px' }}>
-                    <input
-                      className="column-filter"
-                      type="number"
-                      placeholder="Min"
-                      value={vColumnFilters.applications?.min || ''}
-                      onChange={e => {
-                        const current = vColumnFilters.applications || {};
-                        setVColumnFilters({ ...vColumnFilters, applications: { ...current, min: e.target.value } });
-                        setVacPage(1);
-                      }}
-                    />
-                    <input
-                      className="column-filter"
-                      type="number"
-                      placeholder="Max"
-                      value={vColumnFilters.applications?.max || ''}
-                      onChange={e => {
-                        const current = vColumnFilters.applications || {};
-                        setVColumnFilters({ ...vColumnFilters, applications: { ...current, max: e.target.value } });
-                        setVacPage(1);
-                      }}
-                    />
-                  </div>
-                </th>
+
                 <th>
                   <button className="th-btn" onClick={() => handleVSortClick('deadline')}>Deadline {vSortKey === 'deadline' ? (vSortDir === 'asc' ? '▲' : '▼') : ''}</button>
                   <input
@@ -752,54 +862,98 @@ export default function VacanciesPage() {
               </tr>
             </thead>
             <tbody>
-              {paginatedVacancies.map((vac, idx) => {
-                const appCount = applications.filter(a => a.vacancyId === vac.id).length;
-                const today = new Date();
-                today.setHours(0, 0, 0, 0);
-                const start = vac.postingStart ? new Date(vac.postingStart.slice(0, 10) + "T00:00:00") : null;
-                const end = vac.postingEnd ? new Date(vac.postingEnd.slice(0, 10) + "T00:00:00") : null;
-                const isClosed = vac.status === 'closed' || (start && today < start) || (end && today > end);
-                const deadlinePast = end ? end < today : false;
-                
-                let drText = 'N/A';
-                let drColor = 'var(--muted)';
-                if (!isClosed && end) {
-                  const rem = Math.round((end - today) / 86400000);
-                  drText = String(rem);
-                  drColor = rem < 0 ? 'var(--red)' : rem <= 3 ? 'var(--amber)' : 'var(--green)';
+              {(() => {
+                const grouped = {};
+                paginatedVacancies.forEach(vac => {
+                  const title = positions.find(p => p.id === vac.positionId)?.title || vac.title || 'Unassigned';
+                  if (!grouped[title]) grouped[title] = [];
+                  grouped[title].push(vac);
+                });
+                if (paginatedVacancies.length === 0) {
+                  return (
+                    <tr>
+                      <td colSpan={9} style={{ textAlign: 'center' }}>No vacancies match the filters.</td>
+                    </tr>
+                  );
                 }
+                return Object.entries(grouped).map(([clusterName, items]) => (
+                  <VacancyClusterAccordion key={clusterName} title={clusterName} colSpan={9}>
+                    {items.map((vac, idx) => {
+                      const appCount = applications.filter(a => a.vacancyId === vac.jobClusterId).length;
+                      const today = new Date();
+                      today.setHours(0, 0, 0, 0);
+                      const start = vac.postingStart ? new Date(vac.postingStart.slice(0, 10) + "T00:00:00") : null;
+                      const end = vac.postingEnd ? new Date(vac.postingEnd.slice(0, 10) + "T00:00:00") : null;
+                      const isClosed = vac.status === 'closed' || (start && today < start) || (end && today > end);
+                      const deadlinePast = end ? end < today : false;
+                      
+                      let drText = 'N/A';
+                      let drColor = 'var(--muted)';
+                      if (!isClosed && end) {
+                        const rem = Math.round((end - today) / 86400000) + 1;
+                        drText = String(rem);
+                        drColor = rem <= 1 ? 'var(--red)' : rem <= 3 ? 'var(--amber)' : 'var(--green)';
+                      }
 
-                const appCountColor = appCount === 0 ? 'var(--red)' : 'var(--navy)';
-                const deadlineColor = deadlinePast ? 'var(--red)' : 'var(--text)';
+                      const appCountColor = appCount === 0 ? 'var(--red)' : 'var(--navy)';
+                      const deadlineColor = deadlinePast ? 'var(--red)' : 'var(--text)';
 
-                return (
-                  <tr key={vac.id}>
-                    <td className="row-num">{(vacPage - 1) * vacPageSize + idx + 1}</td>
-                    <td><b>{vac.itemNo}</b></td>
-                    <td>{positions.find(p => p.id === vac.positionId)?.title || vac.title}</td>
-                    <td>{vac.school || 'Division Pool'}</td>
-                    <td className="num-col"><span className="qs-number" style={{ color: appCountColor }}>{appCount}</span></td>
-                    <td><span className="qs-number" style={{ color: deadlineColor }}>{vac.postingEnd ? vac.postingEnd.slice(0, 10) : '—'}</span></td>
-                    <td className="num-col"><span className="qs-number" style={{ color: drColor }}>{drText}</span></td>
-                    <td><span className={`badge ${isClosed ? 'gray' : 'green'}`}>{isClosed ? 'Closed' : 'Open for Application'}</span></td>
-                    <td>
-                      <span className={`badge ${vac.fillingUpStatus === 'FILLED' ? 'filled-status' : 'unfilled-status'}`}>
-                        {vac.fillingUpStatus || 'UNFILLED'}
-                      </span>
-                    </td>
-                    <td>
-                      <button 
-                        className={`vac-action ${vac.fillingUpStatus === 'FILLED' ? 'incomplete' : (isClosed ? 'good' : 'danger')}`} 
-                        onClick={() => handleToggleVacancy(vac)}
-                        disabled={vac.fillingUpStatus === 'FILLED'}
-                        style={vac.fillingUpStatus === 'FILLED' ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
-                      >
-                        {isClosed ? 'Open' : 'Close'}
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
+                      return (
+                        <tr key={vac.id}>
+                          <td className="row-num">{(vacPage - 1) * vacPageSize + idx + 1}</td>
+                          <td><b>{vac.itemNo}</b></td>
+                          <td>{positions.find(p => p.id === vac.positionId)?.title || vac.title}</td>
+                          <td>{vac.school || 'Division Pool'}</td>
+
+                          <td><span className="qs-number" style={{ color: deadlineColor }}>{vac.postingEnd ? vac.postingEnd.slice(0, 10) : '—'}</span></td>
+                          <td className="num-col"><span className="qs-number" style={{ color: drColor }}>{drText}</span></td>
+                          <td><span className={`badge ${isClosed ? 'gray' : 'green'}`}>{isClosed ? 'Closed' : 'Open for Application'}</span></td>
+                          <td>
+                            <span className={`badge ${vac.fillingUpStatus === 'FILLED' ? 'filled-status' : 'unfilled-status'}`}>
+                              {vac.fillingUpStatus || 'UNFILLED'}
+                            </span>
+                          </td>
+                          <td style={{ display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'center' }}>
+                            <button 
+                              className={`vac-action ${vac.fillingUpStatus === 'FILLED' ? 'incomplete' : (isClosed ? 'good' : 'danger')}`} 
+                              onClick={() => handleToggleVacancy(vac)}
+                              disabled={vac.fillingUpStatus === 'FILLED'}
+                              style={vac.fillingUpStatus === 'FILLED' ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
+                            >
+                              {isClosed ? 'Open' : 'Close'}
+                            </button>
+                            <button
+                              onClick={() => handleInitiateDeleteVacancy(vac)}
+                              title="Delete vacancy"
+                              style={{
+                                background: 'none',
+                                border: 'none',
+                                cursor: 'pointer',
+                                color: '#EF4444',
+                                padding: '6px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                borderRadius: '6px',
+                                transition: 'background-color 0.2s'
+                              }}
+                              onMouseOver={e => e.currentTarget.style.backgroundColor = '#FEE2E2'}
+                              onMouseOut={e => e.currentTarget.style.backgroundColor = 'transparent'}
+                            >
+                              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <polyline points="3 6 5 6 21 6"></polyline>
+                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                                <line x1="10" y1="11" x2="10" y2="17"></line>
+                                <line x1="14" y1="11" x2="14" y2="17"></line>
+                              </svg>
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </VacancyClusterAccordion>
+                ));
+              })()}
             </tbody>
           </table>
         </div>
@@ -946,7 +1100,7 @@ export default function VacanciesPage() {
                       </div>
                       <div className="position-info-tile">
                         <b>Division</b>
-                        <span>{calVacancy.location || 'SDO Manila'}</span>
+                        <span>{calVacancy.division || 'SDO Manila'}</span>
                       </div>
                     </div>
                   </section>
@@ -1098,6 +1252,9 @@ export default function VacanciesPage() {
                   <button className="gold" onClick={handleScanNOSCA} disabled={noscaScanning} style={{ marginTop: '8px' }}>
                     {noscaScanning ? 'Scanning...' : '↑ Upload NOSCA'}
                   </button>
+                  <button className="secondary" onClick={handleAddManually} disabled={noscaScanning} style={{ marginTop: '4px', width: '100%', maxWidth: '170px' }}>
+                    ✎ Add Manually
+                  </button>
                   <input
                     id="nosca-file-input"
                     type="file"
@@ -1107,7 +1264,131 @@ export default function VacanciesPage() {
                   />
                 </div>
 
-                <div className="nosca-scan" style={{ minHeight: '300px', border: '2px solid var(--line)', borderRadius: '18px', padding: '16px', background: 'white', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                {showManualFields ? (
+                  <div className="nosca-scan manual-form" style={{ minHeight: '300px', border: '2px solid var(--line)', borderRadius: '18px', padding: '24px 20px', background: 'white', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                    <h3 style={{ fontFamily: 'var(--font-heading)', color: 'var(--navy)', margin: 0, fontSize: '16px', fontWeight: 'bold' }}>Add Vacancy Manually</h3>
+                    
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                      <div>
+                        <label style={{ display: 'block', fontSize: '10.5px', fontWeight: 'bold', textTransform: 'uppercase', color: 'var(--navy)', marginBottom: '4px' }}>Position Title</label>
+                        <select
+                          value={manualPositionId}
+                          onChange={e => setManualPositionId(e.target.value)}
+                          style={{ width: '100%', height: '38px', padding: '0 8px', borderRadius: '8px', border: '1.5px solid var(--blue)', background: 'white', color: 'var(--navy)', fontSize: '12px', boxSizing: 'border-box' }}
+                        >
+                          <option value="">Select Position...</option>
+                          {positions.map(p => (
+                            <option key={p.id} value={p.id}>{p.title}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label style={{ display: 'block', fontSize: '10.5px', fontWeight: 'bold', textTransform: 'uppercase', color: 'var(--navy)', marginBottom: '4px' }}>Item Number</label>
+                        <input
+                          type="text"
+                          placeholder="e.g. SCA1-00000-2026"
+                          value={manualItemNo}
+                          onChange={e => setManualItemNo(e.target.value.toUpperCase())}
+                          style={{ width: '100%', height: '38px', padding: '0 12px', borderRadius: '8px', border: '1.5px solid var(--line)', background: 'white', color: 'var(--navy)', fontSize: '12px', boxSizing: 'border-box' }}
+                        />
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                      <div>
+                        <label style={{ display: 'block', fontSize: '10.5px', fontWeight: 'bold', textTransform: 'uppercase', color: 'var(--navy)', marginBottom: '4px' }}>School Level</label>
+                        <select
+                          value={manualSchoolLevel || ''}
+                          onChange={(e) => {
+                            setManualSchoolLevel(e.target.value);
+                            setManualSchoolId(null);
+                            setManualSchoolName('');
+                            setManualSchoolSearchQuery('');
+                          }}
+                          style={{ width: '100%', height: '38px', padding: '0 8px', borderRadius: '8px', border: '1.5px solid var(--line)', background: 'white', color: 'var(--navy)', fontSize: '12px', boxSizing: 'border-box' }}
+                        >
+                          <option value="">Select School Level</option>
+                          <option value="ES">ES</option>
+                          <option value="JHS">JHS</option>
+                          <option value="SHS">SHS</option>
+                        </select>
+                      </div>
+
+                      {manualSchoolLevel === 'JHS' && (
+                        <div style={{ position: 'relative' }}>
+                          <label style={{ display: 'block', fontSize: '10.5px', fontWeight: 'bold', textTransform: 'uppercase', color: 'var(--navy)', marginBottom: '4px' }}>School ID & Name</label>
+                          <input
+                            type="text"
+                            value={manualSchoolSearchQuery || ''}
+                            onChange={(e) => {
+                              setManualSchoolSearchQuery(e.target.value);
+                              setShowManualDropdown(true);
+                            }}
+                            onFocus={() => setShowManualDropdown(true)}
+                            placeholder="Type School ID or Name..."
+                            style={{
+                              width: '100%',
+                              padding: '0 12px',
+                              borderRadius: '8px',
+                              border: '1px solid var(--line)',
+                              fontSize: '12px',
+                              height: '38px',
+                              boxSizing: 'border-box'
+                            }}
+                          />
+                          {showManualDropdown && manualSearchResults.length > 0 && (
+                            <div style={{
+                              position: 'absolute',
+                              top: '100%',
+                              left: 0,
+                              right: 0,
+                              background: 'white',
+                              border: '1px solid var(--line)',
+                              borderRadius: '8px',
+                              boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
+                              zIndex: 9999,
+                              maxHeight: '150px',
+                              overflowY: 'auto',
+                              marginTop: '4px'
+                            }}>
+                              {manualSearchResults.map((sch) => (
+                                <div
+                                  key={sch.schoolId}
+                                  onClick={() => {
+                                    setManualSchoolId(sch.schoolId);
+                                    setManualSchoolName(sch.schoolName);
+                                    setManualSchoolSearchQuery(`${sch.schoolId} - ${sch.schoolName}`);
+                                    setShowManualDropdown(false);
+                                  }}
+                                  style={{
+                                    padding: '8px 12px',
+                                    fontSize: '11.5px',
+                                    cursor: 'pointer',
+                                    userSelect: 'none',
+                                    borderBottom: '1px solid #F1F5F9'
+                                  }}
+                                  onMouseEnter={(e) => e.currentTarget.style.background = '#F8FAFC'}
+                                  onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                                >
+                                  <span style={{ pointerEvents: 'none' }}>
+                                    <b>{sch.schoolId}</b> - {sch.schoolName}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: 'auto', paddingTop: '16px', borderTop: '1px solid var(--line)' }}>
+                      <button type="button" className="secondary" onClick={() => setShowManualFields(false)} style={{ padding: '10px 20px', borderRadius: '10px', fontSize: '13px' }}>Cancel</button>
+                      <button type="button" className="good" onClick={handleConfirmAddManual} style={{ padding: '10px 20px', borderRadius: '10px', fontSize: '13px' }}>Add Vacancy</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="nosca-scan" style={{ minHeight: '300px', border: '2px solid var(--line)', borderRadius: '18px', padding: '16px', background: 'white', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
                   {noscaScanning ? (
                     <div className="nosca-empty" style={{ height: '100%', minHeight: '230px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', color: 'var(--muted)', fontWeight: '700', fontSize: '13px', gap: '4px' }}>
                       <p>Scanning document metadata...</p>
@@ -1145,25 +1426,47 @@ export default function VacanciesPage() {
                                   id={`nosca-checkbox-${idx}`}
                                 />
                                 <div>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                                    <span className="si-title" style={{ fontSize: '12px', color: 'var(--navy)', fontWeight: '900' }}>{it.title}</span>
-                                    <span style={{ fontSize: '11px', color: 'var(--muted)' }}>(Edit per character below)</span>
-                                    {isInvalid && (
-                                      <span style={{
-                                        fontSize: '10px',
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px', width: '100%' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                                      <span className="si-title" style={{ fontSize: '12px', color: 'var(--navy)', fontWeight: '900' }}>{it.title}</span>
+                                      <span style={{ fontSize: '11px', color: 'var(--muted)' }}>(Edit below)</span>
+                                      {isInvalid && (
+                                        <span style={{
+                                          fontSize: '10px',
+                                          background: '#FEF2F2',
+                                          color: '#EF4444',
+                                          border: '1px solid #FCA5A5',
+                                          padding: '1px 6px',
+                                          borderRadius: '6px',
+                                          fontWeight: 'bold',
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: '3px'
+                                        }}>
+                                          ⚠️ Scan Check Needed
+                                        </span>
+                                      )}
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setDetectedItems(prev => prev.filter((_, i) => i !== idx));
+                                        setSelectedNoscaItemNos(prev => prev.filter(x => x !== it.itemNo));
+                                      }}
+                                      style={{
+                                        padding: '2px 8px',
+                                        fontSize: '11px',
+                                        minHeight: 'auto',
+                                        borderRadius: '6px',
                                         background: '#FEF2F2',
                                         color: '#EF4444',
                                         border: '1px solid #FCA5A5',
-                                        padding: '1px 6px',
-                                        borderRadius: '6px',
-                                        fontWeight: 'bold',
-                                        display: 'inline-flex',
-                                        alignItems: 'center',
-                                        gap: '3px'
-                                      }}>
-                                        ⚠️ Scan Check Needed
-                                      </span>
-                                    )}
+                                        cursor: 'pointer',
+                                        fontWeight: 'bold'
+                                      }}
+                                    >
+                                      Remove
+                                    </button>
                                   </div>
                                   <NOSCAItemEditor
                                     itemIndex={idx}
@@ -1178,6 +1481,22 @@ export default function VacanciesPage() {
                                         return prev;
                                       });
                                     }}
+                                    schoolLevel={it.schoolLevel || ''}
+                                    onSchoolLevelChange={(level) => {
+                                      setDetectedItems(prev => prev.map((item, i) => i === idx ? { ...item, schoolLevel: level, schoolId: null, schoolName: '', schoolSearchQuery: '' } : item));
+                                    }}
+                                    schoolSearchQuery={it.schoolSearchQuery || ''}
+                                    onSchoolSearchQueryChange={(query) => {
+                                      setDetectedItems(prev => prev.map((item, i) => i === idx ? { ...item, schoolSearchQuery: query } : item));
+                                    }}
+                                    onSchoolSelect={(school) => {
+                                      setDetectedItems(prev => prev.map((item, i) => i === idx ? {
+                                        ...item,
+                                        schoolId: school.schoolId,
+                                        schoolName: school.schoolName,
+                                        schoolSearchQuery: `${school.schoolId} - ${school.schoolName}`
+                                      } : item));
+                                    }}
                                   />
                                 </div>
                               </div>
@@ -1185,10 +1504,44 @@ export default function VacanciesPage() {
                           })}
                         </div>
                       </div>
+
                       <div className="nosca-actions" style={{ marginTop: '14px', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '10px' }}>
+                        <button
+                          type="button"
+                          className="secondary"
+                          style={{ marginRight: 'auto' }}
+                          onClick={() => {
+                            const positionName = "School Counselor Associate I";
+                            const positionId = positions.find(p => p.title.toLowerCase() === positionName.toLowerCase())?.id || '';
+                            const newItem = {
+                              itemNo: `SCA1-0000${detectedItems.length + 1}-2026`,
+                              title: positionName,
+                              positionId: positionId,
+                              schoolLevel: '',
+                              schoolId: null,
+                              schoolName: '',
+                              schoolSearchQuery: ''
+                            };
+                            setDetectedItems(prev => [...prev, newItem]);
+                            setSelectedNoscaItemNos(prev => [...prev, newItem.itemNo]);
+                          }}
+                        >
+                          + Add Item
+                        </button>
                         <button className="secondary" onClick={() => { setDetectedItems([]); setSelectedNoscaItemNos([]); }}>Clear</button>
                         <button className="good" onClick={() => {
                           if (!selectedNoscaItemNos.length) return setToast({ message: 'Please tick at least one item to add', type: 'error' });
+                          
+                          const toAdd = detectedItems.filter(it => selectedNoscaItemNos.includes(it.itemNo));
+                          for (const it of toAdd) {
+                            if (!it.schoolLevel) {
+                              return setToast({ message: `Please select a School Level for item ${it.itemNo}.`, type: 'error' });
+                            }
+                            if (it.schoolLevel === 'JHS' && !it.schoolId) {
+                              return setToast({ message: `Please select a valid JHS school ID for item ${it.itemNo}.`, type: 'error' });
+                            }
+                          }
+                          
                           setShowNoscaConfirm(true);
                         }}>Add Selected Items</button>
                       </div>
@@ -1200,7 +1553,8 @@ export default function VacanciesPage() {
                     </div>
                   )}
                 </div>
-              </div>
+              )}
+            </div>
             </div>
           </div>
         </div>
@@ -1359,6 +1713,67 @@ export default function VacanciesPage() {
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '16px' }}>
               <button className="secondary" onClick={() => setShowCloseWarning(false)} style={{ padding: '10px 20px', borderRadius: '12px' }}>Cancel</button>
               <button className="danger" onClick={handleConfirmOverrideClose} style={{ padding: '10px 20px', borderRadius: '12px' }}>Override & Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: DELETE VACANCY CONFIRMATION */}
+      {showDeleteConfirmModal && deleteConfirmVac && (
+        <div className="modal open" style={{ zIndex: 100003, left: 0, background: 'rgba(15, 23, 42, 0.45)', backdropFilter: 'blur(16px)' }}>
+          <div className="modal-box" style={{ width: 'min(480px, 94vw)', padding: '24px 32px', borderRadius: '24px', background: 'white', borderTop: '6px solid #EF4444', boxShadow: '0 24px 60px rgba(0, 0, 0, 0.15)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+              <span style={{ fontSize: '32px' }}>⚠️</span>
+              <h3 style={{ margin: 0, fontSize: '20px', fontWeight: 900, fontFamily: 'var(--font-heading)', color: '#EF4444' }}>Delete Vacancy Posting</h3>
+            </div>
+            
+            <p style={{ margin: '0 0 20px', lineHeight: '1.6', fontSize: '14px', color: 'var(--text)' }}>
+              Are you sure you want to delete the vacancy posting for Item No. <b>{deleteConfirmVac.itemNo}</b>? This action will permanently remove the item from the database. This cannot be undone.
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginBottom: '20px' }}>
+              <div>
+                <label style={{
+                  color: '#991B1B',
+                  fontWeight: '900',
+                  fontSize: '11px',
+                  letterSpacing: '0.06em',
+                  textTransform: 'uppercase',
+                  margin: '0 0 6px',
+                  display: 'block'
+                }}>Enter Passcode to Confirm</label>
+                <input
+                  type="password"
+                  placeholder="Enter 6-digit passcode"
+                  value={deletePasscode}
+                  onChange={e => setDeletePasscode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      handleConfirmDeleteVacancy();
+                    }
+                  }}
+                  style={{
+                    background: 'white',
+                    border: '1.5px solid #D7EEF8',
+                    height: '42px',
+                    borderRadius: '10px',
+                    fontSize: '13px',
+                    width: '100%',
+                    boxSizing: 'border-box',
+                    padding: '0 12px'
+                  }}
+                />
+                {deletePasscodeError && (
+                  <div style={{ color: 'var(--red)', fontSize: '12px', fontWeight: '900', marginTop: '6px' }}>
+                    {deletePasscodeError}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button className="secondary" onClick={() => { setShowDeleteConfirmModal(false); setDeleteConfirmVac(null); }} style={{ padding: '10px 20px', borderRadius: '12px', cursor: 'pointer' }}>Cancel</button>
+              <button className="danger" onClick={handleConfirmDeleteVacancy} style={{ padding: '10px 20px', borderRadius: '12px', cursor: 'pointer' }}>Delete Permanently</button>
             </div>
           </div>
         </div>

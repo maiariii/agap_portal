@@ -22,13 +22,16 @@ export function mapVacancy(row) {
     itemNo: row.item_no,
     title: row.title,
     school: row.school,
-    location: row.location,
+    division: row.division,
     region: row.region,
     status: row.status,
+    schoolLevel: row.school_level,
+    schoolId: row.school_id,
     fillingUpStatus: row.filling_up_status || 'UNFILLED',
     postingStart: row.posting_start ? new Date(row.posting_start) : null,
     postingEnd: row.posting_end ? new Date(row.posting_end) : null,
     salaryGrade: row.salary_grade,
+    jobClusterId: row.job_cluster_id,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at)
   };

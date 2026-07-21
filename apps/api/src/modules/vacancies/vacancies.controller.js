@@ -2,7 +2,11 @@ import { pool } from '../../config/db.js';
 import { mapPosition, mapVacancy } from '../../utils/mappers.js';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import { exec } from 'child_process';
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const pdfParse = require('pdf-parse');
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 
@@ -23,9 +27,16 @@ export async function getVacancies(req, res) {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
+    const userQuery = await pool.query('SELECT region, division FROM users WHERE id = $1', [req.user.id]);
+    const user = userQuery.rows[0];
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    const { region, division } = user;
+
     const { rows: expiredVacancies } = await pool.query(
-      "SELECT id FROM vacancies WHERE status = 'open' AND posting_end < $1",
-      [today]
+      "SELECT id FROM vacancies WHERE status = 'open' AND posting_end < $1 AND region = $2 AND division = $3",
+      [today, region, division]
     );
 
     if (expiredVacancies.length > 0) {
@@ -37,18 +48,43 @@ export async function getVacancies(req, res) {
     }
 
     const { rows } = await pool.query(`
-      SELECT v.*, p.title as position_title, p.track as position_track,
-             p.required_bachelor_degree as position_required_bachelor_degree,
-             p.required_degree_keywords as position_required_degree_keywords,
-             p.min_years_experience as position_min_years_experience,
-             p.min_training_hours as position_min_training_hours,
-             p.eligibility_required as position_eligibility_required
+      SELECT 
+        v.id,
+        v.position_id,
+        v.item_no,
+        v.job_cluster_id,
+        CASE WHEN v.filling_up_status = 'UNFILLED' THEN v.item_no ELSE '' END as unfilled_item_nos,
+        v.title,
+        v.school,
+        v.division,
+        v.region,
+        v.status,
+        v.school_level,
+        v.school_id,
+        v.filling_up_status,
+        v.posting_start,
+        v.posting_end,
+        v.salary_grade,
+        v.created_at,
+        v.updated_at,
+        CASE WHEN v.status = 'open' AND v.filling_up_status = 'UNFILLED' THEN 1 ELSE 0 END as open_slots,
+        1 as total_slots,
+        p.title as position_title, p.track as position_track,
+        p.required_bachelor_degree as position_required_bachelor_degree,
+        p.required_degree_keywords as position_required_degree_keywords,
+        p.min_years_experience as position_min_years_experience,
+        p.min_training_hours as position_min_training_hours,
+        p.eligibility_required as position_eligibility_required
       FROM vacancies v
       JOIN positions p ON v.position_id = p.id
-    `);
+      WHERE v.region = $1 AND v.division = $2
+    `, [region, division]);
 
     res.json(rows.map(r => ({
       ...mapVacancy(r),
+      openSlots: r.open_slots ? parseInt(r.open_slots) : 0,
+      totalSlots: r.total_slots ? parseInt(r.total_slots) : 0,
+      unfilledItemNos: r.unfilled_item_nos || '',
       position: {
         id: r.position_id,
         title: r.position_title,
@@ -66,12 +102,28 @@ export async function getVacancies(req, res) {
 }
 
 export async function createVacancy(req, res) {
-  const { positionId, itemNo, title, school, location, postingStart, postingEnd, salaryGrade } = req.body;
+  const { positionId, itemNo, title, school, division: bodyDivision, postingStart, postingEnd, salaryGrade } = req.body;
   try {
+    const userQuery = await pool.query('SELECT region, division FROM users WHERE id = $1', [req.user.id]);
+    const user = userQuery.rows[0];
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    const region = user.region || 'NCR';
+    const division = user.division || bodyDivision || 'SDO Manila';
+
+    const jobClusterId = crypto.createHash('md5').update(`${positionId}|${division}|${region}`).digest('hex');
+    await pool.query(
+      `INSERT INTO job_clusters (id, position_id, division, region)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (id) DO NOTHING`,
+      [jobClusterId, positionId, division, region]
+    );
+
     const id = crypto.randomUUID();
     const { rows } = await pool.query(
-      `INSERT INTO vacancies (id, position_id, item_no, title, school, location, region, status, posting_start, posting_end, salary_grade)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      `INSERT INTO vacancies (id, position_id, item_no, title, school, division, region, status, posting_start, posting_end, salary_grade, job_cluster_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        RETURNING *`,
       [
         id,
@@ -79,12 +131,13 @@ export async function createVacancy(req, res) {
         itemNo,
         title,
         school,
-        location,
-        'NCR',
+        division,
+        region,
         'open',
         postingStart ? new Date(postingStart) : null,
         postingEnd ? new Date(postingEnd) : null,
-        salaryGrade ? parseInt(salaryGrade) : null
+        salaryGrade ? parseInt(salaryGrade) : null,
+        jobClusterId
       ]
     );
     res.json(mapVacancy(rows[0]));
@@ -129,47 +182,166 @@ export async function scanNosca(req, res) {
     return res.status(400).json({ error: 'No file data provided' });
   }
 
-  const rootDir = path.resolve(__dirname, '../../../../../');
-  const scannerPath = path.join(rootDir, 'scanner.py');
-  const tempFilename = `temp_${Date.now()}_${fileName || 'nosca.pdf'}`;
-  const tempFilePath = path.join(rootDir, tempFilename);
-
   try {
     const buffer = Buffer.from(fileData, 'base64');
-    fs.writeFileSync(tempFilePath, buffer);
+    const pageTexts = [];
+    const options = {
+      pagerender: function(pageData) {
+        return pageData.getTextContent()
+          .then(function(textContent) {
+            let lastY, text = '';
+            for (let item of textContent.items) {
+              if (lastY == item.transform[5] || !lastY){
+                text += item.str;
+              } else {
+                text += '\n' + item.str;
+              }
+              lastY = item.transform[5];
+            }
+            pageTexts.push(text);
+            return text;
+          });
+      }
+    };
 
-    exec(`python "${scannerPath}" "${tempFilePath}"`, (error, stdout, stderr) => {
-      try {
-        if (fs.existsSync(tempFilePath)) {
-          fs.unlinkSync(tempFilePath);
+    const parseResult = await pdfParse(buffer, options);
+
+    const results = {
+      serial_no: "UNKNOWN",
+      division: "",
+      school_name: "",
+      items: [],
+      position: "School Counselor Associate I",
+      category: "ELEMENTARY",
+      count: 0,
+      category_breakdown: {
+        ELEMENTARY: [],
+        JHS: [],
+        SHS: [],
+        ALS: []
+      },
+      raw_text: "",
+      ai_powered: false
+    };
+
+    let fullText = parseResult.text;
+    const categoryItemsMap = {
+      ELEMENTARY: [],
+      JHS: [],
+      SHS: [],
+      ALS: []
+    };
+    const allSeenItems = new Set();
+    const itemPattern = /(?:OSEC[A-Z0-9\-\s]+)?(?:TCH[0-9]|SPET[0-9]?|SST[0-9]|SP[0-9]?|ADO[0-9]?|AO[0-9]?|SCA[0-9]?|PDO[0-9]?)[A-Z0-9\-\s]+20\d\d/g;
+    const fallbackItemPattern = /[A-Z0-9]{2,}\s*[\-\s]\s*[\d]{5,}\s*[\-\s]\s*20\d\d/g;
+
+    let currentPageCat = "ELEMENTARY";
+
+    for (const extracted of pageTexts) {
+      const pageLower = extracted.toLowerCase();
+
+      // Determine category for this specific page
+      if (pageLower.includes("senior high school") || pageLower.includes("- shs")) {
+        currentPageCat = "SHS";
+      } else if (pageLower.includes("alternative learning") || pageLower.includes("- als") || pageLower.includes("als ")) {
+        currentPageCat = "ALS";
+      } else if (pageLower.includes("junior high school") || pageLower.includes("high school") || pageLower.includes("national high")) {
+        currentPageCat = "JHS";
+        const schoolMatch = extracted.match(/([A-Za-z\s\n]+?(?:National|Memorial|Integrated|Science|Vocational|City)?\s+High\s+School)/i);
+        if (schoolMatch && !results.school_name) {
+          const rawSchool = schoolMatch[1];
+          const cleanSchool = rawSchool.replace(/\s+/g, " ").trim();
+          results.school_name = cleanSchool;
         }
-      } catch (err) {
-        console.error('Failed to delete temp file:', err);
+      } else if (pageLower.includes("elementary") || pageLower.includes("elem ")) {
+        currentPageCat = "ELEMENTARY";
       }
 
-      if (error) {
-        console.error(`Exec error: ${error}`);
-        return res.status(500).json({ error: `Scanning failed: ${stderr || error.message}` });
+      let itemsFound = extracted.match(itemPattern) || [];
+      if (itemsFound.length === 0) {
+        itemsFound = extracted.match(fallbackItemPattern) || [];
       }
 
-      try {
-        const parsed = JSON.parse(stdout);
-        if (parsed.error) {
-          return res.status(400).json({ error: parsed.error });
+      const cleanItems = itemsFound.map(i => i.replace(/\s+/g, ""));
+      for (const item of cleanItems) {
+        if (!allSeenItems.has(item)) {
+          allSeenItems.add(item);
+          categoryItemsMap[currentPageCat].push(item);
+          results.items.push(item);
         }
-        res.json(parsed);
-      } catch (parseError) {
-        console.error(`Failed to parse scanner output: ${stdout}`);
-        res.status(500).json({ error: 'Failed to parse scanner output' });
       }
-    });
+    }
+
+    results.raw_text = fullText.slice(0, 2000);
+
+    // Perform Smart Regex Extraction for Serial Number & Division
+    try {
+      // 1. Extract Serial Number
+      let serialNo = "UNKNOWN";
+      let snMatch = fullText.match(/N[0O]SCA\s+SER[I1L]AL\s+N[0O]?[A-Z]*(?:[\.\s,:-]*)\s*([0-9-oilsbzg]{3,})/i);
+      if (!snMatch) {
+        snMatch = fullText.match(/SER[I1L]AL\s+N[0O]?[A-Z]*(?:[\.\s,:-]*)\s*([0-9-oilsbzg]{3,})/i);
+      }
+      if (!snMatch) {
+        snMatch = fullText.match(/N[0O]SCA\s+N[0O]?[A-Z]*(?:[\.\s,:-]*)\s*([0-9-oilsbzg]{3,})/i);
+      }
+      if (!snMatch) {
+        snMatch = fullText.match(/([0-9oilsbzg]{6,8}-[0-9oilsbzg]{2}-[0-9oilsbzg]{3})/i);
+      }
+
+      if (snMatch) {
+        const rawSn = snMatch[1];
+        const lookalikeLetters = { 'O': '0', 'I': '1', 'L': '1', 'S': '5', 'B': '8', 'Z': '2', 'G': '6' };
+        const cleanedSn = [...rawSn.toUpperCase()].map(char => lookalikeLetters[char] || char).join("");
+        serialNo = cleanedSn;
+      }
+      results.serial_no = serialNo;
+      results.count = results.items.length;
+
+      // 2. Detect Position (fixed fallback or list matching)
+      let position = "School Counselor Associate I";
+      const posList = ["Teacher I", "Teacher III", "Teacher IV", "Principal I", "AO II", "SCA I", "PDO I"];
+      for (const pos of posList) {
+        if (fullText.toLowerCase().includes(pos.toLowerCase())) {
+          position = pos;
+          break;
+        }
+      }
+      results.position = position;
+
+      // 3. Detect Division
+      const divMatch = fullText.match(/Division\s+of\s+([A-Za-z\s]+?)(?:\s*-\s*|$)/i);
+      if (divMatch) {
+        const divClean = divMatch[1].replace("Senior High School", "").replace("ALS", "").trim();
+        results.division = divClean;
+      }
+
+      // 4. Set Category Breakdown and primary category
+      results.category_breakdown = categoryItemsMap;
+
+      let maxCat = "ELEMENTARY";
+      let maxCount = -1;
+      for (const [cat, items] of Object.entries(categoryItemsMap)) {
+        if (items.length > maxCount) {
+          maxCount = items.length;
+          maxCat = cat;
+        }
+      }
+      if (maxCount > 0) {
+        results.category = maxCat;
+      }
+      results.ai_powered = true;
+    } catch (e) {
+      results.error = e.message;
+    }
+
+    if (results.error) {
+      return res.status(400).json({ error: results.error });
+    }
+
+    res.json(results);
   } catch (error) {
     console.error(error);
-    try {
-      if (fs.existsSync(tempFilePath)) {
-        fs.unlinkSync(tempFilePath);
-      }
-    } catch (_) {}
     res.status(500).json({ error: error.message });
   }
 }
@@ -177,6 +349,14 @@ export async function scanNosca(req, res) {
 export async function importNosca(req, res) {
   const { items } = req.body;
   try {
+    const userQuery = await pool.query('SELECT region, division FROM users WHERE id = $1', [req.user.id]);
+    const user = userQuery.rows[0];
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    const region = user.region || 'NCR';
+    const division = user.division || 'SDO Manila';
+
     const createdList = [];
     for (const item of items) {
       let positionId = item.positionId;
@@ -204,24 +384,99 @@ export async function importNosca(req, res) {
         positionId = pos.id;
       }
 
+      let finalSchoolName = item.schoolName || '';
+      let finalSchoolId = item.schoolId || null;
+      let finalSchoolLevel = item.schoolLevel || null;
+
+      if (finalSchoolLevel === 'JHS' && finalSchoolId) {
+        const schoolRes = await pool.query('SELECT school_name FROM agap_schools WHERE school_id = $1 LIMIT 1', [finalSchoolId]);
+        if (schoolRes.rows[0]) {
+          finalSchoolName = schoolRes.rows[0].school_name;
+        }
+      } else {
+        finalSchoolId = null;
+      }
+
+      const jobClusterId = crypto.createHash('md5').update(`${positionId}|${division}|${region}`).digest('hex');
+      await pool.query(
+        `INSERT INTO job_clusters (id, position_id, division, region)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (id) DO NOTHING`,
+        [jobClusterId, positionId, division, region]
+      );
+
       const id = crypto.randomUUID();
       const { rows: vacRows } = await pool.query(
-        `INSERT INTO vacancies (id, position_id, item_no, title, school, location, region, status)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+        `INSERT INTO vacancies (id, position_id, item_no, title, school, division, region, status, school_level, school_id, job_cluster_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
         [
           id,
           positionId,
           item.itemNo,
           item.title,
-          '',
-          'SDO Manila',
-          'NCR',
-          'closed'
+          finalSchoolName,
+          division,
+          region,
+          'closed',
+          finalSchoolLevel,
+          finalSchoolId,
+          jobClusterId
         ]
       );
       createdList.push(mapVacancy(vacRows[0]));
     }
     res.json(createdList);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+}
+
+export async function autocompleteSchools(req, res) {
+  const { q } = req.query;
+  if (!q) {
+    return res.json([]);
+  }
+  try {
+    const isNumeric = /^\d+$/.test(q);
+    let query;
+    let params;
+
+    if (isNumeric) {
+      // Numerical query: search school_id by prefix match (great for index utilization)
+      query = `SELECT school_id, school_name 
+               FROM agap_schools 
+               WHERE CAST(school_id AS TEXT) LIKE $1
+               ORDER BY school_id 
+               LIMIT 10;`;
+      params = [`${q}%`];
+    } else {
+      // Text query: search school_name using case-insensitive ILIKE
+      query = `SELECT school_id, school_name 
+               FROM agap_schools 
+               WHERE school_name ILIKE $1
+               ORDER BY school_id 
+               LIMIT 10;`;
+      params = [`%${q}%`];
+    }
+
+    const { rows } = await pool.query(query, params);
+    res.json(rows.map(r => ({
+      schoolId: r.school_id,
+      schoolName: r.school_name
+    })));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+}
+
+export async function deleteVacancy(req, res) {
+  const { id } = req.params;
+  try {
+    const { rowCount } = await pool.query('DELETE FROM vacancies WHERE id = $1', [id]);
+    if (rowCount === 0) {
+      return res.status(404).json({ error: 'Vacancy not found' });
+    }
+    res.json({ success: true, message: 'Vacancy deleted successfully.' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
