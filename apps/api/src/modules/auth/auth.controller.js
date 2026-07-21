@@ -5,12 +5,38 @@ import { pool } from '../../config/db.js';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import {
+  exchangeHqSsoToken,
+  HqSsoAuthenticationError,
+  HqSsoConfigurationError,
+} from './hq-sso.service.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.resolve(__dirname, '../../../../../.env') });
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-jwt-key-change-in-production';
+
+export async function hqSsoLogin(req, res) {
+  const token = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+  if (!token) {
+    return res.status(400).json({ error: 'HQ sign-in token is required' });
+  }
+
+  try {
+    return res.json(await exchangeHqSsoToken(token));
+  } catch (error) {
+    if (error instanceof HqSsoConfigurationError) {
+      console.error('AGAP Portal SSO configuration error:', error.message);
+      return res.status(500).json({ error: 'AGAP Portal SSO is not configured' });
+    }
+    if (error instanceof HqSsoAuthenticationError) {
+      return res.status(401).json({ error: error.message });
+    }
+    console.error('AGAP Portal SSO exchange error:', error);
+    return res.status(500).json({ error: 'Unable to complete HQ sign-in' });
+  }
+}
 
 export async function login(req, res) {
   const { username, password } = req.body;

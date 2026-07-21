@@ -43,6 +43,11 @@ export default function App() {
   const [username, setUsername] = useState('hr_officer');
   const [password, setPassword] = useState('password');
   const [loginError, setLoginError] = useState('');
+  const ssoToken = useMemo(
+    () => new URLSearchParams(location.search).get('sso_token'),
+    [location.search]
+  );
+  const [isProcessingSso, setIsProcessingSso] = useState(Boolean(ssoToken));
 
   // Register Modal State
   const [showRegister, setShowRegister] = useState(false);
@@ -69,6 +74,57 @@ export default function App() {
       setShowWelcome(!localStorage.getItem("deped_tour_seen"));
     }
   }, [token]);
+
+  useEffect(() => {
+    if (!ssoToken) {
+      setIsProcessingSso(false);
+      return;
+    }
+
+    let isActive = true;
+    setIsProcessingSso(true);
+    setLoginError('');
+
+    // A fresh HQ handoff must replace any AGAP session already stored in this
+    // browser. In particular, do not let an expired local token bypass SSO and
+    // trigger the global session-expired redirect back to the login screen.
+    localStorage.removeItem('agap_token');
+    localStorage.removeItem('agap_user');
+
+    apiFetch('/api/auth/hq-sso', {
+      method: 'POST',
+      body: JSON.stringify({ token: ssoToken })
+    })
+      .then((data) => {
+        if (!isActive) return;
+        if (!data?.token || !data?.user) {
+          throw new Error('AGAP Portal did not return a valid session.');
+        }
+
+        localStorage.setItem('agap_token', data.token);
+        localStorage.setItem('agap_user', JSON.stringify(data.user));
+        setToken(data.token);
+        setUser(data.user);
+        setToast({ message: `Welcome, ${data.user.fullName || data.user.username || 'HR Officer'}!`, type: 'success' });
+        navigate('/dashboard', { replace: true });
+      })
+      .catch((error) => {
+        if (!isActive) return;
+        const message = error.message || 'Unable to complete InsightED HQ sign-in.';
+        setToken('');
+        setUser(null);
+        setLoginError(message);
+        setToast({ message, type: 'error' });
+        navigate('/', { replace: true });
+      })
+      .finally(() => {
+        if (isActive) setIsProcessingSso(false);
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [navigate, setToast, setToken, setUser, ssoToken]);
 
   useEffect(() => {
     if (location.pathname === '/register') {
@@ -343,6 +399,17 @@ export default function App() {
     setTourActive(false);
     localStorage.setItem("deped_tour_seen", "1");
   };
+
+  if (isProcessingSso) {
+    return (
+      <div className="login-container" style={{ display: 'grid', placeItems: 'center' }}>
+        <div className="login-card" style={{ textAlign: 'center' }}>
+          <h2>Signing you in</h2>
+          <p>Preparing your AGAP Portal session from InsightED HQ...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!token) {
     return (

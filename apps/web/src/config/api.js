@@ -8,7 +8,11 @@ export const apiFetch = async (path, options = {}) => {
     const apiPath = (import.meta.env.VITE_API_URL || '') + path;
     const res = await fetch(apiPath, { ...options, headers });
     if (!res.ok) {
-      if ((res.status === 401 || res.status === 403) && path !== '/api/auth/login') {
+      if (
+        (res.status === 401 || res.status === 403) &&
+        path !== '/api/auth/login' &&
+        path !== '/api/auth/hq-sso'
+      ) {
         window.dispatchEvent(new Event('agap-session-expired'));
         throw new Error('Your session has expired. Please log in again.');
       }

@@ -3,8 +3,12 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [token, setToken] = useState(() => localStorage.getItem('agap_token') || '');
+  const hasHqSsoToken = new URLSearchParams(window.location.search).has('sso_token');
+  const [token, setToken] = useState(() => (
+    hasHqSsoToken ? '' : localStorage.getItem('agap_token') || ''
+  ));
   const [user, setUser] = useState(() => {
+    if (hasHqSsoToken) return null;
     const raw = localStorage.getItem('agap_user');
     try { return raw ? JSON.parse(raw) : null; } catch(e) { return null; }
   });
