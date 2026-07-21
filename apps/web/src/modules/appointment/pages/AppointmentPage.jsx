@@ -192,7 +192,7 @@ export default function AppointmentPage() {
   }, [filteredAppointments, apptPage, apptPageSize]);
 
   const handleDownloadNoticeOfAppointment = (app) => {
-    const date = app.appointmentDate ? new Date(app.appointmentDate).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }) : new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+    const date = app.appointmentDate ? new Date(app.appointmentDate).toLocaleDateString("en-PH", { year: "numeric", month: "long", day: "numeric", timeZone: "Asia/Manila" }) : new Date().toLocaleDateString("en-PH", { year: "numeric", month: "long", day: "numeric", timeZone: "Asia/Manila" });
     const content = `DEPARTMENT OF EDUCATION
 SDO Manila, Region NCR
 ____________________________________________________
@@ -646,19 +646,8 @@ SDO Manila, Department of Education
       {/* MODAL: VIEW DOCUMENTS */}
       {showDocsModal && selectedDocApp && (
         <div className="modal open" style={{ zIndex: 100002 }}>
-          <div className="modal-box" style={{ padding: '0 24px 24px', maxHeight: '92vh', overflow: 'auto', width: 'min(1100px, 98vw)' }}>
-            <div className="modal-head" style={{
-              paddingTop: '24px',
-              paddingBottom: '12px',
-              background: 'white',
-              position: 'sticky',
-              top: 0,
-              zIndex: 10,
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              borderBottom: '1px solid var(--line)'
-            }}>
+          <div className="modal-box" style={{ width: 'min(1100px, 98vw)' }}>
+            <div className="modal-head">
               <h2 style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: 0 }}>
                 📂 Document Vault — {selectedDocApp.applicant}
               </h2>

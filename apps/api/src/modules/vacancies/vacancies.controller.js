@@ -142,6 +142,9 @@ export async function createVacancy(req, res) {
     );
     res.json(mapVacancy(rows[0]));
   } catch (error) {
+    if (error.code === '23505') {
+      return res.status(400).json({ error: 'A vacancy with this Item Number already exists.' });
+    }
     res.status(500).json({ error: error.message });
   }
 }
@@ -427,6 +430,9 @@ export async function importNosca(req, res) {
     }
     res.json(createdList);
   } catch (error) {
+    if (error.code === '23505') {
+      return res.status(400).json({ error: 'A vacancy with this Item Number already exists.' });
+    }
     res.status(500).json({ error: error.message });
   }
 }

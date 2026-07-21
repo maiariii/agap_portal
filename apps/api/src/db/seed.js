@@ -289,14 +289,16 @@ async function main() {
       [hrOfficerId, "hr_officer", "hr@deped.gov.ph", "HR Officer", "NCR", "SDO Manila", passwordHash, passcodeHash, "hr_officer", "active"]
     );
 
+    const zoroId = crypto.randomUUID();
+    await pool.query(
+      `INSERT INTO users (id, username, email, full_name, region, division, office, password_hash, passcode_hash, role, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+      [zoroId, "zoro@deped.gov.ph", "zoro@deped.gov.ph", "Zoro Roronoa", "NCR", "QUEZON CITY", "Region: NCR, Division: QUEZON CITY", passcodeHash, passcodeHash, "hr_officer", "active"]
+    );
+
     console.log("Seeding positions...");
     const positionsData = [
-      { id: crypto.randomUUID(), title: "Teacher I", track: "teacher_i", requiredBachelorDegree: "Bachelor of Elementary Education or Bachelor of Secondary Education", requiredDegreeKeywords: ["education", "elementary", "secondary", "teaching"], minYearsExperience: 0, minTrainingHours: 0, eligibilityRequired: "LET / PRC License" },
-      { id: crypto.randomUUID(), title: "Master Teacher I", track: "higher_teaching", requiredBachelorDegree: "Bachelor in Education or relevant bachelor's degree", requiredDegreeKeywords: ["education", "teaching"], minYearsExperience: 3, minTrainingHours: 24, eligibilityRequired: "LET / PRC License" },
-      { id: crypto.randomUUID(), title: "Head Teacher I", track: "school_leadership", requiredBachelorDegree: "Bachelor in Education with school leadership preparation", requiredDegreeKeywords: ["education", "teaching", "leadership"], minYearsExperience: 5, minTrainingHours: 40, eligibilityRequired: "LET / PRC License" },
-      { id: crypto.randomUUID(), title: "Administrative Officer II", track: "administrative", requiredBachelorDegree: "Bachelor in Business Administration, Public Administration, Accounting, or Management", requiredDegreeKeywords: ["business", "public administration", "accounting", "management"], minYearsExperience: 1, minTrainingHours: 8, eligibilityRequired: "Career Service Professional" },
-      { id: crypto.randomUUID(), title: "Guidance Counselor I", track: "learner_support", requiredBachelorDegree: "Bachelor in Guidance and Counseling, Psychology, or Education", requiredDegreeKeywords: ["guidance", "counseling", "psychology", "education"], minYearsExperience: 1, minTrainingHours: 16, eligibilityRequired: "RA 1080 / Guidance Counselor License" },
-      { id: crypto.randomUUID(), title: "School Nurse II", track: "health", requiredBachelorDegree: "Bachelor of Science in Nursing", requiredDegreeKeywords: ["nursing"], minYearsExperience: 1, minTrainingHours: 8, eligibilityRequired: "RA 1080 / Nursing License" }
+      { id: crypto.randomUUID(), title: "School Counselor Associate I", track: "learner_support", requiredBachelorDegree: "Bachelor in Guidance and Counseling or Psychology", requiredDegreeKeywords: ["guidance", "counseling", "psychology"], minYearsExperience: 0, minTrainingHours: 0, eligibilityRequired: "RA 1080 / Guidance Counselor License" }
     ];
 
     for (const pos of positionsData) {
@@ -309,12 +311,16 @@ async function main() {
 
     console.log("Seeding vacancies...");
     const vacanciesData = [
-      { id: crypto.randomUUID(), positionKey: "Teacher I", itemNo: "TCH1-001", title: "Teacher I - Elementary", school: "Rizal ES", division: "SDO Manila", region: "NCR", status: "open", postingStart: new Date("2026-07-01"), postingEnd: new Date("2026-08-15"), salaryGrade: 11 },
-      { id: crypto.randomUUID(), positionKey: "Master Teacher I", itemNo: "MT1-002", title: "Master Teacher I", school: "Manila Science HS", division: "SDO Manila", region: "NCR", status: "open", postingStart: new Date("2026-07-01"), postingEnd: new Date("2026-08-20"), salaryGrade: 18 },
-      { id: crypto.randomUUID(), positionKey: "Head Teacher I", itemNo: "HT1-003", title: "Head Teacher I", school: "Bonifacio ES", division: "SDO Manila", region: "NCR", status: "open", postingStart: new Date("2026-07-03"), postingEnd: new Date("2026-08-25"), salaryGrade: 14 },
-      { id: crypto.randomUUID(), positionKey: "Administrative Officer II", itemNo: "AO2-004", title: "Administrative Officer II", school: "SDO Manila", division: "Division Office", region: "NCR", status: "open", postingStart: new Date("2026-07-05"), postingEnd: new Date("2026-08-18"), salaryGrade: 11 },
-      { id: crypto.randomUUID(), positionKey: "Guidance Counselor I", itemNo: "GC1-005", title: "Guidance Counselor I", school: "Manila Integrated School", division: "SDO Manila", region: "NCR", status: "open", postingStart: new Date("2026-07-06"), postingEnd: new Date("2026-08-22"), salaryGrade: 11 },
-      { id: crypto.randomUUID(), positionKey: "School Nurse II", itemNo: "NUR2-006", title: "School Nurse II", school: "Tondo HS", division: "SDO Manila", region: "NCR", status: "open", postingStart: new Date("2026-07-07"), postingEnd: new Date("2026-08-28"), salaryGrade: 15 }
+      { id: crypto.randomUUID(), positionKey: "School Counselor Associate I", itemNo: "SCA-001", title: "School Counselor Associate I", school: "Rizal ES", division: "SDO Manila", region: "NCR", status: "open", postingStart: new Date("2026-07-01"), postingEnd: new Date("2026-07-28"), salaryGrade: 11 },
+      { id: crypto.randomUUID(), positionKey: "School Counselor Associate I", itemNo: "SCA-002", title: "School Counselor Associate I", school: "Manila Science HS", division: "SDO Manila", region: "NCR", status: "open", postingStart: new Date("2026-07-01"), postingEnd: new Date("2026-07-29"), salaryGrade: 11 },
+      { id: crypto.randomUUID(), positionKey: "School Counselor Associate I", itemNo: "SCA-003", title: "School Counselor Associate I", school: "Bonifacio ES", division: "SDO Manila", region: "NCR", status: "open", postingStart: new Date("2026-07-03"), postingEnd: new Date("2026-07-30"), salaryGrade: 11 },
+      { id: crypto.randomUUID(), positionKey: "School Counselor Associate I", itemNo: "SCA-004", title: "School Counselor Associate I", school: "SDO Manila", division: "Division Office", region: "NCR", status: "open", postingStart: new Date("2026-07-05"), postingEnd: new Date("2026-07-31"), salaryGrade: 11 },
+      { id: crypto.randomUUID(), positionKey: "School Counselor Associate I", itemNo: "SCA-005", title: "School Counselor Associate I", school: "Manila Integrated School", division: "SDO Manila", region: "NCR", status: "open", postingStart: new Date("2026-07-06"), postingEnd: new Date("2026-07-27"), salaryGrade: 11 },
+      { id: crypto.randomUUID(), positionKey: "School Counselor Associate I", itemNo: "SCA-006", title: "School Counselor Associate I", school: "Tondo HS", division: "SDO Manila", region: "NCR", status: "open", postingStart: new Date("2026-07-07"), postingEnd: new Date("2026-07-26"), salaryGrade: 11 },
+      { id: crypto.randomUUID(), positionKey: "School Counselor Associate I", itemNo: "SCA1-20001-2026", title: "School Counselor Associate I", school: "Rosa L. Susano - Novaliches Elementary School", division: "QUEZON CITY", region: "NCR", status: "open", postingStart: new Date("2026-07-01"), postingEnd: new Date("2026-07-31"), salaryGrade: 11 },
+      { id: crypto.randomUUID(), positionKey: "School Counselor Associate I", itemNo: "SCA1-20002-2026", title: "School Counselor Associate I", school: "", division: "QUEZON CITY", region: "NCR", status: "open", postingStart: new Date("2026-07-01"), postingEnd: new Date("2026-07-30"), salaryGrade: 11 },
+      { id: crypto.randomUUID(), positionKey: "School Counselor Associate I", itemNo: "SCA1-20003-2026", title: "School Counselor Associate I", school: "", division: "QUEZON CITY", region: "NCR", status: "open", postingStart: new Date("2026-07-01"), postingEnd: new Date("2026-07-29"), salaryGrade: 11 },
+      { id: crypto.randomUUID(), positionKey: "School Counselor Associate I", itemNo: "SCA1-20004-2026", title: "School Counselor Associate I", school: "San Bartolome Elementary School", division: "QUEZON CITY", region: "NCR", status: "open", postingStart: new Date("2026-07-01"), postingEnd: new Date("2026-07-28"), salaryGrade: 11 }
     ];
 
     for (const vac of vacanciesData) {
@@ -335,52 +341,42 @@ async function main() {
       vac.jobClusterId = jobClusterId;
     }
 
-    const addDays = (date, days) => {
-      const d = new Date(date);
-      d.setDate(d.getDate() + days);
-      return d;
-    };
+    console.log("Seeding 5 One Piece character applicants...");
+    const onePieceApplicants = [
+      { firstName: "Monkey D.", lastName: "Luffy", degree: { degree: "Bachelor of Arts in English", major: "English", elig: "LET / PRC License" }, yearsExperience: 2, trainingHours: 16 },
+      { firstName: "Nico", lastName: "Robin", degree: { degree: "Bachelor of Science in Psychology", major: "Psychology", elig: "RA 1080 / Guidance Counselor License" }, yearsExperience: 8, trainingHours: 40 },
+      { firstName: "Tony Tony", lastName: "Chopper", degree: { degree: "Bachelor of Science in Nursing", major: "Nursing", elig: "RA 1080 / Nursing License" }, yearsExperience: 5, trainingHours: 24 },
+      { firstName: "Vinsmoke", lastName: "Sanji", degree: { degree: "Bachelor of Science in Business Administration", major: "Business Administration", elig: "Career Service Professional" }, yearsExperience: 4, trainingHours: 12 },
+      { firstName: "Nami", lastName: "Navigator", degree: { degree: "Bachelor in Guidance and Counseling", major: "Guidance and Counseling", elig: "RA 1080 / Guidance Counselor License" }, yearsExperience: 6, trainingHours: 32 }
+    ];
 
-    console.log("Seeding applicants and applications (103 items)...");
-    for (let i = 1; i <= 103; i++) {
-      const degree = degreePool[(i * 7) % degreePool.length];
-      const name = `${firstNames[i % firstNames.length]} ${lastNames[(i * 3) % lastNames.length]}`;
-      const vacancy = vacanciesData[(i - 1) % vacanciesData.length];
-      const position = positionsData.find(p => p.id === vacancy.positionId);
-      const yearsExperience = (i * 2 + (i % 5)) % 11;
-      const trainingHours = (i * 13) % 121;
-      const dateDay = String(1 + ((i * 3) % 28)).padStart(2, "0");
-      const baseDateStr = `2026-07-${dateDay}`;
-      const lateDate = addDays(vacancy.postingEnd, (i % 5) + 1);
-      const dateApplied = i % 9 === 0 ? lateDate : new Date(baseDateStr);
-
-      const fName = firstNames[i % firstNames.length];
-      const lName = lastNames[(i * 3) % lastNames.length];
-      const codeVal = `DUAN-2026-${String(100000 + i).padStart(6, "0")}`;
+    const qcVacancies = vacanciesData.filter(v => v.division === 'QUEZON CITY');
+    for (let k = 0; k < onePieceApplicants.length; k++) {
+      const char = onePieceApplicants[k];
+      const name = `${char.firstName} ${char.lastName}`;
+      const index = k + 1;
+      const vacancy = qcVacancies[k % qcVacancies.length] || vacanciesData[0];
+      const position = positionsData[0];
+      const codeVal = `ONEPIECE-2026-${String(100000 + index).padStart(6, "0")}`;
 
       const { rows: applicantRows } = await pool.query(
         `INSERT INTO applicants (surname, first_name, email_address, name, code, local_resident, bachelor_degree, major, years_experience, training_hours, eligibility, applicant_number)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id`,
-        [lName, fName, `applicant_${i}@deped.gov.ph`, name, codeVal, i % 3 !== 0, degree.degree, degree.major, yearsExperience, trainingHours, degree.elig, codeVal]
+        [char.lastName, char.firstName, `${char.firstName.toLowerCase().replace(/\s+/g, '')}_${char.lastName.toLowerCase()}@deped.gov.ph`, name, codeVal, true, char.degree.degree, char.degree.major, char.yearsExperience, char.trainingHours, char.degree.elig, codeVal]
       );
       const applicantId = applicantRows[0].id;
-
-      const isQualified = i % 17 === 0;
-      const isDisqualified = i % 19 === 0;
-      const status = isQualified ? "qualified" : (isDisqualified ? "disqualified" : "Application Submitted");
 
       const applicationId = crypto.randomUUID();
       await pool.query(
         `INSERT INTO applications (id, application_number, job_cluster_id, applicant_id, status, date_applied, documents)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+         VALUES ($1, $2, $3, $4, $5, NOW(), $6)`,
         [
           applicationId,
-          `APP-${String(i).padStart(3, "0")}`,
+          `APP-${String(index).padStart(3, "0")}`,
           vacancy.jobClusterId,
           applicantId,
-          status,
-          dateApplied,
-          JSON.stringify({ loi: true, pds: true, prc: i % 4 !== 0, tor: i % 5 !== 0, diploma: i % 6 !== 0, oss: i % 7 !== 0 })
+          "Application Submitted",
+          JSON.stringify({})
         ]
       );
 
@@ -388,49 +384,9 @@ async function main() {
       const historyId = crypto.randomUUID();
       await pool.query(
         `INSERT INTO application_history (id, application_id, text) VALUES ($1, $2, $3)`,
-        [historyId, applicationId, "Mock application submitted for QS simulation"]
+        [historyId, applicationId, "Mock One Piece character application submitted"]
       );
 
-      const fit = computeFit(
-        {
-          bachelorDegree: degree.degree,
-          major: degree.major,
-          yearsExperience: Number(yearsExperience),
-          trainingHours: Number(trainingHours),
-          eligibility: degree.elig
-        },
-        {
-          id: position.id,
-          title: position.title,
-          track: position.track,
-          requiredBachelorDegree: position.requiredBachelorDegree,
-          requiredDegreeKeywords: Array.isArray(position.requiredDegreeKeywords) ? position.requiredDegreeKeywords : (position.requiredDegreeKeywords ? position.requiredDegreeKeywords.split(',') : []),
-          minYearsExperience: position.minYearsExperience,
-          minTrainingHours: position.minTrainingHours,
-          eligibilityRequired: position.eligibilityRequired
-        }
-      );
-
-      const evalId = crypto.randomUUID();
-      await pool.query(
-        `INSERT INTO qual_evals (id, application_id, result, overall_fit, degree_score, experience_score, training_score, eligibility_score, degree_decision, experience_decision, training_decision, eligibility_decision, remarks)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
-        [
-          evalId,
-          applicationId,
-          fit.overall >= 60 ? "qualified_suggested" : "disqualified_suggested",
-          fit.overall,
-          fit.degreeScore,
-          fit.experienceScore,
-          fit.trainingScore,
-          fit.eligibilityScore,
-          fit.degreeScore >= 60 ? "pass" : "fail",
-          fit.experienceScore >= 60 ? "pass" : "fail",
-          fit.trainingScore >= 60 ? "pass" : "fail",
-          fit.eligibilityScore >= 60 ? "pass" : "fail",
-          `Mock QS score generated for ${position.title}: ${fit.recommendation}`
-        ]
-      );
     }
 
     console.log("Database schema created and successfully seeded!");

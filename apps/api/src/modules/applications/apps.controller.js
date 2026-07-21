@@ -262,9 +262,39 @@ async function handleAppointmentAction(req, res, targetStatus) {
     }
     
     // If we are flagging, check if the item is already filled (or if it is filled by the current applicant)
-    if (targetStatus === 'FOR APPOINTMENT' && vacancy.filling_up_status === 'FILLED') {
-      if (currentApp.appointment_item_no !== selectedItemNo) {
+    if (targetStatus === 'FOR APPOINTMENT') {
+      if (vacancy.filling_up_status === 'FILLED' && currentApp.appointment_item_no !== selectedItemNo) {
         return res.status(400).json({ error: 'Selected item number is already filled.' });
+      }
+
+      const parseDateNoTime = (val) => {
+        if (!val) return null;
+        if (val instanceof Date) {
+          const d = new Date(val.getTime());
+          d.setHours(0, 0, 0, 0);
+          return isNaN(d.getTime()) ? null : d;
+        }
+        const str = String(val);
+        const dateStr = str.includes('T') ? str.slice(0, 10) : (str.length >= 10 ? str.slice(0, 10) : str);
+        const d = new Date(dateStr + 'T00:00:00');
+        d.setHours(0, 0, 0, 0);
+        return isNaN(d.getTime()) ? null : d;
+      };
+
+      const todayDate = new Date();
+      todayDate.setHours(0, 0, 0, 0);
+      const start = parseDateNoTime(vacancy.posting_start);
+      const end = parseDateNoTime(vacancy.posting_end);
+
+      const hasNotOpened = !start || !end || todayDate < start;
+      const isDeadlinePassed = end && todayDate > end;
+      const isClosedStatus = vacancy.status === 'closed' && start && todayDate >= start;
+
+      if (hasNotOpened) {
+        return res.status(400).json({ error: 'Cannot appoint to an item number whose posting has not yet opened.' });
+      }
+      if (!isDeadlinePassed && !isClosedStatus) {
+        return res.status(400).json({ error: 'Cannot appoint to an item number that is currently open for application. The posting deadline must pass first.' });
       }
     }
 

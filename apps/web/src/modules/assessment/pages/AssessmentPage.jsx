@@ -164,6 +164,44 @@ export default function AssessmentPage() {
     return str.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
   };
 
+  const parseDateNoTime = (val) => {
+    if (!val) return null;
+    if (val instanceof Date) {
+      const d = new Date(val.getTime());
+      d.setHours(0, 0, 0, 0);
+      return isNaN(d.getTime()) ? null : d;
+    }
+    const str = String(val);
+    const dateStr = str.includes('T') ? str.slice(0, 10) : (str.length >= 10 ? str.slice(0, 10) : str);
+    const d = new Date(dateStr + 'T00:00:00');
+    d.setHours(0, 0, 0, 0);
+    return isNaN(d.getTime()) ? null : d;
+  };
+
+  const isItemSelectableForAppointment = (v) => {
+    if (!v) return false;
+    if (v.fillingUpStatus === 'FILLED' || v.filling_up_status === 'FILLED') return false;
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const start = parseDateNoTime(v.postingStart || v.posting_start);
+    const end = parseDateNoTime(v.postingEnd || v.posting_end);
+
+    // Strict rule: Must have valid posting start AND end dates.
+    if (!start || !end) return false;
+
+    const hasOpened = today >= start;
+    const isDeadlinePassed = today > end;
+    const isClosedStatus = v.status === 'closed' && hasOpened;
+
+    if (hasOpened && (isDeadlinePassed || isClosedStatus)) {
+      return true;
+    }
+
+    return false;
+  };
+
   const downloadCSV = (headers, rows, filename) => {
     const csvContent = "data:text/csv;charset=utf-8," 
       + [headers.join(","), ...rows.map(r => r.map(val => {
@@ -368,7 +406,7 @@ export default function AssessmentPage() {
     
     const areaCount = SCORE_AREAS.filter(sa => hasValue(areaScores[sa.key])).length;
     
-    if (areaCount === SCORE_AREAS.length && compCount === 3) return { label: 'ASSESSMENT COMPLETE', badge: 'green' };
+    if (areaCount === SCORE_AREAS.length && compCount === 3) return { label: 'Assessment Completed', badge: 'green' };
     if (areaCount > 0 || compCount > 0) return { label: 'Assessment Started', badge: 'orange' };
     return { label: 'Assessment Not Started', badge: 'blue' };
   };
@@ -476,7 +514,7 @@ export default function AssessmentPage() {
 
     let computedAssessmentStatus = 'Assessment Not Started';
     if (areaCount === SCORE_AREAS.length && compCount === 3) {
-      computedAssessmentStatus = 'ASSESSMENT COMPLETE';
+      computedAssessmentStatus = 'Assessment Completed';
     } else if (areaCount > 0 || compCount > 0) {
       computedAssessmentStatus = 'Assessment Started';
     }
@@ -635,16 +673,16 @@ export default function AssessmentPage() {
         <div className="table-wrap" style={{ width: '100%', overflow: 'auto' }}>
           <table style={{ width: '100%', minWidth: '100%', tableLayout: 'fixed' }}>
             <colgroup>
-              <col style={{ width: '5%' }} />
-              <col style={{ width: '16%' }} />
-              <col style={{ width: '16%' }} />
-              <col style={{ width: '16%' }} />
-              <col style={{ width: '10%' }} />
+              <col style={{ width: '4%' }} />
+              <col style={{ width: '14%' }} />
+              <col style={{ width: '13%' }} />
+              <col style={{ width: '13%' }} />
+              <col style={{ width: '9%' }} />
               <col style={{ width: '7%' }} />
               <col style={{ width: '7%' }} />
               <col style={{ width: '7%' }} />
-              <col style={{ width: '8%' }} />
-              <col style={{ width: '8%' }} />
+              <col style={{ width: '14%' }} />
+              <col style={{ width: '12%' }} />
             </colgroup>
             <thead>
               <tr>
@@ -846,15 +884,22 @@ export default function AssessmentPage() {
                         <span className="badge green">For Appointment</span>
                       ) : (appt === 'rejected' || appt === 'not_appointed') ? (
                         <span className="badge red">Not Appointed</span>
-                      ) : assessment.label === 'ASSESSMENT COMPLETE' ? (
+                      ) : (assessment.label === 'Assessment Completed' || assessment.label === 'ASSESSMENT COMPLETE') ? (
                         <button
                           className="good vac-action"
                           onClick={(e) => {
                             e.stopPropagation();
                             setAppointConfirmApp(r);
                             setAppointDate(new Date().toISOString().slice(0, 10));
-                            const clusterItems = vacancies.filter(v => v.jobClusterId === r.vacancyId && v.fillingUpStatus !== 'FILLED');
-                            setAppointItemNo(clusterItems[0]?.itemNo || '');
+                            const appJobClusterId = r.jobClusterId || r.job_cluster_id;
+                            const clusterItems = vacancies.filter(v => 
+                              (appJobClusterId && v.jobClusterId === appJobClusterId) ||
+                              (r.positionId && v.positionId === r.positionId) ||
+                              (r.vacancy && v.title === r.vacancy)
+                            );
+                            const initialItem = clusterItems.find(v => (v.itemNo === r.itemNo || v.itemNo === r.item_no) && isItemSelectableForAppointment(v))
+                              || clusterItems.find(v => isItemSelectableForAppointment(v));
+                            setAppointItemNo(initialItem?.itemNo || '');
                             const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
                             const rand = Math.floor(1000 + Math.random() * 9000);
                             setAppointRefCode(`APPT-${today}-${rand}`);
@@ -892,7 +937,7 @@ export default function AssessmentPage() {
                           <td className="num-col">{fmtScore(cs.bei)}</td>
                           <td className="num-col">{fmtScore(cs.wst)}</td>
                           <td className="num-col">{fmtScore(cs.we)}</td>
-                          <td>
+                          <td style={{ textAlign: 'center' }}>
                             <span className={`badge ${assessment.badge}`}>{assessment.label}</span>
                           </td>
                           <td>{actionCell}</td>
@@ -936,20 +981,9 @@ export default function AssessmentPage() {
 
       {/* MODAL: QS SCORING MATRIX */}
       {showQualModal && selectedQualApp && (
-        <div className="modal open">
-          <div className="modal-box" style={{ padding: '0 24px 24px', maxHeight: '92vh', overflow: 'auto', width: 'min(1100px, 98vw)' }}>
-            <div className="modal-head" style={{
-              paddingTop: '24px',
-              paddingBottom: '12px',
-              background: 'white',
-              position: 'sticky',
-              top: 0,
-              zIndex: 10,
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              borderBottom: '1px solid var(--line)'
-            }}>
+        <div className="modal open" style={{ zIndex: 1000 }}>
+          <div className="modal-box" style={{ width: 'min(1100px, 98vw)' }}>
+            <div className="modal-head">
               <h2>Qualification Standards Matrix — {selectedQualApp.applicant}</h2>
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                 <button 
@@ -980,7 +1014,7 @@ export default function AssessmentPage() {
               </div>
             </div>
 
-            <div className="modal-body" style={{ marginTop: '20px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
+            <div className="modal-body">
               <div className="qs-matrix-wrap qualified-tab-card">
                 <div className="qualified-card-head" style={{ padding: '24px' }}>
                   <div className="position-detail-eyebrow">Qualification Standards</div>
@@ -1066,39 +1100,9 @@ export default function AssessmentPage() {
                       const docInfo = availableDocs.find(d => d.key === docKey);
                       const exists = !!docInfo?.existsInAzure;
                       
-                      const handleViewDoc = (e) => {
-                        e.stopPropagation();
-                        if (!exists) return;
-                        const apiBaseUrl = import.meta.env.VITE_API_URL || window.location.origin;
-                        const downloadUrl = `${apiBaseUrl}/api/applications/${selectedQualApp.id}/documents/${docKey}/download?token=${localStorage.getItem('agap_token')}`;
-                        window.open(downloadUrl, '_blank');
-                      };
-
                       return (
                         <div className="qs-card" key={area.key} style={{ border: '1px solid var(--line)', borderRadius: '16px', padding: '16px', position: 'relative' }}>
                           <h3 style={{ marginBottom: '6px' }}>{area.label}</h3>
-                          {docKey && (
-                            <button
-                              type="button"
-                              onClick={handleViewDoc}
-                              disabled={!exists}
-                              style={{
-                                position: 'absolute',
-                                top: '16px',
-                                right: '16px',
-                                padding: '4px 8px',
-                                fontSize: '11px',
-                                borderRadius: '8px',
-                                backgroundColor: exists ? 'var(--blue-100)' : '#f1f5f9',
-                                color: exists ? 'var(--blue)' : '#94a3b8',
-                                border: 'none',
-                                cursor: exists ? 'pointer' : 'not-allowed',
-                                fontWeight: 'bold'
-                              }}
-                            >
-                              📄 View Document
-                            </button>
-                          )}
                           <p className="small" style={{ margin: '0 0 12px', minHeight: '36px' }}>{area.description}</p>
                           <div style={{ marginTop: 'auto', padding: '14px', border: '2px solid var(--line)', borderRadius: '18px', background: 'linear-gradient(135deg,#FFFFFF,#F8FCFF)' }}>
                             <label style={{ margin: '0 0 8px', display: 'block', fontWeight: 'bold' }}>Score</label>
@@ -1204,7 +1208,7 @@ export default function AssessmentPage() {
               </div>
             </div>
 
-            <div className="decision-row" style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '24px', gap: '12px' }}>
+            <div className="decision-row">
               <button className="secondary" onClick={handleCloseQualModal}>Close</button>
               <button
                 className="good"
@@ -1287,14 +1291,12 @@ export default function AssessmentPage() {
         <div className="modal open" style={{ zIndex: 1000 }}>
           <div className="modal-box" style={{ width: 'min(620px, 94vw)' }}>
             <div className="modal-head">
-              <h3>Confirm Appointment — {appointConfirmApp.applicant}</h3>
+              <h3 style={{ margin: 0 }}>Confirm Appointment — {appointConfirmApp.applicant}</h3>
             </div>
-            <div style={{ padding: '0 20px' }}>
-              <p className="small" style={{ marginTop: '8px' }}>
+            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <p className="small" style={{ margin: 0 }}>
                 You are about to appoint the following applicant. On confirmation, this applicant's status will become <b>FOR APPOINTMENT</b>, and the selected plantilla item will be filled.
               </p>
-            </div>
-            <div className="modal-body" style={{ margin: '16px 0', display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div className="qs-matrix-meta" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px', padding: '12px', backgroundColor: 'var(--blue-50)', borderRadius: '12px' }}>
                 <div className="meta-tile"><b>Applicant</b><br/>{appointConfirmApp.applicant}</div>
                 <div className="meta-tile"><b>Applicant number</b><br/>{appointConfirmApp.code}</div>
@@ -1304,21 +1306,71 @@ export default function AssessmentPage() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 <div>
                   <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '6px' }}>Plantilla Item Number</label>
-                  <select
-                    value={appointItemNo}
-                    onChange={e => setAppointItemNo(e.target.value)}
-                    style={{ width: '100%', height: '40px', padding: '0 8px', borderRadius: '8px', border: '1px solid var(--line)', boxSizing: 'border-box' }}
-                  >
-                    <option value="">-- Select Available Item No. --</option>
-                    {vacancies
-                      .filter(v => v.jobClusterId === appointConfirmApp.jobClusterId && v.fillingUpStatus !== 'FILLED')
-                      .map(v => (
-                        <option key={v.id} value={v.itemNo}>
-                          {v.itemNo} — {v.school || v.division}
-                        </option>
-                      ))
-                    }
-                  </select>
+                  {(() => {
+                    const targetClusterId = appointConfirmApp.jobClusterId || appointConfirmApp.job_cluster_id;
+                    const clusterVacancies = vacancies.filter(v => 
+                      (targetClusterId && v.jobClusterId === targetClusterId) ||
+                      (appointConfirmApp.positionId && v.positionId === appointConfirmApp.positionId) ||
+                      (appointConfirmApp.vacancy && v.title === appointConfirmApp.vacancy)
+                    );
+                    const selectableList = clusterVacancies.filter(v => isItemSelectableForAppointment(v));
+                    const disabledList = clusterVacancies.filter(v => !isItemSelectableForAppointment(v));
+
+                    return (
+                      <select
+                        value={appointItemNo}
+                        onChange={e => setAppointItemNo(e.target.value)}
+                        style={{
+                          width: '100%',
+                          height: '42px',
+                          padding: '0 12px',
+                          borderRadius: '8px',
+                          border: '1.5px solid var(--line)',
+                          boxSizing: 'border-box',
+                          fontSize: '13px',
+                          fontWeight: '600',
+                          backgroundColor: '#F8FAFC',
+                          color: 'var(--navy)'
+                        }}
+                      >
+                        <option value="">-- Select Plantilla Item No. --</option>
+                        {selectableList.length > 0 && (
+                          <optgroup label="✅ Available for Appointment (Posting Closed)">
+                            {selectableList.map(v => (
+                              <option key={v.id} value={v.itemNo}>
+                                {v.itemNo} — {v.school || v.division}
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
+                        {disabledList.length > 0 && (
+                          <optgroup label="🔒 Unavailable Item Numbers (Active Posting / Filled)">
+                            {disabledList.map(v => {
+                              const today = new Date();
+                              today.setHours(0, 0, 0, 0);
+                              const start = parseDateNoTime(v.postingStart || v.posting_start);
+                              const end = parseDateNoTime(v.postingEnd || v.posting_end);
+
+                              let statusTag = 'Open Posting';
+                              if (v.fillingUpStatus === 'FILLED' || v.filling_up_status === 'FILLED') {
+                                statusTag = 'Filled';
+                              } else if (!start || !end || today < start) {
+                                statusTag = 'Not Yet Open';
+                              }
+                              return (
+                                <option key={v.id} value={v.itemNo} disabled>
+                                  {v.itemNo} — {v.school || v.division} ({statusTag})
+                                </option>
+                              );
+                            })}
+                          </optgroup>
+                        )}
+                      </select>
+                    );
+                  })()}
+                  <p className="small" style={{ color: '#64748B', margin: '6px 0 0', fontSize: '11px' }}>
+                    Note: Only closed item numbers with passed application deadlines are eligible for appointment. Active, unposted, and filled items are shown for reference.
+                  </p>
                 </div>
                 <div>
                   <label style={{ fontWeight: 'bold', display: 'block', marginBottom: '6px' }}>Appointment Date</label>
@@ -1350,7 +1402,7 @@ export default function AssessmentPage() {
                 </div>
               </div>
             </div>
-            <div className="decision-row" style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+            <div className="decision-row" style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', padding: '16px 24px', borderTop: '1px solid var(--line)', background: '#F8FAFC' }}>
               <button className="secondary" onClick={() => { setShowAppointConfirmModal(false); setAppointConfirmApp(null); }}>Cancel</button>
               <button className="good" onClick={() => {
                 handleConfirmAppointment(appointConfirmApp.id, appointDate, appointPasscode, appointItemNo);
@@ -1379,9 +1431,9 @@ export default function AssessmentPage() {
                 <li>Work Sample Test (WST)</li>
                 <li>Written Examination (WE)</li>
               </ul>
-            </div>
-            <div className="decision-row" style={{ display: 'flex', justifyContent: 'flex-end' }}>
-              <button className="secondary" onClick={() => setShowIncompleteAppointModal(false)}>Close</button>
+              <div className="decision-row" style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <button className="secondary" onClick={() => setShowIncompleteAppointModal(false)}>Close</button>
+              </div>
             </div>
           </div>
         </div>
@@ -1390,19 +1442,8 @@ export default function AssessmentPage() {
       {/* MODAL: VIEW DOCUMENTS */}
       {showDocsModal && selectedQualApp && (
         <div className="modal open" style={{ zIndex: 100002 }}>
-          <div className="modal-box" style={{ padding: '0 24px 24px', maxHeight: '92vh', overflow: 'auto', width: 'min(1100px, 98vw)' }}>
-            <div className="modal-head" style={{
-              paddingTop: '24px',
-              paddingBottom: '12px',
-              background: 'white',
-              position: 'sticky',
-              top: 0,
-              zIndex: 10,
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              borderBottom: '1px solid var(--line)'
-            }}>
+          <div className="modal-box" style={{ width: 'min(1100px, 98vw)' }}>
+            <div className="modal-head">
               <h2 style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: 0 }}>
                 📂 Document Vault — {selectedQualApp.applicant}
               </h2>

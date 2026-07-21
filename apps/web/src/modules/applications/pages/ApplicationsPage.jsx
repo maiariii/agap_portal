@@ -512,6 +512,17 @@ export default function ApplicationsPage() {
         </div>
         <div className="table-wrap">
           <table style={{ width: '100%', tableLayout: 'fixed' }}>
+            <colgroup>
+              <col style={{ width: '4%' }} />
+              <col style={{ width: '15%' }} />
+              <col style={{ width: '10%' }} />
+              <col style={{ width: '10%' }} />
+              <col style={{ width: '17%' }} />
+              <col style={{ width: '7%' }} />
+              <col style={{ width: '7%' }} />
+              <col style={{ width: '15%' }} />
+              <col style={{ width: '15%' }} />
+            </colgroup>
             <thead>
               <tr>
                 <th className="row-num">No.</th>
@@ -686,7 +697,7 @@ export default function ApplicationsPage() {
                           </span>
                         </td>
                         <td>{r.vacancy}</td>
-                        <td><span className={`badge ${cls(getApplicationDisplayStatus(r))}`}>{getApplicationDisplayStatus(r)}</span></td>
+                        <td style={{ textAlign: 'center' }}><span className={`badge ${cls(getApplicationDisplayStatus(r))}`}>{getApplicationDisplayStatus(r)}</span></td>
                       </tr>
                     ))}
                   </VacancyClusterAccordion>
@@ -726,23 +737,9 @@ export default function ApplicationsPage() {
 
       {/* MODAL: INITIAL EVALUATION REVIEW */}
       {reviewId && reviewApp && (
-        <div className="modal open">
-          <div className="modal-box" style={{ width: 'min(960px, 96vw)', padding: '0 24px 24px', maxHeight: '92vh', overflow: 'auto' }}>
-            <div className="modal-head" style={{
-              paddingTop: '24px',
-              paddingBottom: '12px',
-              background: 'white',
-              position: 'sticky',
-              top: 0,
-              zIndex: 10,
-              margin: '0 -24px 16px',
-              paddingLeft: '24px',
-              paddingRight: '24px',
-              borderBottom: '1px solid #E2E8F0',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center'
-            }}>
+        <div className="modal open" style={{ zIndex: 1000 }}>
+          <div className="modal-box" style={{ width: 'min(960px, 96vw)' }}>
+            <div className="modal-head">
               <h2 style={{ margin: 0 }}>Initial Evaluation Review — {reviewApp.applicant}</h2>
               <div style={{ display: 'flex', gap: '8px' }}>
                 <button type="button" className="secondary" onClick={() => setShowReviewDocsVault(!showReviewDocsVault)}>
@@ -751,8 +748,8 @@ export default function ApplicationsPage() {
                 <button className="secondary" onClick={handleCloseReviewModal}>Close</button>
               </div>
             </div>
-
-            <div className="qs-matrix-wrap">
+            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              <div className="qs-matrix-wrap">
               <div className="qs-matrix-head">
                 <div>
                   <div className="position-detail-eyebrow">Qualification Standards</div>
@@ -956,30 +953,19 @@ export default function ApplicationsPage() {
               </div>
             </div>
           </div>
+        </div>
 
       {/* SUB-MODAL: DOCUMENT VAULT PREVIEW */}
       {showReviewDocsVault && reviewApp && (
         <div className="modal open" style={{ zIndex: 100002 }}>
-          <div className="modal-box" style={{ padding: '0 24px 24px', maxHeight: '92vh', overflow: 'auto', width: 'min(1100px, 98vw)' }}>
-            <div className="modal-head" style={{
-              paddingTop: '24px',
-              paddingBottom: '12px',
-              background: 'white',
-              position: 'sticky',
-              top: 0,
-              zIndex: 10,
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              borderBottom: '1px solid var(--line)'
-            }}>
+          <div className="modal-box" style={{ width: 'min(1100px, 98vw)' }}>
+            <div className="modal-head">
               <h2 style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: 0 }}>
                 📂 Document Vault — {reviewApp.applicant}
               </h2>
               <button className="secondary" onClick={() => setShowReviewDocsVault(false)}>Close Vault</button>
             </div>
-
-            <div className="modal-body" style={{ marginTop: '20px', display: 'grid', gridTemplateColumns: '320px 1fr', gap: '20px', alignItems: 'start' }}>
+            <div className="modal-body" style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: '20px', alignItems: 'start' }}>
               {/* Document Checklist Sidebar */}
               <div style={{ border: '1px solid var(--line)', borderRadius: '12px', overflow: 'hidden', background: '#F8FAFC' }}>
                 <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)', background: 'white' }}>
