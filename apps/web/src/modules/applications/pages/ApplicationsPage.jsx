@@ -316,13 +316,37 @@ export default function ApplicationsPage() {
     }
   };
 
-  const handleExportIER = () => {
-    const qualRows = filteredApps.filter(app => getApplicationDisplayStatus(app).toLowerCase() === 'qualified');
-    const headers = ["No.", "Applicant", "Applicant Number", "Date of Application", "Deadline", "Bachelor's Degree", "Years Experience", "Hours Training", "Vacancy", "Status"];
-    const rows = qualRows.map((r, i) => [
-      i + 1, r.applicant, r.code, r.dateApplied, r.deadline, r.bachelorDegree, r.yearsExperience, r.trainingHours, r.vacancy, getApplicationDisplayStatus(r)
-    ]);
-    downloadCSV(headers, rows, `IER-qualified-applicants-${new Date().toISOString().slice(0, 10)}.csv`);
+  const handleExportIER = async () => {
+    try {
+      const token = localStorage.getItem('agap_token');
+      const params = new URLSearchParams();
+      if (appVacancyFilter) params.append('vacancyId', appVacancyFilter);
+
+      const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/applications/export-ier?${params.toString()}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || 'Failed to export IER Excel file');
+      }
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const dateStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
+      a.download = `IER_Annex_D_${dateStr}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error(err);
+      alert('Failed to download IER Excel file: ' + err.message);
+    }
   };
 
   const handleOpenReview = (appRow) => {
@@ -492,10 +516,36 @@ export default function ApplicationsPage() {
           </div>
         </div>
 
-        <div className="card action-card">
-          <div className="action-title">Quick actions</div>
-          <div className="action-buttons" style={{ gridTemplateColumns: '1fr' }}>
-            <button onClick={handleExportIER}>Download IER</button>
+        <div className="card action-card export-quick-action-card">
+          <div className="action-card-header">
+            <div className="action-card-icon-badge">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+                <path d="M8 13h8" />
+                <path d="M8 17h8" />
+                <path d="M10 9h1" />
+              </svg>
+            </div>
+            <div className="action-title-group">
+              <span className="action-kicker">EXPORT REPORT</span>
+              <span className="action-title">DepEd Order 7 · Annex D (IER)</span>
+            </div>
+          </div>
+          <button className="export-report-btn" onClick={handleExportIER}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+              <span>Download IER Excel</span>
+            </div>
+            <span className="export-btn-badge">.XLSX</span>
+          </button>
+          <div className="action-card-footer">
+            <span className="footer-check">✓</span>
+            <span>Auto-formatted official template</span>
           </div>
         </div>
       </div>

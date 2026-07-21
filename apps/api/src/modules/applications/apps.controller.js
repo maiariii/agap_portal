@@ -733,10 +733,31 @@ export async function exportCar(req, res) {
     const schoolDiv = [sampleApp.school || sampleApp.vacancy_school, sampleApp.division || sampleApp.vacancy_division].filter(Boolean).join(' / ') || 'SDO Manila';
     const todayFormatted = new Date().toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'Asia/Manila' });
 
-    sheet.getCell('B4').value = `Position:  ${posTitle}`;
-    sheet.getCell('M4').value = `Plantilla Item Number: ${itemNo}`;
-    sheet.getCell('B5').value = `Office/Bureau/Service/Unit where the vacancy exists: ${schoolDiv}`;
-    sheet.getCell('M5').value = `Date of Final Deliberation: ${todayFormatted}`;
+    const carFont = { name: 'Bookman Old Style', size: 11 };
+    sheet.getCell('B4').value = {
+      richText: [
+        { text: 'Position:  ', font: { ...carFont } },
+        { text: posTitle, font: { ...carFont, bold: true } }
+      ]
+    };
+    sheet.getCell('M4').value = {
+      richText: [
+        { text: 'Plantilla Item Number: ', font: { ...carFont } },
+        { text: itemNo, font: { ...carFont, bold: true } }
+      ]
+    };
+    sheet.getCell('B5').value = {
+      richText: [
+        { text: 'Office/Bureau/Service/Unit where the vacancy exists: ', font: { ...carFont } },
+        { text: schoolDiv, font: { ...carFont, bold: true } }
+      ]
+    };
+    sheet.getCell('M5').value = {
+      richText: [
+        { text: 'Date of Final Deliberation: ', font: { ...carFont } },
+        { text: todayFormatted, font: { ...carFont, bold: true } }
+      ]
+    };
 
     let startRow = 9;
     completedApps.forEach((app, idx) => {
@@ -768,13 +789,134 @@ export async function exportCar(req, res) {
       row.commit();
     });
 
+    const dateStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename="CAR_Annex_I_${Date.now()}.xlsx"`);
+    res.setHeader('Content-Disposition', `attachment; filename="CAR_Annex_I_${dateStr}.xlsx"`);
 
     await workbook.xlsx.write(res);
     res.end();
   } catch (error) {
     console.error('Error exporting CAR Excel:', error);
+    res.status(500).json({ error: error.message });
+  }
+}
+
+function calculateAge(dobStr) {
+  if (!dobStr) return '—';
+  const birthDate = new Date(dobStr);
+  if (isNaN(birthDate.getTime())) return '—';
+  const today = new Date();
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const m = today.getMonth() - birthDate.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+    age--;
+  }
+  return age >= 0 ? age : '—';
+}
+
+export async function exportIer(req, res) {
+  try {
+    const userId = req.user?.id;
+    const userQuery = await pool.query('SELECT region, division FROM users WHERE id = $1', [userId]);
+    const user = userQuery.rows[0] || {};
+
+    const { vacancyId } = req.query;
+    const list = await getHydratedApplications(vacancyId || null, user.region || null, user.division || null);
+
+    const templatePath = path.resolve(__dirname, '../../templates/Annex_D_Initial_Evaluation_Results.xlsx');
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(templatePath);
+
+    const sheet = workbook.getWorksheet(1) || workbook.worksheets[0];
+
+    const sampleApp = list[0] || {};
+    const posTitle = sampleApp.vacancy || sampleApp.positionTitle || sampleApp.vacancy_title || 'Position';
+    const salaryGrade = sampleApp.salaryGrade || sampleApp.salary_grade || '—';
+
+    const ierFont = { name: 'Bookman Old Style', size: 18 };
+    sheet.getCell('B4').value = {
+      richText: [
+        { text: 'Position:   ', font: { ...ierFont } },
+        { text: posTitle, font: { ...ierFont, bold: true } }
+      ]
+    };
+    sheet.getCell('B5').value = {
+      richText: [
+        { text: 'Salary Grade and Monthly Salary:   ', font: { ...ierFont } },
+        { text: `SG ${salaryGrade}`, font: { ...ierFont, bold: true } }
+      ]
+    };
+
+    const setBoldCell = (cellRef, textVal) => {
+      const cell = sheet.getCell(cellRef);
+      cell.value = textVal;
+      cell.font = { name: 'Bookman Old Style', size: 18, bold: true };
+    };
+
+    setBoldCell('C7', sampleApp.qsDegree || 'Bachelor\'s Degree relevant to the job');
+    setBoldCell('C8', sampleApp.qsTraining || 'None required');
+    setBoldCell('C9', sampleApp.qsExperience || 'None required');
+    setBoldCell('C10', sampleApp.qsEligibility || 'Career Service (Professional) / Second Level Eligibility');
+
+    let startRow = 15;
+    list.forEach((app, idx) => {
+      const rowNum = startRow + idx;
+      const row = sheet.getRow(rowNum);
+      const appObj = app.applicantObj || {};
+
+      const name = app.applicant || app.applicant_name || `Applicant #${idx + 1}`;
+      const code = app.code || app.applicant_code || '—';
+      const address = appObj.residential_address || appObj.permanent_address || '—';
+      const age = calculateAge(appObj.date_of_birth);
+      const sex = appObj.sex || '—';
+      const civilStatus = appObj.civil_status || '—';
+      const religion = appObj.religion || '—';
+      const disability = appObj.disability || '—';
+      const ethnicGroup = appObj.ethnic_group || '—';
+      const email = appObj.email_address || app.email || '—';
+      const contactNo = appObj.mobile_no || appObj.telephone_no || '—';
+
+      const education = app.bachelorDegree || appObj.bachelor_degree || '—';
+      const trainingTitle = appObj.training_title || (app.trainingHours > 0 ? `${app.trainingHours} hours relevant training` : 'None');
+      const trainingHours = app.trainingHours || appObj.training_hours || 0;
+      const expDetails = appObj.experience_details || (app.yearsExperience > 0 ? `${app.yearsExperience} years relevant experience` : 'None');
+      const expYears = app.yearsExperience || appObj.years_experience || 0;
+      const eligibility = appObj.eligibility || 'Civil Service Professional';
+
+      const isDisqualified = String(app.status || '').toLowerCase() === 'disqualified';
+      const remarks = isDisqualified ? 'Disqualified' : 'Qualified';
+
+      row.getCell(2).value = idx + 1; // B: No.
+      row.getCell(3).value = code; // C: Application Code
+      row.getCell(4).value = name; // D: Names of Applicant
+      row.getCell(5).value = address; // E: Address
+      row.getCell(6).value = age; // F: Age
+      row.getCell(7).value = sex; // G: Sex
+      row.getCell(8).value = civilStatus; // H: Civil Status
+      row.getCell(9).value = religion; // I: Religion
+      row.getCell(10).value = disability; // J: Disability
+      row.getCell(11).value = ethnicGroup; // K: Ethnic Group
+      row.getCell(12).value = email; // L: Email Address
+      row.getCell(13).value = contactNo; // M: Contact No.
+      row.getCell(14).value = education; // N: Education
+      row.getCell(15).value = trainingTitle; // O: Training Title
+      row.getCell(16).value = trainingHours; // P: Training Hours
+      row.getCell(17).value = expDetails; // Q: Experience Details
+      row.getCell(18).value = expYears; // R: Experience Years
+      row.getCell(19).value = eligibility; // S: Eligibility
+      row.getCell(20).value = remarks; // T: Remarks (Qualified or Disqualified)
+
+      row.commit();
+    });
+
+    const dateStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="IER_Annex_D_${dateStr}.xlsx"`);
+
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (error) {
+    console.error('Error exporting IER Excel:', error);
     res.status(500).json({ error: error.message });
   }
 }

@@ -435,7 +435,8 @@ export default function AssessmentPage() {
       const downloadUrl = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = downloadUrl;
-      a.download = `Annex_I_Comparative_Assessment_Result_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      const dateStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
+      a.download = `CAR_Annex_I_${dateStr}.xlsx`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -672,9 +673,37 @@ export default function AssessmentPage() {
             </div>
           </div>
         </div>
-        <div className="card action-card">
-          <div className="action-title">Quick Actions</div>
-          <button onClick={handleExportCAR}>Download CAR</button>
+        <div className="card action-card export-quick-action-card">
+          <div className="action-card-header">
+            <div className="action-card-icon-badge">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+                <path d="M8 13h8" />
+                <path d="M8 17h8" />
+                <path d="M10 9h1" />
+              </svg>
+            </div>
+            <div className="action-title-group">
+              <span className="action-kicker">EXPORT REPORT</span>
+              <span className="action-title">DepEd Order 7 · Annex I (CAR)</span>
+            </div>
+          </div>
+          <button className="export-report-btn" onClick={handleExportCAR}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+              <span>Download CAR Excel</span>
+            </div>
+            <span className="export-btn-badge">.XLSX</span>
+          </button>
+          <div className="action-card-footer">
+            <span className="footer-check">✓</span>
+            <span>Auto-formatted official template</span>
+          </div>
         </div>
       </div>
 

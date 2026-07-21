@@ -9,7 +9,8 @@ import {
   rollbackAppointment,
   getApplicationDocuments,
   downloadApplicationDocument,
-  exportCar
+  exportCar,
+  exportIer
 } from './apps.controller.js';
 import { authenticateToken } from '../../middleware/auth.middleware.js';
 
@@ -17,6 +18,7 @@ const router = Router();
 
 router.get('/', authenticateToken, getApplications);
 router.get('/export-car', authenticateToken, exportCar);
+router.get('/export-ier', authenticateToken, exportIer);
 router.get('/:id/documents', authenticateToken, getApplicationDocuments);
 router.get('/:id/documents/:key/download', authenticateToken, downloadApplicationDocument);
 router.post('/:id/review', authenticateToken, reviewApplication);
