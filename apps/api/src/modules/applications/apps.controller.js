@@ -4,6 +4,12 @@ import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { BlobServiceClient } from '@azure/storage-blob';
 import { computeOverallAreaScore } from '@agap/shared';
+import ExcelJS from 'exceljs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 
 export async function getApplications(req, res) {
@@ -675,5 +681,100 @@ export async function downloadApplicationDocument(req, res) {
   } catch (err) {
     console.error(`[Azure Storage Error] Failed to process blob download:`, err.message);
     res.status(500).json({ error: `Azure Blob download failed: ${err.message}` });
+  }
+}
+
+export async function exportCar(req, res) {
+  try {
+    const userId = req.user?.id;
+    const userQuery = await pool.query('SELECT region, division FROM users WHERE id = $1', [userId]);
+    const user = userQuery.rows[0] || {};
+
+    const { vacancyId } = req.query;
+    const list = await getHydratedApplications(vacancyId || null, user.region || null, user.division || null);
+
+    const SCORE_AREA_KEYS = ['education', 'experience', 'training', 'outstandingAccomplishment', 'applicationEducation', 'applicationLearning', 'performanceRating', 'potential'];
+
+    // Strictly filter for applicants whose status is Assessment Completed AND not yet appointed
+    const completedApps = list.filter(app => {
+      const apptStatus = String(app.appointmentStatus || app.appointment_status || '').toUpperCase();
+      if (apptStatus === 'FOR APPOINTMENT' || apptStatus === 'APPOINTED') {
+        return false;
+      }
+
+      const cs = app.comparativeAssessmentScores || app.comparative_assessment_scores || {};
+      const latestEval = app.latestEval || (app.qual_evals && app.qual_evals[0]) || {};
+      let areaScores = latestEval.areaScores || latestEval.area_scores || {};
+      if (typeof areaScores === 'string') {
+        try { areaScores = JSON.parse(areaScores); } catch (e) { areaScores = {}; }
+      }
+
+      const hasVal = v => v !== "" && v !== null && v !== undefined && Number.isFinite(Number(v));
+      const compChecks = [cs.bei, cs.wst, cs.we].map(hasVal);
+      const compCount = compChecks.filter(Boolean).length;
+
+      const areaCount = SCORE_AREA_KEYS.filter(k => hasVal(areaScores[k])).length;
+
+      return areaCount === SCORE_AREA_KEYS.length && compCount === 3;
+    });
+
+    // Sort by overall fit / total score descending
+    completedApps.sort((a, b) => (b.fit || b.overall_fit || 0) - (a.fit || a.overall_fit || 0));
+
+    const templatePath = path.resolve(__dirname, '../../templates/Annex_I_Comparative_Assessment_Result.xlsx');
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(templatePath);
+
+    const sheet = workbook.getWorksheet(1) || workbook.worksheets[0];
+
+    const sampleApp = completedApps[0] || list[0] || {};
+    const posTitle = sampleApp.vacancy || sampleApp.positionTitle || sampleApp.vacancy_title || 'Position';
+    const itemNo = sampleApp.itemNo || sampleApp.vacancy_item_no || sampleApp.appointment_item_no || '—';
+    const schoolDiv = [sampleApp.school || sampleApp.vacancy_school, sampleApp.division || sampleApp.vacancy_division].filter(Boolean).join(' / ') || 'SDO Manila';
+    const todayFormatted = new Date().toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'Asia/Manila' });
+
+    sheet.getCell('B4').value = `Position:  ${posTitle}`;
+    sheet.getCell('M4').value = `Plantilla Item Number: ${itemNo}`;
+    sheet.getCell('B5').value = `Office/Bureau/Service/Unit where the vacancy exists: ${schoolDiv}`;
+    sheet.getCell('M5').value = `Date of Final Deliberation: ${todayFormatted}`;
+
+    let startRow = 9;
+    completedApps.forEach((app, idx) => {
+      const rowNum = startRow + idx;
+      const row = sheet.getRow(rowNum);
+      const latestEval = app.latestEval || (app.qual_evals && app.qual_evals[0]) || {};
+      let areaScores = latestEval.areaScores || latestEval.area_scores || {};
+      if (typeof areaScores === 'string') {
+        try { areaScores = JSON.parse(areaScores); } catch (e) { areaScores = {}; }
+      }
+
+      const name = app.applicant || app.applicant_name || `Applicant #${idx + 1}`;
+      const code = app.code || app.applicant_code || '—';
+
+      row.getCell(2).value = idx + 1; // B: No. (1, 2, 3...)
+      row.getCell(3).value = name; // C: Name of Applicant
+      row.getCell(4).value = code; // D: Application Code
+      row.getCell(5).value = Number(areaScores.education || 0); // E: Education
+      row.getCell(6).value = Number(areaScores.training || 0); // F: Training
+      row.getCell(7).value = Number(areaScores.experience || 0); // G: Experience
+      row.getCell(8).value = Number(areaScores.performanceRating || areaScores.performance || 0); // H: Performance
+      row.getCell(9).value = Number(areaScores.outstandingAccomplishment || areaScores.accomplishments || 0); // I: Outstanding Accomplishments
+      row.getCell(10).value = Number(areaScores.applicationEducation || areaScores.appEducation || 0); // J: Application of Education
+      row.getCell(11).value = Number(areaScores.applicationLearning || areaScores.appLD || 0); // K: Application of L&D
+      row.getCell(12).value = Number(areaScores.potential || 0); // L: Potential
+      row.getCell(13).value = Number(app.fit || app.overall_fit || 0); // M: Total
+      row.getCell(14).value = ''; // N: Remarks
+
+      row.commit();
+    });
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="CAR_Annex_I_${Date.now()}.xlsx"`);
+
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (error) {
+    console.error('Error exporting CAR Excel:', error);
+    res.status(500).json({ error: error.message });
   }
 }

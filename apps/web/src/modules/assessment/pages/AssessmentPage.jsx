@@ -411,29 +411,39 @@ export default function AssessmentPage() {
     return { label: 'Assessment Not Started', badge: 'blue' };
   };
 
-  const handleExportCAR = () => {
-    const headers = ["No.", "Applicant", "Applicant Number", "Bachelor's Degree", "Vacancy", "Item No.", "Average Score", "BEI", "WST", "WE", "Assessment Status"];
-    const scoreVal = v => (v !== "" && v !== null && v !== undefined && Number.isFinite(Number(v))) ? Number(v).toFixed(2) : "";
-    const rows = qualifiedApps.map((r, i) => {
-      const cs = r.comparativeAssessmentScores || r.appObj?.comparativeAssessmentScores || {};
-      const hasCompScores = ['bei', 'wst', 'we'].every(k => cs[k] !== '' && cs[k] !== null && cs[k] !== undefined && Number.isFinite(Number(cs[k])));
-      const compAvgValue = hasCompScores ? (['bei', 'wst', 'we'].reduce((sum, k) => sum + Number(cs[k]), 0) / 3) : null;
-      const assessment = getAssessmentStatus(r);
-      return [
-        i + 1,
-        r.applicant,
-        r.code,
-        r.bachelorDegree,
-        r.vacancy,
-        r.itemNo,
-        compAvgValue !== null ? compAvgValue.toFixed(2) : "",
-        scoreVal(cs.bei),
-        scoreVal(cs.wst),
-        scoreVal(cs.we),
-        assessment.label
-      ];
-    });
-    downloadCSV(headers, rows, `CAR-qualified-pool-${new Date().toISOString().slice(0, 10)}.csv`);
+  const handleExportCAR = async () => {
+    try {
+      const token = localStorage.getItem('agap_token');
+      const queryParams = new URLSearchParams();
+      if (qualVacancyFilter) {
+        queryParams.append('vacancyId', qualVacancyFilter);
+      }
+      const url = `${import.meta.env.VITE_API_URL || window.location.origin}/api/applications/export-car?${queryParams.toString()}`;
+      
+      const res = await fetch(url, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || 'Failed to export CAR Excel file');
+      }
+
+      const blob = await res.blob();
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      a.download = `Annex_I_Comparative_Assessment_Result_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(downloadUrl);
+    } catch (err) {
+      console.error('Error downloading CAR:', err);
+      alert('Failed to download CAR Excel file: ' + err.message);
+    }
   };
 
   const handleQualSort = (key) => {
