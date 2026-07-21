@@ -1,7 +1,7 @@
 import jwt from 'jsonwebtoken';
 import { pool } from '../../config/db.js';
 
-const MAX_HANDOFF_TTL_SECONDS = 5 * 60;
+const MAX_HANDOFF_TTL_SECONDS = 24 * 60 * 60;
 const PORTAL_SESSION_TTL = '2h';
 
 export class HqSsoConfigurationError extends Error {}
@@ -16,7 +16,11 @@ function getHandoffSecret() {
 }
 
 function getPortalJwtSecret() {
-  return process.env.JWT_SECRET || 'super-secret-jwt-key-change-in-production';
+  const secret = process.env.JWT_SECRET?.trim();
+  if (!secret) {
+    throw new HqSsoConfigurationError('JWT_SECRET is required');
+  }
+  return secret;
 }
 
 function getAuthorizedHqEmail() {
@@ -44,8 +48,6 @@ function verifyHandoffToken(token, now = Math.floor(Date.now() / 1000)) {
   try {
     claims = jwt.verify(token, getHandoffSecret(), {
       algorithms: ['HS256'],
-      issuer: 'insighted-hq',
-      audience: 'agap-portal',
       clockTimestamp: now,
     });
   } catch (error) {
@@ -55,12 +57,10 @@ function verifyHandoffToken(token, now = Math.floor(Date.now() / 1000)) {
 
   if (
     typeof claims !== 'object' ||
-    claims.type !== 'hq_sso' ||
     typeof claims.email !== 'string' ||
     !claims.email.trim() ||
-    claims.sub !== claims.email ||
-    typeof claims.jti !== 'string' ||
-    !claims.jti ||
+    typeof claims.username !== 'string' ||
+    !claims.username.trim() ||
     !isUnixTimestamp(claims.iat) ||
     !isUnixTimestamp(claims.exp) ||
     claims.iat > now + 30 ||
@@ -71,16 +71,16 @@ function verifyHandoffToken(token, now = Math.floor(Date.now() / 1000)) {
   }
 
   const email = claims.email.trim().toLowerCase();
-  if (email !== getAuthorizedHqEmail()) {
+  const username = claims.username.trim();
+  if (email !== getAuthorizedHqEmail() || username !== getMappedPortalUsername()) {
     throw new HqSsoAuthenticationError('This HQ account is not authorized for AGAP Portal access');
   }
 
-  return email;
+  return username;
 }
 
 export async function exchangeHqSsoToken(token) {
-  verifyHandoffToken(token);
-  const username = getMappedPortalUsername();
+  const username = verifyHandoffToken(token);
   const { rows } = await pool.query(
     `SELECT id, username, role, full_name, status, locked_until
      FROM users
