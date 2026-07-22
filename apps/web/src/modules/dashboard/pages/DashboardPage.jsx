@@ -5,7 +5,7 @@ const matchStatus = (appStatus, filterStatus) => {
   if (!filterStatus) return true;
   const appStatusLower = (appStatus || '').toLowerCase();
   const filterStatusLower = filterStatus.toLowerCase();
-  
+
   if (filterStatusLower === 'qualified') {
     return appStatusLower === 'qualified' || appStatusLower === 'for_comparative_assessment';
   }
@@ -30,14 +30,14 @@ const CustomSelect = ({ value, onChange, options, label, icon }) => {
 
   return (
     <div ref={ref} style={{ position: 'relative', minWidth: label === 'Position' ? '260px' : '220px' }}>
-      <div 
+      <div
         onClick={() => setIsOpen(!isOpen)}
         className="control-select-wrap"
-        style={{ 
-          display: 'flex', 
-          alignItems: 'center', 
-          background: '#F8FAFC', 
-          borderRadius: '8px', 
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          background: '#F8FAFC',
+          borderRadius: '8px',
           padding: '6px 12px',
           gap: '10px',
           cursor: 'pointer',
@@ -51,7 +51,7 @@ const CustomSelect = ({ value, onChange, options, label, icon }) => {
           </span>
         </div>
         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s ease', flexShrink: 0 }}>
-          <polyline points="6 9 12 15 18 9"/>
+          <polyline points="6 9 12 15 18 9" />
         </svg>
       </div>
 
@@ -235,22 +235,7 @@ export default function DashboardPage() {
           { key: 'disqualified', label: 'Disqualified', colorClass: 'seg-disqualified', color: '#B91C1C' },
           { key: 'excluded', label: 'Excluded', colorClass: 'seg-excluded', color: '#64748B' }
         ],
-        getKey: r => {
-          const s = (r.status || '').toLowerCase().replace(/[\s_-]+/g, '_');
-          if (s === 'application_submitted' || s === 'pending_qs_review' || s === 'pending_qs' || s === 'pending_qs_review_') {
-            return 'pending_qs_review';
-          }
-          if (s === 'qualified' || s === 'for_comparative_assessment') {
-            return 'qualified';
-          }
-          if (s === 'disqualified') {
-            return 'disqualified';
-          }
-          if (s === 'excluded') {
-            return 'excluded';
-          }
-          return s;
-        },
+        getKey: r => r.status,
         kpiTotalLabel: 'Total Applications',
         kpiTotalCaption: 'All records',
         overallTitle: 'Overall Application Status Distribution',
@@ -259,7 +244,7 @@ export default function DashboardPage() {
         centerLabel: 'applications',
         tableLabel: 'Application Status',
         detailColumns: [
-          { label: 'Applicant', key: 'applicant', type: 'text', render: row => <span><b>{row.applicant}</b><br/><span className="small">{row.code}</span></span> },
+          { label: 'Applicant', key: 'applicant', type: 'text', render: row => <span><b>{row.applicant}</b><br /><span className="small">{row.code}</span></span> },
           { label: 'Vacancy', key: 'vacancy', type: 'categorical' },
           { label: 'Date Applied', key: 'dateApplied', type: 'text' },
           { label: 'Application Status', key: 'status', type: 'categorical', render: row => <span className={`badge ${cls(row.status)}`}>{row.status === 'Application Submitted' ? 'Application Submitted' : titleCase(row.status)}</span> }
@@ -274,7 +259,7 @@ export default function DashboardPage() {
         code: app.code,
         vacancy: app.vacancy,
         fit: app.appObj?.overallFit || app.overallFit || 0,
-        assessmentStatus: app.assessmentStatus || 'marked_qualified',
+        assessmentStatus: app.appObj?.assessmentStatus || 'marked_qualified',
         updatedAt: app.updatedAt || app.createdAt
       }));
       return {
@@ -284,19 +269,7 @@ export default function DashboardPage() {
           { key: 'assessment_started', label: 'Assessment Started', colorClass: 'seg-docs', color: '#D97706' },
           { key: 'assessment_completed', label: 'Assessment Completed', colorClass: 'seg-qualified', color: '#16A34A' }
         ],
-        getKey: r => {
-          const s = (r.assessmentStatus || '').toLowerCase().replace(/[\s_-]+/g, '_');
-          if (s === 'assessment_not_started' || s === 'marked_qualified' || s === 'marked_qualified_') {
-            return 'marked_qualified';
-          }
-          if (s === 'assessment_started') {
-            return 'assessment_started';
-          }
-          if (s === 'assessment_complete' || s === 'assessment_completed' || s === 'assessment_completed_') {
-            return 'assessment_completed';
-          }
-          return s;
-        },
+        getKey: r => r.assessmentStatus,
         kpiTotalLabel: 'Total Qualified',
         kpiTotalCaption: 'Passed Initial Screening',
         overallTitle: 'Overall Assessment Status Distribution',
@@ -305,18 +278,20 @@ export default function DashboardPage() {
         centerLabel: 'applications',
         tableLabel: 'Assessment Status',
         detailColumns: [
-          { label: 'Applicant', key: 'applicant', type: 'text', render: row => <span><b>{row.applicant}</b><br/><span className="small">{row.code}</span></span> },
+          { label: 'Applicant', key: 'applicant', type: 'text', render: row => <span><b>{row.applicant}</b><br /><span className="small">{row.code}</span></span> },
           { label: 'Vacancy', key: 'vacancy', type: 'categorical' },
           { label: 'Overall Fit', key: 'fit', type: 'numeric', render: row => `${row.fit}%` },
-          { label: 'Assessment Status', key: 'assessmentStatus', type: 'categorical', render: row => {
-            const map = {
-              marked_qualified: ['Assessment Not Started', 'blue'],
-              assessment_started: ['Assessment Started', 'orange'],
-              assessment_completed: ['Assessment Completed', 'green']
-            };
-            const info = map[row.assessmentStatus] || ['—', 'gray'];
-            return <span className={`badge ${info[1]}`}>{info[0]}</span>;
-          }}
+          {
+            label: 'Assessment Status', key: 'assessmentStatus', type: 'categorical', render: row => {
+              const map = {
+                marked_qualified: ['Assessment Not Started', 'blue'],
+                assessment_started: ['Assessment Started', 'orange'],
+                assessment_completed: ['Assessment Completed', 'green']
+              };
+              const info = map[row.assessmentStatus] || ['—', 'gray'];
+              return <span className={`badge ${info[1]}`}>{info[0]}</span>;
+            }
+          }
         ]
       };
     } else { // posting_status
@@ -394,22 +369,22 @@ export default function DashboardPage() {
   const getBezierPath = (points, height) => {
     if (points.length === 0) return '';
     if (points.length === 1) return `M ${points[0].x} ${points[0].y}`;
-    
+
     let d = `M ${points[0].x} ${points[0].y}`;
     for (let i = 0; i < points.length - 1; i++) {
       const p0 = points[i];
       const p1 = points[i + 1];
-      
+
       const cp1x = p0.x + (p1.x - p0.x) / 3;
       let cp1y = p0.y;
-      
+
       const cp2x = p0.x + 2 * (p1.x - p0.x) / 3;
       let cp2y = p1.y;
-      
+
       // Clamp control points to bounds
       cp1y = Math.max(0, Math.min(height, cp1y));
       cp2y = Math.max(0, Math.min(height, cp2y));
-      
+
       d += ` C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${p1.x} ${p1.y}`;
     }
     return d;
@@ -466,7 +441,7 @@ export default function DashboardPage() {
     const end = new Date(latestDate);
     curr.setHours(0, 0, 0, 0);
     end.setHours(0, 0, 0, 0);
-    
+
     while (curr <= end) {
       dayList.push({
         dateStr: curr.toISOString().slice(0, 10),
@@ -475,7 +450,7 @@ export default function DashboardPage() {
       });
       curr.setDate(curr.getDate() + 1);
     }
-    
+
     filteredHomeDetailRows.forEach(r => {
       if (!r.updatedAt) return;
       const rDateStr = new Date(r.updatedAt).toISOString().slice(0, 10);
@@ -484,7 +459,7 @@ export default function DashboardPage() {
         dayObj.count += 1;
       }
     });
-    
+
     return dayList;
   }, [startDate, latestDate, filteredHomeDetailRows]);
 
@@ -495,10 +470,10 @@ export default function DashboardPage() {
   const points = useMemo(() => {
     if (trendData.length === 0) return [];
     const maxVal = Math.max(...trendData.map(d => d.count), 1);
-    
+
     return trendData.map((d, index) => {
-      const x = padding.left + (trendData.length > 1 
-        ? (index / (trendData.length - 1)) * chartWidth 
+      const x = padding.left + (trendData.length > 1
+        ? (index / (trendData.length - 1)) * chartWidth
         : chartWidth / 2);
       const y = padding.top + chartHeight - (d.count / maxVal) * chartHeight;
       return {
@@ -530,16 +505,16 @@ export default function DashboardPage() {
 
   const filteredModalRows = useMemo(() => {
     let rows = [...modalRows];
-    
+
     if (modalSearch) {
       const q = modalSearch.toLowerCase();
       rows = rows.filter(r => {
-        return Object.values(r).some(val => 
+        return Object.values(r).some(val =>
           String(val || '').toLowerCase().includes(q)
         );
       });
     }
-    
+
     Object.entries(modalColFilters).forEach(([key, val]) => {
       if (!val) return;
       rows = rows.filter(r => {
@@ -547,20 +522,20 @@ export default function DashboardPage() {
         return colVal.includes(val.toLowerCase());
       });
     });
-    
+
     if (modalSort.key) {
       rows.sort((a, b) => {
         let valA = a[modalSort.key];
         let valB = b[modalSort.key];
         if (typeof valA === 'string') valA = valA.toLowerCase();
         if (typeof valB === 'string') valB = valB.toLowerCase();
-        
+
         if (valA < valB) return modalSort.dir === 'asc' ? -1 : 1;
         if (valA > valB) return modalSort.dir === 'asc' ? 1 : -1;
         return 0;
       });
     }
-    
+
     return rows;
   }, [modalRows, modalSearch, modalColFilters, modalSort]);
 
@@ -715,23 +690,28 @@ export default function DashboardPage() {
           box-shadow: 0 0 0 3px rgba(11, 60, 93, 0.15) !important;
         }
       `}</style>
-      <div className="filterbar" style={{ 
-        marginBottom: '16px', 
-        padding: '10px 18px', 
-        display: 'inline-flex', 
-        alignItems: 'center', 
-        gap: '16px',
+      <div style={{
         background: '#ffffff',
-        border: '1.5px solid #E2E8F0',
-        borderRadius: '12px',
+        border: '1.5px solid #0B3C5D',
+        borderLeft: '5px solid #F59E0B',
+        borderRadius: '16px',
         boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03)',
-        width: 'fit-content',
+        width: '100%',
+        marginBottom: '20px',
         overflow: 'visible'
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+        {/* Top Header Filter Bar */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '16px',
+          padding: '12px 20px',
+          borderBottom: '1px solid #E2E8F0',
+          flexWrap: 'wrap'
+        }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0B3C5D" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>
+              <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
             </svg>
             <h2 style={{ margin: 0, fontSize: '13px', fontWeight: '700', color: '#0F172A', letterSpacing: '-0.02em', textTransform: 'uppercase' }}>Data Filters</h2>
           </div>
@@ -755,17 +735,38 @@ export default function DashboardPage() {
               label="Distribution"
             />
           </div>
+        {/* Lower KPI Section Area */}
+        <div style={{
+          display: 'flex',
+          padding: 0,
+          background: 'transparent',
+          flexWrap: 'wrap'
+        }}>
+          {dashboardKPIs.map((k, i) => (
+            <div 
+              key={i} 
+              style={{
+                flex: 1,
+                padding: '16px 24px',
+                borderRight: i < dashboardKPIs.length - 1 ? '1px solid #E2E8F0' : 'none',
+                minWidth: '150px',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'center'
+              }}
+            >
+              <div style={{ fontSize: '9px', fontWeight: '800', color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '4px' }}>
+                {k.label}
+              </div>
+              <div style={{ fontSize: '28px', fontWeight: '800', color: '#0B3C5D', lineHeight: '1.1', marginBottom: '4px' }}>
+                {k.value}
+              </div>
+              <div style={{ fontSize: '12px', fontWeight: '500', color: '#64748B' }}>
+                {k.desc}
+              </div>
+            </div>
+          ))}
         </div>
-      </div>
-
-      <div className="kpis" style={{ marginBottom: '14px' }}>
-        {dashboardKPIs.map((k, i) => (
-          <div className="card kpi" key={i}>
-            <div className="kpi-label">{k.label}</div>
-            <div className="kpi-number">{k.value}</div>
-            <div className="kpi-caption">{k.desc}</div>
-          </div>
-        ))}
       </div>
 
       <div className="card">
@@ -946,7 +947,7 @@ export default function DashboardPage() {
             ))}
           </div>
         </div>
-        
+
         {filteredHomeDetailRows.length === 0 ? (
           <div style={{ height: '200px', display: 'flex', justifyContent: 'center', alignItems: 'center', color: '#64748B' }}>
             No records match the active filters.
@@ -964,7 +965,7 @@ export default function DashboardPage() {
                   </g>
                 );
               })}
-              
+
               {/* Area Path */}
               {points.length > 0 && (
                 <path
@@ -973,7 +974,7 @@ export default function DashboardPage() {
                   opacity="0.15"
                 />
               )}
-              
+
               {/* Line Path */}
               {points.length > 0 && (
                 <path
@@ -984,7 +985,7 @@ export default function DashboardPage() {
                   strokeLinecap="round"
                 />
               )}
-              
+
               {/* Dots */}
               {points.map((pt, idx) => (
                 <circle
@@ -1014,7 +1015,7 @@ export default function DashboardPage() {
                   onMouseLeave={() => setHoverTooltip({ visible: false, x: 0, y: 0, content: '' })}
                 />
               ))}
-              
+
               {/* X Labels */}
               {points.length > 0 && (
                 <>
@@ -1027,7 +1028,7 @@ export default function DashboardPage() {
                   )}
                 </>
               )}
-              
+
               <defs>
                 <linearGradient id="trendGrad" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="#0284C7" />
@@ -1273,7 +1274,7 @@ export default function DashboardPage() {
               </div>
               <button className="trend-modal-close" onClick={() => setSelectedTrendDate(null)}>×</button>
             </div>
-            
+
             <div className="trend-modal-body">
               <input
                 className="trend-modal-search"
@@ -1281,7 +1282,7 @@ export default function DashboardPage() {
                 value={modalSearch}
                 onChange={(e) => setModalSearch(e.target.value)}
               />
-              
+
               <div className="trend-modal-table-wrap">
                 <table className="trend-modal-table">
                   <thead>
