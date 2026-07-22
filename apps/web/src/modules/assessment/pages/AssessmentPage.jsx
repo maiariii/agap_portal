@@ -257,11 +257,10 @@ export default function AssessmentPage() {
       const compChecks = [cs.bei, cs.wst, cs.we].map(hasValue);
       const compCount = compChecks.filter(Boolean).length;
       
-      const areaChecks = Object.values(areaScores).map(hasValue);
-      const areaCount = areaChecks.filter(Boolean).length;
+      const areaCount = SCORE_AREAS.filter(sa => hasValue(areaScores[sa.key])).length;
       
       let label = "No Assessment";
-      if (areaCount === 10 && compCount === 3) {
+      if (areaCount === SCORE_AREAS.length && compCount === 3) {
         label = "Assessment Completed";
       } else if (areaCount > 0 || compCount > 0) {
         label = "Assessment Started";
@@ -291,8 +290,8 @@ export default function AssessmentPage() {
     if (key === 'fit') {
       const areaScores = row.latestEval?.areaScores || {};
       const hasValue = v => v !== "" && v !== null && v !== undefined && Number.isFinite(Number(v));
-      const areaCount = Object.values(areaScores).map(hasValue).filter(Boolean).length;
-      if (areaCount === 10) {
+      const areaCount = SCORE_AREAS.filter(sa => hasValue(areaScores[sa.key])).length;
+      if (areaCount === SCORE_AREAS.length) {
         return row.fit !== null && row.fit !== undefined ? Number(row.fit) : '';
       }
       return '';
@@ -303,10 +302,9 @@ export default function AssessmentPage() {
       const hasValue = v => v !== "" && v !== null && v !== undefined && Number.isFinite(Number(v));
       const compChecks = [csObj.bei, csObj.wst, csObj.we].map(hasValue);
       const compCount = compChecks.filter(Boolean).length;
-      const areaChecks = Object.values(areaScores).map(hasValue);
-      const areaCount = areaChecks.filter(Boolean).length;
+      const areaCount = SCORE_AREAS.filter(sa => hasValue(areaScores[sa.key])).length;
       
-      if (areaCount === 10 && compCount === 3) return 'Assessment Completed';
+      if (areaCount === SCORE_AREAS.length && compCount === 3) return 'Assessment Completed';
       if (areaCount > 0 || compCount > 0) return 'Assessment Started';
       return 'Assessment Not Started';
     }

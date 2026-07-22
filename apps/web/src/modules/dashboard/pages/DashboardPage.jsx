@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useAppData } from '../../../middleware/DataProvider.jsx';
+import { SCORE_AREAS } from '@agap/shared';
 
 const matchStatus = (appStatus, filterStatus) => {
   if (!filterStatus) return true;
@@ -235,7 +236,22 @@ export default function DashboardPage() {
           { key: 'disqualified', label: 'Disqualified', colorClass: 'seg-disqualified', color: '#B91C1C' },
           { key: 'excluded', label: 'Excluded', colorClass: 'seg-excluded', color: '#64748B' }
         ],
-        getKey: r => r.status,
+        getKey: r => {
+          const s = (r.status || '').toLowerCase().replace(/[\s_-]+/g, '_');
+          if (s === 'pending' || s === 'application_submitted' || s === 'pending_qs_review' || s === 'pending_qs' || s === 'pending_qs_review_') {
+            return 'pending_qs_review';
+          }
+          if (s === 'qualified' || s === 'for_comparative_assessment') {
+            return 'qualified';
+          }
+          if (s === 'disqualified') {
+            return 'disqualified';
+          }
+          if (s === 'excluded') {
+            return 'excluded';
+          }
+          return s;
+        },
         kpiTotalLabel: 'Total Applications',
         kpiTotalCaption: 'All records',
         overallTitle: 'Overall Application Status Distribution',
@@ -251,17 +267,33 @@ export default function DashboardPage() {
         ]
       };
     } else if (homeDistributionBy === 'assessment_status') {
-      const rows = dashboardRows.filter(r => r.status === 'qualified' || r.status === 'for_comparative_assessment').map(app => ({
-        id: app.id,
-        positionId: app.vacancyObj.positionId,
-        positionTitle: app.vacancy,
-        applicant: app.applicant,
-        code: app.code,
-        vacancy: app.vacancy,
-        fit: app.appObj?.overallFit || app.overallFit || 0,
-        assessmentStatus: app.appObj?.assessmentStatus || 'marked_qualified',
-        updatedAt: app.updatedAt || app.createdAt
-      }));
+      const rows = dashboardRows.filter(r => (r.status || '').toLowerCase() === 'qualified' || (r.status || '').toLowerCase() === 'for_comparative_assessment').map(app => {
+        const cs = app.comparativeAssessmentScores || app.appObj?.comparativeAssessmentScores || {};
+        const areaScores = app.latestEval?.areaScores || {};
+        const hasValue = v => v !== "" && v !== null && v !== undefined && Number.isFinite(Number(v));
+        
+        const compCount = [cs.bei, cs.wst, cs.we].map(hasValue).filter(Boolean).length;
+        const areaCount = SCORE_AREAS.filter(sa => hasValue(areaScores[sa.key])).length;
+        
+        let dynamicStatus = 'marked_qualified';
+        if (areaCount === SCORE_AREAS.length && compCount === 3) {
+          dynamicStatus = 'assessment_completed';
+        } else if (areaCount > 0 || compCount > 0) {
+          dynamicStatus = 'assessment_started';
+        }
+
+        return {
+          id: app.id,
+          positionId: app.vacancyObj.positionId,
+          positionTitle: app.vacancy,
+          applicant: app.applicant,
+          code: app.code,
+          vacancy: app.vacancy,
+          fit: app.appObj?.overallFit || app.overallFit || 0,
+          assessmentStatus: dynamicStatus,
+          updatedAt: app.updatedAt || app.createdAt
+        };
+      });
       return {
         rows,
         segments: [
@@ -269,7 +301,19 @@ export default function DashboardPage() {
           { key: 'assessment_started', label: 'Assessment Started', colorClass: 'seg-docs', color: '#D97706' },
           { key: 'assessment_completed', label: 'Assessment Completed', colorClass: 'seg-qualified', color: '#16A34A' }
         ],
-        getKey: r => r.assessmentStatus,
+        getKey: r => {
+          const s = (r.assessmentStatus || '').toLowerCase().replace(/[\s_-]+/g, '_');
+          if (s === 'assessment_not_started' || s === 'marked_qualified' || s === 'marked_qualified_') {
+            return 'marked_qualified';
+          }
+          if (s === 'assessment_started') {
+            return 'assessment_started';
+          }
+          if (s === 'assessment_complete' || s === 'assessment_completed' || s === 'assessment_completed_') {
+            return 'assessment_completed';
+          }
+          return s;
+        },
         kpiTotalLabel: 'Total Qualified',
         kpiTotalCaption: 'Passed Initial Screening',
         overallTitle: 'Overall Assessment Status Distribution',
@@ -692,10 +736,9 @@ export default function DashboardPage() {
       `}</style>
       <div style={{
         background: '#ffffff',
-        border: '1.5px solid #0B3C5D',
-        borderLeft: '5px solid #F59E0B',
-        borderRadius: '16px',
-        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03)',
+        border: '2.5px solid color-mix(in srgb, var(--blue) 64%, var(--navy) 36%)',
+        borderRadius: '20px',
+        boxShadow: 'none',
         width: '100%',
         marginBottom: '20px',
         overflow: 'visible'
@@ -735,35 +778,20 @@ export default function DashboardPage() {
               label="Distribution"
             />
           </div>
+        </div>
         {/* Lower KPI Section Area */}
-        <div style={{
-          display: 'flex',
-          padding: 0,
+        <div className="kpis" style={{
+          padding: '20px',
           background: 'transparent',
-          flexWrap: 'wrap'
+          marginBottom: 0,
+          borderBottomLeftRadius: '18px',
+          borderBottomRightRadius: '18px'
         }}>
           {dashboardKPIs.map((k, i) => (
-            <div 
-              key={i} 
-              style={{
-                flex: 1,
-                padding: '16px 24px',
-                borderRight: i < dashboardKPIs.length - 1 ? '1px solid #E2E8F0' : 'none',
-                minWidth: '150px',
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'center'
-              }}
-            >
-              <div style={{ fontSize: '9px', fontWeight: '800', color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '4px' }}>
-                {k.label}
-              </div>
-              <div style={{ fontSize: '28px', fontWeight: '800', color: '#0B3C5D', lineHeight: '1.1', marginBottom: '4px' }}>
-                {k.value}
-              </div>
-              <div style={{ fontSize: '12px', fontWeight: '500', color: '#64748B' }}>
-                {k.desc}
-              </div>
+            <div className="card kpi" key={i} style={{ margin: 0 }}>
+              <div className="kpi-label">{k.label}</div>
+              <div className="kpi-number">{k.value}</div>
+              <div className="kpi-caption">{k.desc}</div>
             </div>
           ))}
         </div>
