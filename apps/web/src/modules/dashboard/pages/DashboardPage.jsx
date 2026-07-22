@@ -566,9 +566,9 @@ export default function DashboardPage() {
           background: #ffffff !important;
         }
         .control-select-wrap:focus-within {
-          border-color: #0284C7 !important;
+          border-color: #0B3C5D !important;
           background: #ffffff !important;
-          box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.12) !important;
+          box-shadow: 0 0 0 3px rgba(11, 60, 93, 0.15) !important;
         }
         .dashboard-select-el {
           border: none !important;
@@ -597,11 +597,11 @@ export default function DashboardPage() {
         background: '#ffffff',
         border: '1.5px solid #E2E8F0',
         borderRadius: '12px',
-        boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.05)'
+        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03)'
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap', width: '100%' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0284C7" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0B3C5D" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>
             </svg>
             <h2 style={{ margin: 0, fontSize: '14px', fontWeight: '700', color: '#0F172A', letterSpacing: '-0.02em', textTransform: 'uppercase' }}>Data Filters</h2>
@@ -621,7 +621,7 @@ export default function DashboardPage() {
               minWidth: '260px',
               position: 'relative'
             }} className="control-select-wrap">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
                 <rect x="2" y="7" width="20" height="14" rx="2" ry="2"/>
                 <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>
               </svg>
@@ -636,7 +636,7 @@ export default function DashboardPage() {
                   {positions.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
                 </select>
               </div>
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ position: 'absolute', right: '12px', pointerEvents: 'none' }}>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}>
                 <polyline points="6 9 12 15 18 9"/>
               </svg>
             </div>
@@ -652,7 +652,7 @@ export default function DashboardPage() {
               minWidth: '220px',
               position: 'relative'
             }} className="control-select-wrap">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
                 <path d="M21.21 15.89A10 10 0 1 1 8 2.83"/>
                 <path d="M22 12A10 10 0 0 0 12 2v10z"/>
               </svg>
@@ -669,7 +669,7 @@ export default function DashboardPage() {
                   <option value="posting_status">Posting Status</option>
                 </select>
               </div>
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ position: 'absolute', right: '12px', pointerEvents: 'none' }}>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}>
                 <polyline points="6 9 12 15 18 9"/>
               </svg>
             </div>
