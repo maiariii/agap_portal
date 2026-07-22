@@ -556,7 +556,7 @@ export default function DashboardPage() {
 
   return (
     <section className="view active">
-      <div className="filterbar data-control-card" style={{ marginBottom: '14px' }}>
+      <div className="filterbar data-control-card" style={{ marginBottom: '14px', padding: '10px 18px' }}>
         <div className="data-control-head">
           <div>
             <h2>Data Controls</h2>
@@ -566,17 +566,17 @@ export default function DashboardPage() {
             <button className="secondary" onClick={() => setPositionId('')}>Reset</button>
           </div>
         </div>
-        <div className="data-control-body">
-          <div className="dashboard-controls" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+        <div className="data-control-body" style={{ padding: '8px 0 0' }}>
+          <div className="dashboard-controls" style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', width: '100%', maxWidth: '300px' }}>
               <label style={{ fontSize: '11px', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748B' }}>Position</label>
               <select
                 value={positionId}
                 onChange={e => setPositionId(e.target.value)}
                 style={{
                   width: '100%',
-                  padding: '10px 14px',
-                  borderRadius: '10px',
+                  padding: '6px 12px',
+                  borderRadius: '8px',
                   border: '1.5px solid #E2E8F0',
                   backgroundColor: '#F8FAFC',
                   fontSize: '13px',
@@ -602,15 +602,15 @@ export default function DashboardPage() {
                 {positions.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
               </select>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', width: '100%', maxWidth: '300px' }}>
               <label style={{ fontSize: '11px', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748B' }}>Distribution by</label>
               <select
                 value={homeDistributionBy}
                 onChange={e => setHomeDistributionBy(e.target.value)}
                 style={{
                   width: '100%',
-                  padding: '10px 14px',
-                  borderRadius: '10px',
+                  padding: '6px 12px',
+                  borderRadius: '8px',
                   border: '1.5px solid #E2E8F0',
                   backgroundColor: '#F8FAFC',
                   fontSize: '13px',
