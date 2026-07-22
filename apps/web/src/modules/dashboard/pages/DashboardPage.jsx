@@ -562,9 +562,6 @@ export default function DashboardPage() {
             <h2>Data Controls</h2>
             <p className="small">Filter the selected data module and configure chart behavior.</p>
           </div>
-          <div className="data-control-actions">
-            <button className="secondary" onClick={() => setPositionId('')}>Reset</button>
-          </div>
         </div>
         <div className="data-control-body" style={{ padding: '8px 0 0' }}>
           <div className="dashboard-controls" style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
