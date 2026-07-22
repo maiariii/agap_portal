@@ -34,7 +34,7 @@ export default function DashboardPage() {
     return applications.filter(app => {
       if (homeFilters.positionId && app.vacancyObj.positionId !== homeFilters.positionId) return false;
       if (homeFilters.status && app.status !== homeFilters.status) return false;
-      const isFilled = applications.some(a => a.vacancyId === app.vacancyId && a.appointmentStatus === 'appointed');
+      const isFilled = app.appointmentStatus?.toLowerCase() === 'appointed' || app.appointmentStatus?.toUpperCase() === 'FOR APPOINTMENT' || app.vacancyObj?.fillingUpStatus?.toUpperCase() === 'FILLED';
       const itemStatusVal = isFilled ? 'filled' : 'unfilled';
       if (homeFilters.itemStatus && itemStatusVal !== homeFilters.itemStatus) return false;
       if (homeFilters.assessmentStatus) {
@@ -50,7 +50,7 @@ export default function DashboardPage() {
   const dashboardVacancies = useMemo(() => {
     return vacancies.filter(v => {
       if (homeFilters.positionId && v.positionId !== homeFilters.positionId) return false;
-      const isFilled = applications.some(a => a.vacancyId === v.jobClusterId && a.appointmentStatus === 'appointed');
+      const isFilled = v.fillingUpStatus?.toUpperCase() === 'FILLED';
       const itemStatusVal = isFilled ? 'filled' : 'unfilled';
       if (homeFilters.itemStatus && itemStatusVal !== homeFilters.itemStatus) return false;
       if (homeFilters.postingStatus && v.status !== homeFilters.postingStatus) return false;
@@ -62,7 +62,7 @@ export default function DashboardPage() {
   // Active Dashboard Config selection
   const activeDashboardData = useMemo(() => {
     const isFilledItem = (v) => {
-      return applications.some(a => a.vacancyId === v.jobClusterId && a.appointmentStatus === 'appointed');
+      return v.fillingUpStatus?.toUpperCase() === 'FILLED';
     };
 
     if (homeDistributionBy === 'item_status') {
