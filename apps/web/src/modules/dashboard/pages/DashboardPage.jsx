@@ -556,84 +556,122 @@ export default function DashboardPage() {
 
   return (
     <section className="view active">
-      <div className="filterbar data-control-card" style={{ marginBottom: '14px', padding: '10px 18px' }}>
-        <div className="data-control-head">
-          <div>
-            <h2>Data Controls</h2>
-            <p className="small">Filter the selected data module and configure chart behavior.</p>
+      <style>{`
+        .control-select-wrap {
+          transition: all 0.2s ease;
+          border: 1.5px solid #E2E8F0 !important;
+        }
+        .control-select-wrap:hover {
+          border-color: #CBD5E1 !important;
+          background: #ffffff !important;
+        }
+        .control-select-wrap:focus-within {
+          border-color: #0284C7 !important;
+          background: #ffffff !important;
+          box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.12) !important;
+        }
+        .dashboard-select-el {
+          border: none !important;
+          background: transparent !important;
+          padding: 2px 20px 0 0 !important;
+          margin: 0 !important;
+          font-size: 13px !important;
+          font-weight: 600 !important;
+          color: #334155 !important;
+          outline: none !important;
+          cursor: pointer !important;
+          width: 100% !important;
+          -webkit-appearance: none !important;
+          -moz-appearance: none !important;
+          appearance: none !important;
+        }
+      `}</style>
+      <div className="filterbar data-control-card" style={{ 
+        marginBottom: '14px', 
+        padding: '12px 20px', 
+        display: 'flex', 
+        alignItems: 'center', 
+        justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        gap: '16px',
+        background: '#ffffff',
+        border: '1.5px solid #E2E8F0',
+        borderRadius: '12px',
+        boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.05)'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap', width: '100%' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0284C7" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>
+            </svg>
+            <h2 style={{ margin: 0, fontSize: '14px', fontWeight: '700', color: '#0F172A', letterSpacing: '-0.02em', textTransform: 'uppercase' }}>Data Filters</h2>
           </div>
-        </div>
-        <div className="data-control-body" style={{ padding: '8px 0 0' }}>
-          <div className="dashboard-controls" style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', width: '100%', maxWidth: '300px' }}>
-              <label style={{ fontSize: '11px', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748B' }}>Position</label>
-              <select
-                value={positionId}
-                onChange={e => setPositionId(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '6px 12px',
-                  borderRadius: '8px',
-                  border: '1.5px solid #E2E8F0',
-                  backgroundColor: '#F8FAFC',
-                  fontSize: '13px',
-                  fontWeight: '600',
-                  color: '#334155',
-                  outline: 'none',
-                  cursor: 'pointer',
-                  transition: 'all 0.2s ease',
-                  boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)'
-                }}
-                onFocus={(e) => {
-                  e.target.style.borderColor = '#0284C7';
-                  e.target.style.backgroundColor = '#ffffff';
-                  e.target.style.boxShadow = '0 0 0 3px rgba(2, 132, 199, 0.15)';
-                }}
-                onBlur={(e) => {
-                  e.target.style.borderColor = '#E2E8F0';
-                  e.target.style.backgroundColor = '#F8FAFC';
-                  e.target.style.boxShadow = '0 1px 2px 0 rgba(0, 0, 0, 0.05)';
-                }}
-              >
-                <option value="">All positions</option>
-                {positions.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
-              </select>
+          
+          <div className="hidden-mobile" style={{ width: '1px', height: '20px', background: '#E2E8F0' }}></div>
+          
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', flex: 1 }}>
+            {/* Position Select */}
+            <div style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              background: '#F8FAFC', 
+              borderRadius: '8px', 
+              padding: '6px 12px',
+              gap: '10px',
+              minWidth: '260px',
+              position: 'relative'
+            }} className="control-select-wrap">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="7" width="20" height="14" rx="2" ry="2"/>
+                <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>
+              </svg>
+              <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+                <span style={{ fontSize: '9px', fontWeight: '800', color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.05em', lineHeight: '1' }}>Position</span>
+                <select
+                  value={positionId}
+                  onChange={e => setPositionId(e.target.value)}
+                  className="dashboard-select-el"
+                >
+                  <option value="">All positions</option>
+                  {positions.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
+                </select>
+              </div>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ position: 'absolute', right: '12px', pointerEvents: 'none' }}>
+                <polyline points="6 9 12 15 18 9"/>
+              </svg>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', width: '100%', maxWidth: '300px' }}>
-              <label style={{ fontSize: '11px', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748B' }}>Distribution by</label>
-              <select
-                value={homeDistributionBy}
-                onChange={e => setHomeDistributionBy(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '6px 12px',
-                  borderRadius: '8px',
-                  border: '1.5px solid #E2E8F0',
-                  backgroundColor: '#F8FAFC',
-                  fontSize: '13px',
-                  fontWeight: '600',
-                  color: '#334155',
-                  outline: 'none',
-                  cursor: 'pointer',
-                  transition: 'all 0.2s ease',
-                  boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)'
-                }}
-                onFocus={(e) => {
-                  e.target.style.borderColor = '#0284C7';
-                  e.target.style.backgroundColor = '#ffffff';
-                  e.target.style.boxShadow = '0 0 0 3px rgba(2, 132, 199, 0.15)';
-                }}
-                onBlur={(e) => {
-                  e.target.style.borderColor = '#E2E8F0';
-                  e.target.style.backgroundColor = '#F8FAFC';
-                  e.target.style.boxShadow = '0 1px 2px 0 rgba(0, 0, 0, 0.05)';
-                }}
-              >
-                <option value="item_status">Item Status</option>
-                <option value="status">Application Status</option>
-                <option value="assessment_status">Assessment Status</option>
-                <option value="posting_status">Posting Status</option>
-              </select>
+
+            {/* Distribution By Select */}
+            <div style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              background: '#F8FAFC', 
+              borderRadius: '8px', 
+              padding: '6px 12px',
+              gap: '10px',
+              minWidth: '220px',
+              position: 'relative'
+            }} className="control-select-wrap">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21.21 15.89A10 10 0 1 1 8 2.83"/>
+                <path d="M22 12A10 10 0 0 0 12 2v10z"/>
+              </svg>
+              <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+                <span style={{ fontSize: '9px', fontWeight: '800', color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.05em', lineHeight: '1' }}>Distribution</span>
+                <select
+                  value={homeDistributionBy}
+                  onChange={e => setHomeDistributionBy(e.target.value)}
+                  className="dashboard-select-el"
+                >
+                  <option value="item_status">Item Status</option>
+                  <option value="status">Application Status</option>
+                  <option value="assessment_status">Assessment Status</option>
+                  <option value="posting_status">Posting Status</option>
+                </select>
+              </div>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ position: 'absolute', right: '12px', pointerEvents: 'none' }}>
+                <polyline points="6 9 12 15 18 9"/>
+              </svg>
             </div>
           </div>
         </div>
