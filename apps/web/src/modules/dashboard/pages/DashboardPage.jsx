@@ -15,16 +15,8 @@ const matchStatus = (appStatus, filterStatus) => {
 export default function DashboardPage() {
   const { positions, vacancies, applications } = useAppData();
 
-  const [homeFilters, setHomeFilters] = useState({
-    positionId: '',
-    status: '',
-    itemStatus: '',
-    assessmentStatus: '',
-    postingStatus: ''
-  });
-  const [homeAdvanced, setHomeAdvanced] = useState(false);
+  const [positionId, setPositionId] = useState('');
   const [homeDistributionBy, setHomeDistributionBy] = useState('item_status');
-  const [homeMeasure, setHomeMeasure] = useState('count');
   const [homeSortBy, setHomeSortBy] = useState('total');
   const [homeDetailColFilters, setHomeDetailColFilters] = useState({});
   const [homeDetailPage, setHomeDetailPage] = useState(1);
@@ -62,37 +54,18 @@ export default function DashboardPage() {
   // Filter application rows for the dashboard/charts
   const dashboardRows = useMemo(() => {
     return applications.filter(app => {
-      if (homeFilters.positionId && app.vacancyObj.positionId !== homeFilters.positionId) return false;
-      if (homeFilters.status && !matchStatus(app.status, homeFilters.status)) return false;
-      const isFilled = app.appointmentStatus?.toLowerCase() === 'appointed' || app.appointmentStatus?.toUpperCase() === 'FOR APPOINTMENT' || app.vacancyObj?.fillingUpStatus?.toUpperCase() === 'FILLED';
-      const itemStatusVal = isFilled ? 'filled' : 'unfilled';
-      if (homeFilters.itemStatus && itemStatusVal !== homeFilters.itemStatus) return false;
-      if (homeFilters.assessmentStatus) {
-        const statusVal = app.assessmentStatus || 'marked_qualified';
-        if (statusVal.toLowerCase() !== homeFilters.assessmentStatus.toLowerCase()) return false;
-      }
-      if (homeFilters.postingStatus && app.vacancyObj?.status?.toLowerCase() !== homeFilters.postingStatus.toLowerCase()) return false;
+      if (positionId && app.vacancyObj.positionId !== positionId) return false;
       return true;
     });
-  }, [applications, homeFilters]);
+  }, [applications, positionId]);
 
   // Filtered vacancies for the dashboard
   const dashboardVacancies = useMemo(() => {
     return vacancies.filter(v => {
-      if (homeFilters.positionId && v.positionId !== homeFilters.positionId) return false;
-      const isFilled = v.fillingUpStatus?.toUpperCase() === 'FILLED';
-      const itemStatusVal = isFilled ? 'filled' : 'unfilled';
-      if (homeFilters.itemStatus && itemStatusVal !== homeFilters.itemStatus) return false;
-      if (homeFilters.postingStatus && v.status?.toLowerCase() !== homeFilters.postingStatus.toLowerCase()) return false;
-      if (homeFilters.status && !applications.some(a => a.vacancyId === v.jobClusterId && matchStatus(a.status, homeFilters.status))) return false;
-      if (homeFilters.assessmentStatus && !applications.some(a => {
-        if (a.vacancyId !== v.jobClusterId) return false;
-        const statusVal = a.assessmentStatus || 'marked_qualified';
-        return statusVal.toLowerCase() === homeFilters.assessmentStatus.toLowerCase();
-      })) return false;
+      if (positionId && v.positionId !== positionId) return false;
       return true;
     });
-  }, [vacancies, applications, homeFilters]);
+  }, [vacancies, positionId]);
 
   // Active Dashboard Config selection
   const activeDashboardData = useMemo(() => {
@@ -576,14 +549,46 @@ export default function DashboardPage() {
         total: posRows.length,
         counts
       };
-    }).filter(p => p.total > 0 || homeFilters.positionId);
+    }).filter(p => p.total > 0 || positionId);
 
     return homeSortBy === 'total' ? list.sort((a, b) => b.total - a.total) : list.sort((a, b) => a.title.localeCompare(b.title));
-  }, [positions, activeDashboardData, homeFilters.positionId, homeSortBy]);
+  }, [positions, activeDashboardData, positionId, homeSortBy]);
 
   return (
     <section className="view active">
-      <div className="kpis">
+      <div className="filterbar data-control-card" style={{ marginBottom: '14px' }}>
+        <div className="data-control-head">
+          <div>
+            <h2>Data Controls</h2>
+            <p className="small">Filter the selected data module and configure chart behavior.</p>
+          </div>
+          <div className="data-control-actions">
+            <button className="secondary" onClick={() => setPositionId('')}>Reset</button>
+          </div>
+        </div>
+        <div className="data-control-body">
+          <div className="dashboard-controls" style={{ display: 'flex', gap: '16px' }}>
+            <div>
+              <label>Position</label>
+              <select value={positionId} onChange={e => setPositionId(e.target.value)}>
+                <option value="">All positions</option>
+                {positions.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
+              </select>
+            </div>
+            <div>
+              <label>Distribution by</label>
+              <select value={homeDistributionBy} onChange={e => setHomeDistributionBy(e.target.value)}>
+                <option value="item_status">Item Status</option>
+                <option value="status">Application Status</option>
+                <option value="assessment_status">Assessment Status</option>
+                <option value="posting_status">Posting Status</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="kpis" style={{ marginBottom: '14px' }}>
         {dashboardKPIs.map((k, i) => (
           <div className="card kpi" key={i}>
             <div className="kpi-label">{k.label}</div>
@@ -591,96 +596,6 @@ export default function DashboardPage() {
             <div className="kpi-caption">{k.desc}</div>
           </div>
         ))}
-      </div>
-
-      <div className="filterbar data-control-card">
-        <div className="data-control-head">
-          <div>
-            <h2>Data Controls</h2>
-            <p className="small">Filter the selected data module and configure advanced chart behavior.</p>
-          </div>
-          <div className="data-control-actions">
-            <button className="secondary" onClick={() => setHomeFilters({ positionId: '', status: '', itemStatus: '', assessmentStatus: '', postingStatus: '' })}>Reset</button>
-            <button onClick={() => setHomeAdvanced(!homeAdvanced)}>{homeAdvanced ? 'Toggle Basic Mode' : 'Toggle Advanced Mode'}</button>
-          </div>
-        </div>
-        <div className="data-control-body">
-          <div className="dashboard-controls">
-            <div>
-              <label>Position</label>
-              <select value={homeFilters.positionId} onChange={e => setHomeFilters({ ...homeFilters, positionId: e.target.value })}>
-                <option value="">All positions</option>
-                {positions.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
-              </select>
-            </div>
-            <div>
-              <label>Application Status</label>
-              <select value={homeFilters.status} onChange={e => setHomeFilters({ ...homeFilters, status: e.target.value })}>
-                <option value="">All application statuses</option>
-                <option value="pending_qs_review">Pending QS Review</option>
-                <option value="qualified">Qualified</option>
-                <option value="disqualified">Disqualified</option>
-                <option value="excluded">Excluded</option>
-              </select>
-            </div>
-            <div>
-              <label>Item Status</label>
-              <select value={homeFilters.itemStatus} onChange={e => setHomeFilters({ ...homeFilters, itemStatus: e.target.value })}>
-                <option value="">All item statuses</option>
-                <option value="filled">Filled</option>
-                <option value="unfilled">Unfilled</option>
-              </select>
-            </div>
-            <div>
-              <label>Assessment Status</label>
-              <select value={homeFilters.assessmentStatus} onChange={e => setHomeFilters({ ...homeFilters, assessmentStatus: e.target.value })}>
-                <option value="">All assessment statuses</option>
-                <option value="marked_qualified">Assessment Not Started</option>
-                <option value="assessment_started">Assessment Started</option>
-                <option value="assessment_completed">Assessment Completed</option>
-              </select>
-            </div>
-            <div>
-              <label>Posting Status</label>
-              <select value={homeFilters.postingStatus} onChange={e => setHomeFilters({ ...homeFilters, postingStatus: e.target.value })}>
-                <option value="">All posting statuses</option>
-                <option value="open">Open for Application</option>
-                <option value="closed">Closed</option>
-              </select>
-            </div>
-          </div>
-
-          {homeAdvanced && (
-            <div className="advanced-controls">
-              <div className="advanced-title">Advanced Controls</div>
-              <div className="advanced-grid">
-                <div>
-                  <label>Distribution by</label>
-                  <select value={homeDistributionBy} onChange={e => setHomeDistributionBy(e.target.value)}>
-                    <option value="item_status">Item Status</option>
-                    <option value="status">Application Status</option>
-                    <option value="assessment_status">Assessment Status</option>
-                    <option value="posting_status">Posting Status</option>
-                  </select>
-                </div>
-                <div>
-                  <label>Measure</label>
-                  <select value={homeMeasure} onChange={e => setHomeMeasure(e.target.value)}>
-                    <option value="count">Count</option>
-                    <option value="percent">Share (%)</option>
-                  </select>
-                </div>
-                <div>
-                  <label>Sort positions by</label>
-                  <select value={homeSortBy} onChange={e => setHomeSortBy(e.target.value)}>
-                    <option value="total">Total applications</option>
-                    <option value="title">Position name</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
       </div>
 
       <div className="card">
