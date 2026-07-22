@@ -29,9 +29,10 @@ const CustomSelect = ({ value, onChange, options, label, icon }) => {
   const selectedOpt = options.find(o => o.value === value) || options[0];
 
   return (
-    <div ref={ref} style={{ position: 'relative', minWidth: label === 'Position' ? '260px' : '220px' }} className="control-select-wrap">
+    <div ref={ref} style={{ position: 'relative', minWidth: label === 'Position' ? '260px' : '220px' }}>
       <div 
         onClick={() => setIsOpen(!isOpen)}
+        className="control-select-wrap"
         style={{ 
           display: 'flex', 
           alignItems: 'center', 
@@ -43,7 +44,6 @@ const CustomSelect = ({ value, onChange, options, label, icon }) => {
           userSelect: 'none'
         }}
       >
-        {icon}
         <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
           <span style={{ fontSize: '9px', fontWeight: '800', color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.05em', lineHeight: '1' }}>{label}</span>
           <span style={{ fontSize: '13px', fontWeight: '600', color: '#334155', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -690,14 +690,13 @@ export default function DashboardPage() {
       `}</style>
       <div className="filterbar" style={{ 
         marginBottom: '14px', 
-        padding: '8px 16px', 
+        padding: '8px 0', 
         display: 'inline-flex', 
         alignItems: 'center', 
         gap: '16px',
-        background: '#ffffff',
-        border: '1.5px solid #E2E8F0',
-        borderRadius: '12px',
-        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03)',
+        background: 'transparent',
+        border: 'none',
+        boxShadow: 'none',
         width: 'fit-content',
         overflow: 'visible'
       }}>
@@ -718,12 +717,6 @@ export default function DashboardPage() {
               onChange={setPositionId}
               options={positionOptions}
               label="Position"
-              icon={
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-                  <rect x="2" y="7" width="20" height="14" rx="2" ry="2"/>
-                  <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>
-                </svg>
-              }
             />
 
             {/* Distribution By Select */}
@@ -732,12 +725,6 @@ export default function DashboardPage() {
               onChange={setHomeDistributionBy}
               options={distributionOptions}
               label="Distribution"
-              icon={
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-                  <path d="M21.21 15.89A10 10 0 1 1 8 2.83"/>
-                  <path d="M22 12A10 10 0 0 0 12 2v10z"/>
-                </svg>
-              }
             />
           </div>
         </div>
