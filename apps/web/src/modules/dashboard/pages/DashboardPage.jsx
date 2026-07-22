@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useAppData } from '../../../middleware/DataProvider.jsx';
 
 const matchStatus = (appStatus, filterStatus) => {
@@ -29,6 +29,25 @@ export default function DashboardPage() {
   const [homeDetailColFilters, setHomeDetailColFilters] = useState({});
   const [homeDetailPage, setHomeDetailPage] = useState(1);
   const [homeDetailPageSize, setHomeDetailPageSize] = useState(10);
+
+  const [trendRange, setTrendRange] = useState('7');
+  const [selectedTrendDate, setSelectedTrendDate] = useState(null);
+  const [hoverTooltip, setHoverTooltip] = useState({ visible: false, x: 0, y: 0, content: '' });
+
+  // Modal states
+  const [modalSearch, setModalSearch] = useState('');
+  const [modalColFilters, setModalColFilters] = useState({});
+  const [modalSort, setModalSort] = useState({ key: '', dir: 'asc' });
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setSelectedTrendDate(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   const cls = (str) => {
     if (!str) return '';
@@ -92,7 +111,8 @@ export default function DashboardPage() {
           region: v.region || '',
           division: v.division || '',
           school: v.school || '',
-          itemStatus: isFilledItem(v) ? 'filled' : 'unfilled'
+          itemStatus: isFilledItem(v) ? 'filled' : 'unfilled',
+          updatedAt: v.updatedAt || v.createdAt
         };
       });
       return {
@@ -127,7 +147,8 @@ export default function DashboardPage() {
         code: app.code,
         vacancy: app.vacancy,
         dateApplied: app.dateApplied,
-        status: app.status
+        status: app.status,
+        updatedAt: app.updatedAt || app.createdAt
       }));
       return {
         rows,
@@ -161,7 +182,8 @@ export default function DashboardPage() {
         code: app.code,
         vacancy: app.vacancy,
         fit: app.appObj?.overallFit || app.overallFit || 0,
-        assessmentStatus: app.appObj?.assessmentStatus || 'marked_qualified'
+        assessmentStatus: app.appObj?.assessmentStatus || 'marked_qualified',
+        updatedAt: app.updatedAt || app.createdAt
       }));
       return {
         rows,
@@ -204,7 +226,8 @@ export default function DashboardPage() {
           region: v.region || '',
           division: v.division || '',
           school: v.school || '',
-          postingStatus: v.status
+          postingStatus: v.status,
+          updatedAt: v.updatedAt || v.createdAt
         };
       });
       return {
@@ -263,6 +286,179 @@ export default function DashboardPage() {
     });
     return rows;
   }, [activeDashboardData.rows, homeDetailColFilters]);
+
+  const getBezierPath = (points, height) => {
+    if (points.length === 0) return '';
+    if (points.length === 1) return `M ${points[0].x} ${points[0].y}`;
+    
+    let d = `M ${points[0].x} ${points[0].y}`;
+    for (let i = 0; i < points.length - 1; i++) {
+      const p0 = points[i];
+      const p1 = points[i + 1];
+      
+      const cp1x = p0.x + (p1.x - p0.x) / 3;
+      let cp1y = p0.y;
+      
+      const cp2x = p0.x + 2 * (p1.x - p0.x) / 3;
+      let cp2y = p1.y;
+      
+      // Clamp control points to bounds
+      cp1y = Math.max(0, Math.min(height, cp1y));
+      cp2y = Math.max(0, Math.min(height, cp2y));
+      
+      d += ` C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${p1.x} ${p1.y}`;
+    }
+    return d;
+  };
+
+  const latestDate = useMemo(() => {
+    if (filteredHomeDetailRows.length === 0) return new Date();
+    let maxTime = 0;
+    filteredHomeDetailRows.forEach(r => {
+      if (r.updatedAt) {
+        const t = new Date(r.updatedAt).getTime();
+        if (t > maxTime) maxTime = t;
+      }
+    });
+    return maxTime > 0 ? new Date(maxTime) : new Date();
+  }, [filteredHomeDetailRows]);
+
+  const earliestDate = useMemo(() => {
+    if (filteredHomeDetailRows.length === 0) {
+      const d = new Date(latestDate);
+      d.setDate(d.getDate() - 7);
+      return d;
+    }
+    let minTime = latestDate.getTime();
+    filteredHomeDetailRows.forEach(r => {
+      if (r.updatedAt) {
+        const t = new Date(r.updatedAt).getTime();
+        if (t < minTime) minTime = t;
+      }
+    });
+    return new Date(minTime);
+  }, [filteredHomeDetailRows, latestDate]);
+
+  const startDate = useMemo(() => {
+    const d = new Date(latestDate);
+    d.setHours(0, 0, 0, 0);
+    if (trendRange === '7') {
+      d.setDate(d.getDate() - 6);
+    } else if (trendRange === '15') {
+      d.setDate(d.getDate() - 14);
+    } else if (trendRange === '30') {
+      d.setDate(d.getDate() - 29);
+    } else {
+      const earliest = new Date(earliestDate);
+      earliest.setHours(0, 0, 0, 0);
+      return earliest;
+    }
+    return d;
+  }, [latestDate, earliestDate, trendRange]);
+
+  const trendData = useMemo(() => {
+    const dayList = [];
+    const curr = new Date(startDate);
+    const end = new Date(latestDate);
+    curr.setHours(0, 0, 0, 0);
+    end.setHours(0, 0, 0, 0);
+    
+    while (curr <= end) {
+      dayList.push({
+        dateStr: curr.toISOString().slice(0, 10),
+        label: curr.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+        count: 0
+      });
+      curr.setDate(curr.getDate() + 1);
+    }
+    
+    filteredHomeDetailRows.forEach(r => {
+      if (!r.updatedAt) return;
+      const rDateStr = new Date(r.updatedAt).toISOString().slice(0, 10);
+      const dayObj = dayList.find(d => d.dateStr === rDateStr);
+      if (dayObj) {
+        dayObj.count += 1;
+      }
+    });
+    
+    return dayList;
+  }, [startDate, latestDate, filteredHomeDetailRows]);
+
+  const chartWidth = 800 - 40 - 30; // 730
+  const chartHeight = 200 - 20 - 30; // 150
+  const padding = { top: 20, right: 30, bottom: 30, left: 40 };
+
+  const points = useMemo(() => {
+    if (trendData.length === 0) return [];
+    const maxVal = Math.max(...trendData.map(d => d.count), 1);
+    
+    return trendData.map((d, index) => {
+      const x = padding.left + (trendData.length > 1 
+        ? (index / (trendData.length - 1)) * chartWidth 
+        : chartWidth / 2);
+      const y = padding.top + chartHeight - (d.count / maxVal) * chartHeight;
+      return {
+        x,
+        y,
+        dateStr: d.dateStr,
+        label: d.label,
+        count: d.count
+      };
+    });
+  }, [trendData, chartWidth, chartHeight]);
+
+  const maxCount = useMemo(() => {
+    return Math.max(...trendData.map(d => d.count), 0);
+  }, [trendData]);
+
+  const yGridlines = useMemo(() => {
+    return [0, Math.ceil(maxCount / 2), maxCount];
+  }, [maxCount]);
+
+  const modalRows = useMemo(() => {
+    if (!selectedTrendDate) return [];
+    return filteredHomeDetailRows.filter(r => {
+      if (!r.updatedAt) return false;
+      const dateStr = new Date(r.updatedAt).toISOString().slice(0, 10);
+      return dateStr === selectedTrendDate;
+    });
+  }, [filteredHomeDetailRows, selectedTrendDate]);
+
+  const filteredModalRows = useMemo(() => {
+    let rows = [...modalRows];
+    
+    if (modalSearch) {
+      const q = modalSearch.toLowerCase();
+      rows = rows.filter(r => {
+        return Object.values(r).some(val => 
+          String(val || '').toLowerCase().includes(q)
+        );
+      });
+    }
+    
+    Object.entries(modalColFilters).forEach(([key, val]) => {
+      if (!val) return;
+      rows = rows.filter(r => {
+        const colVal = String(r[key] || '').toLowerCase();
+        return colVal.includes(val.toLowerCase());
+      });
+    });
+    
+    if (modalSort.key) {
+      rows.sort((a, b) => {
+        let valA = a[modalSort.key];
+        let valB = b[modalSort.key];
+        if (typeof valA === 'string') valA = valA.toLowerCase();
+        if (typeof valB === 'string') valB = valB.toLowerCase();
+        
+        if (valA < valB) return modalSort.dir === 'asc' ? -1 : 1;
+        if (valA > valB) return modalSort.dir === 'asc' ? 1 : -1;
+        return 0;
+      });
+    }
+    
+    return rows;
+  }, [modalRows, modalSearch, modalColFilters, modalSort]);
 
   // Paginate drilldown detail rows
   const maxHomeDetailPage = useMemo(() => {
@@ -588,6 +784,181 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      <div className="card full-width-card" style={{ gridColumn: '1 / -1', marginBottom: '14px', position: 'relative' }}>
+        <style>{`
+          .trend-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+          }
+          .trend-header h2 {
+            margin: 0;
+            font-size: 16px;
+            font-weight: 700;
+            color: #0F172A;
+          }
+          .trend-range-selector {
+            display: flex;
+            gap: 6px;
+          }
+          .trend-range-btn {
+            background: #ffffff;
+            border: 1px solid #CBD5E1;
+            border-radius: 6px;
+            padding: 4px 10px;
+            font-size: 12px;
+            font-weight: 600;
+            color: #475569;
+            cursor: pointer;
+            transition: all 0.2s ease;
+          }
+          .trend-range-btn.active {
+            background: #0284C7;
+            border-color: #0284C7;
+            color: #ffffff;
+          }
+          .trend-tooltip {
+            position: absolute;
+            background: rgba(15, 23, 42, 0.95);
+            color: #ffffff;
+            padding: 6px 10px;
+            border-radius: 6px;
+            font-size: 11px;
+            pointer-events: none;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            z-index: 10;
+            transition: opacity 0.15s ease;
+          }
+          .trend-point {
+            cursor: pointer;
+            transition: r 0.15s ease, fill 0.15s ease;
+          }
+          .trend-point:hover {
+            r: 6;
+            fill: #0284C7;
+          }
+        `}</style>
+        <div className="trend-header">
+          <div>
+            <h2>Activity Trendline</h2>
+            <p className="small">Daily change count over time for {activeDashboardData.tableLabel}</p>
+          </div>
+          <div className="trend-range-selector">
+            {[
+              { label: '1 Week', value: '7' },
+              { label: '15 Days', value: '15' },
+              { label: '30 Days', value: '30' },
+              { label: 'All', value: 'all' }
+            ].map(btn => (
+              <button
+                key={btn.value}
+                className={`trend-range-btn ${trendRange === btn.value ? 'active' : ''}`}
+                onClick={() => setTrendRange(btn.value)}
+              >
+                {btn.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        
+        {filteredHomeDetailRows.length === 0 ? (
+          <div style={{ height: '200px', display: 'flex', justifyContent: 'center', alignItems: 'center', color: '#64748B' }}>
+            No records match the active filters.
+          </div>
+        ) : (
+          <div style={{ position: 'relative' }}>
+            <svg viewBox="0 0 800 200" style={{ width: '100%', height: 'auto', overflow: 'visible' }}>
+              {/* Gridlines */}
+              {yGridlines.map((val, idx) => {
+                const yVal = padding.top + chartHeight - (maxCount > 0 ? (val / maxCount) * chartHeight : 0);
+                return (
+                  <g key={idx}>
+                    <line x1={padding.left} y1={yVal} x2={800 - padding.right} y2={yVal} stroke="#F1F5F9" strokeWidth="1" />
+                    <text x={padding.left - 10} y={yVal + 3} textAnchor="end" fontSize="10" fill="#94A3B8">{val}</text>
+                  </g>
+                );
+              })}
+              
+              {/* Area Path */}
+              {points.length > 0 && (
+                <path
+                  d={`${getBezierPath(points, padding.top + chartHeight)} L ${points[points.length - 1].x} ${padding.top + chartHeight} L ${points[0].x} ${padding.top + chartHeight} Z`}
+                  fill="url(#trendGrad)"
+                  opacity="0.15"
+                />
+              )}
+              
+              {/* Line Path */}
+              {points.length > 0 && (
+                <path
+                  d={getBezierPath(points, padding.top + chartHeight)}
+                  fill="none"
+                  stroke="#0284C7"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                />
+              )}
+              
+              {/* Dots */}
+              {points.map((pt, idx) => (
+                <circle
+                  key={idx}
+                  className="trend-point"
+                  cx={pt.x}
+                  cy={pt.y}
+                  r="4"
+                  fill="#38BDF8"
+                  stroke="#ffffff"
+                  strokeWidth="1.5"
+                  onClick={() => {
+                    setModalSearch('');
+                    setModalColFilters({});
+                    setSelectedTrendDate(pt.dateStr);
+                  }}
+                  onMouseEnter={(e) => {
+                    const rect = e.target.getBoundingClientRect();
+                    const containerRect = e.currentTarget.ownerSVGElement.parentNode.getBoundingClientRect();
+                    setHoverTooltip({
+                      visible: true,
+                      x: rect.left - containerRect.left + rect.width / 2,
+                      y: rect.top - containerRect.top - 35,
+                      content: `${pt.label}: ${pt.count} active`
+                    });
+                  }}
+                  onMouseLeave={() => setHoverTooltip({ visible: false, x: 0, y: 0, content: '' })}
+                />
+              ))}
+              
+              {/* X Labels */}
+              {points.length > 0 && (
+                <>
+                  <text x={points[0].x} y={200 - 10} textAnchor="middle" fontSize="10" fill="#94A3B8">{points[0].label}</text>
+                  {points.length > 2 && (
+                    <text x={points[Math.floor(points.length / 2)].x} y={200 - 10} textAnchor="middle" fontSize="10" fill="#94A3B8">{points[Math.floor(points.length / 2)].label}</text>
+                  )}
+                  {points.length > 1 && (
+                    <text x={points[points.length - 1].x} y={200 - 10} textAnchor="middle" fontSize="10" fill="#94A3B8">{points[points.length - 1].label}</text>
+                  )}
+                </>
+              )}
+              
+              <defs>
+                <linearGradient id="trendGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#0284C7" />
+                  <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
+                </linearGradient>
+              </defs>
+            </svg>
+            {hoverTooltip.visible && (
+              <div className="trend-tooltip" style={{ left: `${hoverTooltip.x}px`, top: `${hoverTooltip.y}px`, transform: 'translateX(-50%)' }}>
+                {hoverTooltip.content}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       <div className="card">
         <div className="table-card-head" style={{ marginBottom: '10px' }}>
           <div>
@@ -684,6 +1055,237 @@ export default function DashboardPage() {
           </div>
         </div>
       </div>
+
+      {selectedTrendDate && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(15, 23, 42, 0.4)',
+            backdropFilter: 'blur(8px)',
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            zIndex: 1000
+          }}
+          onClick={() => setSelectedTrendDate(null)}
+        >
+          <style>{`
+            .trend-modal {
+              background: #ffffff;
+              border-radius: 12px;
+              box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+              width: 90%;
+              max-width: 800px;
+              max-height: 80vh;
+              display: flex;
+              flex-direction: column;
+              overflow: hidden;
+              animation: modalFadeIn 0.2s ease-out;
+            }
+            @keyframes modalFadeIn {
+              from { opacity: 0; transform: scale(0.95); }
+              to { opacity: 1; transform: scale(1); }
+            }
+            .trend-modal-head {
+              padding: 16px 20px;
+              border-bottom: 1px solid #E2E8F0;
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+            }
+            .trend-modal-head h3 {
+              margin: 0;
+              font-size: 16px;
+              font-weight: 700;
+              color: #0F172A;
+            }
+            .trend-modal-close {
+              background: none;
+              border: none;
+              font-size: 20px;
+              cursor: pointer;
+              color: #94A3B8;
+            }
+            .trend-modal-close:hover {
+              color: #475569;
+            }
+            .trend-modal-body {
+              padding: 16px 20px;
+              overflow-y: auto;
+              flex: 1;
+            }
+            .trend-modal-search {
+              width: 100%;
+              padding: 8px 12px;
+              border: 1px solid #CBD5E1;
+              border-radius: 6px;
+              font-size: 13px;
+              margin-bottom: 14px;
+            }
+            .trend-modal-search:focus {
+              outline: none;
+              border-color: #0284C7;
+              box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.15);
+            }
+            .trend-modal-table-wrap {
+              border: 1px solid #E2E8F0;
+              border-radius: 8px;
+              overflow: hidden;
+            }
+            .trend-modal-table {
+              width: 100%;
+              border-collapse: collapse;
+              font-size: 12px;
+              text-align: left;
+            }
+            .trend-modal-table th {
+              background: #F8FAFC;
+              padding: 10px 12px;
+              font-weight: 600;
+              color: #475569;
+              border-bottom: 1px solid #E2E8F0;
+            }
+            .trend-modal-table td {
+              padding: 10px 12px;
+              border-bottom: 1px solid #E2E8F0;
+              color: #334155;
+            }
+            .trend-modal-table tbody tr:last-child td {
+              border-bottom: none;
+            }
+            .trend-modal-table tfoot td {
+              background: #F8FAFC;
+              font-weight: 700;
+              border-top: 2px solid #E2E8F0;
+            }
+            .th-sortable {
+              cursor: pointer;
+              user-select: none;
+            }
+            .th-sortable:hover {
+              background: #F1F5F9;
+            }
+            .col-filter-input {
+              width: 100%;
+              margin-top: 4px;
+              padding: 2px 4px;
+              font-size: 10px;
+              border: 1px solid #CBD5E1;
+              border-radius: 4px;
+            }
+          `}</style>
+          <div className="trend-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="trend-modal-head">
+              <div>
+                <h3>Activity Details — {new Date(selectedTrendDate).toLocaleDateString(undefined, { dateStyle: 'long' })}</h3>
+                <p className="small" style={{ margin: 0 }}>
+                  Showing {filteredModalRows.length} of {modalRows.length} records.
+                </p>
+              </div>
+              <button className="trend-modal-close" onClick={() => setSelectedTrendDate(null)}>×</button>
+            </div>
+            
+            <div className="trend-modal-body">
+              <input
+                className="trend-modal-search"
+                placeholder="Search records for this day..."
+                value={modalSearch}
+                onChange={(e) => setModalSearch(e.target.value)}
+              />
+              
+              <div className="trend-modal-table-wrap">
+                <table className="trend-modal-table">
+                  <thead>
+                    <tr>
+                      {activeDashboardData.detailColumns.map((col, idx) => (
+                        <th
+                          key={idx}
+                          className="th-sortable"
+                          onClick={() => setModalSort({
+                            key: col.key,
+                            dir: modalSort.key === col.key && modalSort.dir === 'asc' ? 'desc' : 'asc'
+                          })}
+                        >
+                          <div>
+                            {col.label} {modalSort.key === col.key ? (modalSort.dir === 'asc' ? '▲' : '▼') : ''}
+                          </div>
+                          <input
+                            className="col-filter-input"
+                            placeholder="Filter..."
+                            value={modalColFilters[col.key] || ''}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) => setModalColFilters({
+                              ...modalColFilters,
+                              [col.key]: e.target.value
+                            })}
+                          />
+                        </th>
+                      ))}
+                      <th
+                        className="th-sortable"
+                        onClick={() => setModalSort({
+                          key: 'updatedAt',
+                          dir: modalSort.key === 'updatedAt' && modalSort.dir === 'asc' ? 'desc' : 'asc'
+                        })}
+                      >
+                        <div>
+                          Time {modalSort.key === 'updatedAt' ? (modalSort.dir === 'asc' ? '▲' : '▼') : ''}
+                        </div>
+                        <input
+                          className="col-filter-input"
+                          placeholder="Filter..."
+                          value={modalColFilters['updatedAt'] || ''}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={(e) => setModalColFilters({
+                            ...modalColFilters,
+                            ['updatedAt']: e.target.value
+                          })}
+                        />
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredModalRows.length > 0 ? (
+                      filteredModalRows.map((row, idx) => (
+                        <tr key={idx}>
+                          {activeDashboardData.detailColumns.map((col, cIdx) => (
+                            <td key={cIdx}>
+                              {col.render ? col.render(row) : (row[col.key] || '—')}
+                            </td>
+                          ))}
+                          <td>
+                            {row.updatedAt ? new Date(row.updatedAt).toLocaleTimeString() : '—'}
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={activeDashboardData.detailColumns.length + 1} style={{ textAlign: 'center' }}>
+                          No records match the active search/filters.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                  <tfoot>
+                    <tr>
+                      <td colSpan={activeDashboardData.detailColumns.length} style={{ fontWeight: 'bold' }}>
+                        Total Records
+                      </td>
+                      <td style={{ fontWeight: 'bold' }}>
+                        {filteredModalRows.length}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
