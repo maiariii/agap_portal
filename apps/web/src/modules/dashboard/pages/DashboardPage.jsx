@@ -235,7 +235,22 @@ export default function DashboardPage() {
           { key: 'disqualified', label: 'Disqualified', colorClass: 'seg-disqualified', color: '#B91C1C' },
           { key: 'excluded', label: 'Excluded', colorClass: 'seg-excluded', color: '#64748B' }
         ],
-        getKey: r => r.status,
+        getKey: r => {
+          const s = (r.status || '').toLowerCase().replace(/[\s_-]+/g, '_');
+          if (s === 'application_submitted' || s === 'pending_qs_review' || s === 'pending_qs' || s === 'pending_qs_review_') {
+            return 'pending_qs_review';
+          }
+          if (s === 'qualified' || s === 'for_comparative_assessment') {
+            return 'qualified';
+          }
+          if (s === 'disqualified') {
+            return 'disqualified';
+          }
+          if (s === 'excluded') {
+            return 'excluded';
+          }
+          return s;
+        },
         kpiTotalLabel: 'Total Applications',
         kpiTotalCaption: 'All records',
         overallTitle: 'Overall Application Status Distribution',
@@ -259,7 +274,7 @@ export default function DashboardPage() {
         code: app.code,
         vacancy: app.vacancy,
         fit: app.appObj?.overallFit || app.overallFit || 0,
-        assessmentStatus: app.appObj?.assessmentStatus || 'marked_qualified',
+        assessmentStatus: app.assessmentStatus || 'marked_qualified',
         updatedAt: app.updatedAt || app.createdAt
       }));
       return {
@@ -269,7 +284,19 @@ export default function DashboardPage() {
           { key: 'assessment_started', label: 'Assessment Started', colorClass: 'seg-docs', color: '#D97706' },
           { key: 'assessment_completed', label: 'Assessment Completed', colorClass: 'seg-qualified', color: '#16A34A' }
         ],
-        getKey: r => r.assessmentStatus,
+        getKey: r => {
+          const s = (r.assessmentStatus || '').toLowerCase().replace(/[\s_-]+/g, '_');
+          if (s === 'assessment_not_started' || s === 'marked_qualified' || s === 'marked_qualified_') {
+            return 'marked_qualified';
+          }
+          if (s === 'assessment_started') {
+            return 'assessment_started';
+          }
+          if (s === 'assessment_complete' || s === 'assessment_completed' || s === 'assessment_completed_') {
+            return 'assessment_completed';
+          }
+          return s;
+        },
         kpiTotalLabel: 'Total Qualified',
         kpiTotalCaption: 'Passed Initial Screening',
         overallTitle: 'Overall Assessment Status Distribution',
