@@ -191,42 +191,36 @@ export default function AppointmentPage() {
     return filteredAppointments.slice(start, start + apptPageSize);
   }, [filteredAppointments, apptPage, apptPageSize]);
 
-  const handleDownloadNoticeOfAppointment = (app) => {
-    const date = app.appointmentDate ? new Date(app.appointmentDate).toLocaleDateString("en-PH", { year: "numeric", month: "long", day: "numeric", timeZone: "Asia/Manila" }) : new Date().toLocaleDateString("en-PH", { year: "numeric", month: "long", day: "numeric", timeZone: "Asia/Manila" });
-    const content = `DEPARTMENT OF EDUCATION
-SDO Manila, Region NCR
-____________________________________________________
-
-NOTICE OF APPOINTMENT
-
-Date: ${date}
-
-MR./MS. ${app.applicant.toUpperCase()}
-Manila, Philippines
-
-Dear Mr./Ms. ${app.applicant}:
-
-You are hereby informed that the Schools Division Superintendent has approved your appointment as ${app.vacancy} under Item No. ${app.itemNo || 'N/A'}, with a Salary Grade of SG-${app.salaryGrade || app.appObj?.salaryGrade || 'N/A'}, effective on your date of assumption to duty.
-
-This appointment is subject to the usual civil service rules and regulations.
-
-Appointment Reference Code: ${app.appointmentReferenceCode || app.appObj?.appointmentReferenceCode || 'N/A'}
-
-Very truly yours,
-
-SCHOOLS DIVISION SUPERINTENDENT
-SDO Manila, Department of Education
-`;
-
-    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `Notice_of_Appointment_${app.applicant.replace(/\s+/g, '_')}.txt`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+  const handleDownloadNoticeOfAppointment = async (app) => {
+    try {
+      const token = localStorage.getItem('agap_token');
+      const apiHost = import.meta.env.VITE_API_URL || '';
+      const response = await fetch(`${apiHost}/api/applications/${app.id}/notice`, {
+        headers: {
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        }
+      });
+      if (!response.ok) {
+        let errMsg = 'Failed to generate notice';
+        try {
+          const err = await response.json();
+          errMsg = err.error || errMsg;
+        } catch (e) {}
+        throw new Error(errMsg);
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `Notice_of_Appointment_${app.applicant.replace(/\s+/g, '_')}.docx`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error(e);
+      setToast({ message: e.message || 'Failed to generate Notice of Appointment.', type: 'error' });
+    }
   };
 
   const handleRollbackAppointment = async (app, passcode) => {
@@ -662,6 +656,7 @@ SDO Manila, Department of Education
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', background: 'white' }}>
                   {[
+                    { key: 'letter_of_intent', label: 'Letter of Intent', required: true },
                     { key: 'pds', label: 'Personal Data Sheet', required: true },
                     { key: 'work_experience', label: 'Work Experience Sheet', required: true },
                     { key: 'eligibility', label: 'Certificate of Eligibility', required: true },
@@ -669,6 +664,7 @@ SDO Manila, Department of Education
                     { key: 'prc', label: 'Updated PRC License/ID', required: true },
                     { key: 'diploma', label: 'Diploma (optional)', required: false },
                     { key: 'resume', label: 'Resume', required: true },
+                    { key: 'outstanding_accomplishments', label: 'Outstanding Accomplishments', required: false },
                     { key: 'performance_rating', label: 'Performance Rating', required: false },
                     { key: 'training_certificates', label: 'Training Certificates', required: false },
                     { key: 'application_education', label: 'Application of Education', required: false },
@@ -723,6 +719,7 @@ SDO Manila, Department of Education
                       <circle cx="12" cy="12" r="3" />
                     </svg>
                     Document Viewer: {
+                      selectedDocKey === 'letter_of_intent' ? 'Letter of Intent' :
                       selectedDocKey === 'pds' ? 'Personal Data Sheet (PDS)' :
                       selectedDocKey === 'work_experience' ? 'Work Experience Sheet' :
                       selectedDocKey === 'eligibility' ? 'Certificate of Eligibility' :
@@ -730,6 +727,7 @@ SDO Manila, Department of Education
                       selectedDocKey === 'prc' ? 'Updated PRC License/ID' :
                       selectedDocKey === 'diploma' ? 'Diploma' :
                       selectedDocKey === 'resume' ? 'Resume' :
+                      selectedDocKey === 'outstanding_accomplishments' ? 'Outstanding Accomplishments' :
                       selectedDocKey === 'performance_rating' ? 'Performance Rating' :
                       selectedDocKey === 'training_certificates' ? 'Training Certificates' :
                       selectedDocKey === 'application_education' ? 'Application of Education' :

@@ -1023,6 +1023,7 @@ export default function ApplicationsPage() {
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', background: 'white' }}>
                   {[
+                    { key: 'letter_of_intent', label: 'Letter of Intent', required: true },
                     { key: 'pds', label: 'Personal Data Sheet', required: true },
                     { key: 'work_experience', label: 'Work Experience Sheet', required: true },
                     { key: 'eligibility', label: 'Certificate of Eligibility', required: true },
@@ -1030,6 +1031,7 @@ export default function ApplicationsPage() {
                     { key: 'prc', label: 'Updated PRC License/ID', required: true },
                     { key: 'diploma', label: 'Diploma (optional)', required: false },
                     { key: 'resume', label: 'Resume', required: true },
+                    { key: 'outstanding_accomplishments', label: 'Outstanding Accomplishments', required: false },
                     { key: 'performance_rating', label: 'Performance Rating', required: false },
                     { key: 'training_certificates', label: 'Training Certificates', required: false },
                     { key: 'application_education', label: 'Application of Education', required: false },
@@ -1084,6 +1086,7 @@ export default function ApplicationsPage() {
                       <circle cx="12" cy="12" r="3" />
                     </svg>
                     Document Viewer: {
+                      selectedDocKey === 'letter_of_intent' ? 'Letter of Intent' :
                       selectedDocKey === 'pds' ? 'Personal Data Sheet (PDS)' :
                       selectedDocKey === 'work_experience' ? 'Work Experience Sheet' :
                       selectedDocKey === 'eligibility' ? 'Certificate of Eligibility' :
@@ -1091,6 +1094,7 @@ export default function ApplicationsPage() {
                       selectedDocKey === 'prc' ? 'Updated PRC License/ID' :
                       selectedDocKey === 'diploma' ? 'Diploma' :
                       selectedDocKey === 'resume' ? 'Resume' :
+                      selectedDocKey === 'outstanding_accomplishments' ? 'Outstanding Accomplishments' :
                       selectedDocKey === 'performance_rating' ? 'Performance Rating' :
                       selectedDocKey === 'training_certificates' ? 'Training Certificates' :
                       selectedDocKey === 'application_education' ? 'Application of Education' :
@@ -1207,9 +1211,11 @@ export default function ApplicationsPage() {
               <h2>Unsaved changes</h2>
               <button className="secondary" onClick={() => setShowUnsavedPrompt(false)}>Keep Editing</button>
             </div>
-            <p className="small" style={{ fontSize: '14px', fontWeight: '800', color: 'var(--navy)', lineHeight: '1.5', margin: '0 0 16px' }}>
-              You have unsaved evaluation changes. Save first, or discard the changes and close this review.
-            </p>
+            <div className="modal-body">
+              <p className="small" style={{ fontSize: '14px', fontWeight: '800', color: 'var(--navy)', lineHeight: '1.5', margin: 0 }}>
+                You have unsaved evaluation changes. Save first, or discard the changes and close this review.
+              </p>
+            </div>
             <div className="decision-row" style={{ justifyContent: 'flex-end', gap: '8px' }}>
               <button className="secondary" onClick={handleDiscardChanges}>Discard Changes</button>
               <button className="good" onClick={async () => {

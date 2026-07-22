@@ -353,16 +353,15 @@ async function main() {
     const qcVacancies = vacanciesData.filter(v => v.division === 'QUEZON CITY');
     for (let k = 0; k < onePieceApplicants.length; k++) {
       const char = onePieceApplicants[k];
-      const name = `${char.firstName} ${char.lastName}`;
       const index = k + 1;
       const vacancy = qcVacancies[k % qcVacancies.length] || vacanciesData[0];
       const position = positionsData[0];
       const codeVal = `ONEPIECE-2026-${String(100000 + index).padStart(6, "0")}`;
 
       const { rows: applicantRows } = await pool.query(
-        `INSERT INTO applicants (surname, first_name, email_address, name, code, local_resident, bachelor_degree, major, years_experience, training_hours, eligibility, applicant_number)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id`,
-        [char.lastName, char.firstName, `${char.firstName.toLowerCase().replace(/\s+/g, '')}_${char.lastName.toLowerCase()}@deped.gov.ph`, name, codeVal, true, char.degree.degree, char.degree.major, char.yearsExperience, char.trainingHours, char.degree.elig, codeVal]
+        `INSERT INTO applicants (surname, first_name, email_address, code, local_resident, bachelor_degree, major, years_experience, training_hours, eligibility, applicant_number)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
+        [char.lastName, char.firstName, `${char.firstName.toLowerCase().replace(/\s+/g, '')}_${char.lastName.toLowerCase()}@deped.gov.ph`, codeVal, true, char.degree.degree, char.degree.major, char.yearsExperience, char.trainingHours, char.degree.elig, codeVal]
       );
       const applicantId = applicantRows[0].id;
 

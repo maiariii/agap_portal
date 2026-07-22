@@ -1495,6 +1495,7 @@ export default function AssessmentPage() {
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', background: 'white' }}>
                   {[
+                    { key: 'letter_of_intent', label: 'Letter of Intent', required: true },
                     { key: 'pds', label: 'Personal Data Sheet', required: true },
                     { key: 'work_experience', label: 'Work Experience Sheet', required: true },
                     { key: 'eligibility', label: 'Certificate of Eligibility', required: true },
@@ -1502,6 +1503,7 @@ export default function AssessmentPage() {
                     { key: 'prc', label: 'Updated PRC License/ID', required: true },
                     { key: 'diploma', label: 'Diploma (optional)', required: false },
                     { key: 'resume', label: 'Resume', required: true },
+                    { key: 'outstanding_accomplishments', label: 'Outstanding Accomplishments', required: false },
                     { key: 'performance_rating', label: 'Performance Rating', required: false },
                     { key: 'training_certificates', label: 'Training Certificates', required: false },
                     { key: 'application_education', label: 'Application of Education', required: false },
@@ -1556,6 +1558,7 @@ export default function AssessmentPage() {
                       <circle cx="12" cy="12" r="3" />
                     </svg>
                     Document Viewer: {
+                      selectedDocKey === 'letter_of_intent' ? 'Letter of Intent' :
                       selectedDocKey === 'pds' ? 'Personal Data Sheet (PDS)' :
                       selectedDocKey === 'work_experience' ? 'Work Experience Sheet' :
                       selectedDocKey === 'eligibility' ? 'Certificate of Eligibility' :
@@ -1563,6 +1566,7 @@ export default function AssessmentPage() {
                       selectedDocKey === 'prc' ? 'Updated PRC License/ID' :
                       selectedDocKey === 'diploma' ? 'Diploma' :
                       selectedDocKey === 'resume' ? 'Resume' :
+                      selectedDocKey === 'outstanding_accomplishments' ? 'Outstanding Accomplishments' :
                       selectedDocKey === 'performance_rating' ? 'Performance Rating' :
                       selectedDocKey === 'training_certificates' ? 'Training Certificates' :
                       selectedDocKey === 'application_education' ? 'Application of Education' :

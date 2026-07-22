@@ -3,6 +3,9 @@ import { getHydratedApplications } from './apps.service.js';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { BlobServiceClient } from '@azure/storage-blob';
+import fs from 'fs';
+import PizZip from 'pizzip';
+import Docxtemplater from 'docxtemplater';
 import { computeOverallAreaScore } from '@agap/shared';
 import ExcelJS from 'exceljs';
 import path from 'path';
@@ -481,6 +484,7 @@ export async function getApplicationDocuments(req, res) {
   const applicantCode = app ? (app.code || app.applicant_number || '') : '';
 
   const documents = [
+    { key: 'letter_of_intent', label: 'Letter of Intent', filename: 'AGAP-0001_Letter_of_Intent.pdf', existsInAzure: false },
     { key: 'pds', label: 'Personal Data Sheet', filename: `${sampleHash}.pdf`, existsInAzure: false },
     { key: 'work_experience', label: 'Work Experience Sheet', filename: 'AGAP-0001_Work_Experience_Sheet.pdf', existsInAzure: false },
     { key: 'eligibility', label: 'Certificate of Eligibility', filename: 'AGAP-0001_Certificate_of_Eligibility.pdf', existsInAzure: false },
@@ -488,6 +492,7 @@ export async function getApplicationDocuments(req, res) {
     { key: 'prc', label: 'Updated PRC License/ID', filename: 'AGAP-0001_Updated_PRC_License_ID.pdf', existsInAzure: false },
     { key: 'diploma', label: 'Diploma (optional)', filename: 'AGAP-0001_Diploma.pdf', existsInAzure: false },
     { key: 'resume', label: 'Resume', filename: 'AGAP-0001_Resume.pdf', existsInAzure: false },
+    { key: 'outstanding_accomplishments', label: 'Outstanding Accomplishments', filename: 'AGAP-0001_Outstanding_Accomplishments.pdf', existsInAzure: false },
     { key: 'performance_rating', label: 'Performance Rating', filename: 'AGAP-0001_Performance_Rating.pdf', existsInAzure: false },
     { key: 'training_certificates', label: 'Training Certificates', filename: 'AGAP-0001_Training_Certificates.pdf', existsInAzure: false },
     { key: 'application_education', label: 'Application of Education', filename: 'AGAP-0001_Application_of_Education.pdf', existsInAzure: false },
@@ -504,40 +509,27 @@ export async function getApplicationDocuments(req, res) {
         azureBlobs.push({ name: blob.name, nameLower: blob.name.toLowerCase() });
       }
       
-      const checkMatch = (codeToUse) => {
+      const getFolderFromKey = (k) => {
+        if (k === 'pds') return 'personal-data-sheet';
+        if (k === 'work_experience') return 'work-experience-sheet';
+        if (k === 'eligibility') return 'certificate-of-eligibility';
+        if (k === 'tor') return 'transcript-of-records';
+        if (k === 'prc') return 'updated-prc-license-id';
+        if (k === 'diploma') return 'diploma--optional-';
+        if (k === 'outstandingAccomplishment') return 'outstanding-accomplishments';
+        if (k === 'application_education') return 'application-of-education';
+        if (k === 'application_learning') return 'application-of-learning-and-development';
+        return k.replace(/_/g, '-');
+      };
+
+      const checkMatch = (appRow) => {
         let count = 0;
+        const appNum = appRow ? appRow.id : '1';
         documents.forEach(doc => {
-          const cleanKey = doc.key.toLowerCase();
-          const matchedBlob = azureBlobs.find(b => {
-            const isForApplicant = codeToUse && b.nameLower.includes(codeToUse.toLowerCase());
-            let isForDocType = false;
-            
-            if (cleanKey === 'pds' && (b.nameLower.includes('personal_data_sheet') || b.nameLower.includes('pds'))) {
-              isForDocType = true;
-            } else if (cleanKey === 'work_experience' && (b.nameLower.includes('work_experience') || b.nameLower.includes('wes') || b.nameLower.includes('experience'))) {
-              isForDocType = true;
-            } else if (cleanKey === 'eligibility' && (b.nameLower.includes('eligibility') || b.nameLower.includes('coe'))) {
-              isForDocType = true;
-            } else if (cleanKey === 'tor' && (b.nameLower.includes('transcript') || b.nameLower.includes('tor'))) {
-              isForDocType = true;
-            } else if (cleanKey === 'prc' && (b.nameLower.includes('prc') || b.nameLower.includes('license') || b.nameLower.includes('id'))) {
-              isForDocType = true;
-            } else if (cleanKey === 'diploma' && b.nameLower.includes('diploma')) {
-              isForDocType = true;
-            } else if (cleanKey === 'resume' && (b.nameLower.includes('resume') || b.nameLower.includes('cv'))) {
-              isForDocType = true;
-            } else if (cleanKey === 'performance_rating' && (b.nameLower.includes('performance') || b.nameLower.includes('rating'))) {
-              isForDocType = true;
-            } else if (cleanKey === 'training_certificates' && (b.nameLower.includes('training') || b.nameLower.includes('certificate'))) {
-              isForDocType = true;
-            } else if (cleanKey === 'application_education' && (b.nameLower.includes('application_education') || b.nameLower.includes('app_education'))) {
-              isForDocType = true;
-            } else if (cleanKey === 'application_learning' && (b.nameLower.includes('application_learning') || b.nameLower.includes('app_learning') || b.nameLower.includes('learning_and_development') || b.nameLower.includes('l&d'))) {
-              isForDocType = true;
-            }
-            
-            return isForApplicant && isForDocType;
-          });
+          const folderName = getFolderFromKey(doc.key);
+          const prefix = `applicant-${appNum}/${folderName}/`.toLowerCase();
+          
+          const matchedBlob = azureBlobs.find(b => b.nameLower.startsWith(prefix));
           
           if (matchedBlob) {
             doc.existsInAzure = true;
@@ -548,10 +540,13 @@ export async function getApplicationDocuments(req, res) {
         return count;
       };
 
-      let matchedCount = checkMatch(applicantCode);
-      if (matchedCount === 0 && applicantCode !== 'AGAP-0001') {
-        console.log(`[Azure Storage] No blobs found for applicant "${applicantCode}". Falling back to sample applicant "AGAP-0001"...`);
-        checkMatch('AGAP-0001');
+      let matchedCount = checkMatch(app);
+      if (matchedCount === 0 && app && app.id !== 8) {
+        console.log(`[Azure Storage] No blobs found for applicant ID "${app.id}". Falling back to sample applicant ID 8...`);
+        const fallbackQuery = await pool.query("SELECT id, code FROM applicants WHERE id = 8 OR applicant_number = 'AGAP-0003' LIMIT 1");
+        if (fallbackQuery.rows.length > 0) {
+          checkMatch(fallbackQuery.rows[0]);
+        }
       }
       
       console.log(`[Azure Storage] Resolved blobs checklist:`, documents.filter(d => d.existsInAzure).map(d => d.key));
@@ -614,47 +609,35 @@ export async function downloadApplicationDocument(req, res) {
       allBlobs.push(blob);
     }
 
-    const findBlob = (codeToUse) => {
-      for (const blob of allBlobs) {
-        const blobNameLower = blob.name.toLowerCase();
-        const isForApplicant = codeToUse && blobNameLower.includes(codeToUse.toLowerCase());
-        
-        let isForDocType = false;
-        if (cleanKey === 'pds' && (blobNameLower.includes('personal_data_sheet') || blobNameLower.includes('pds'))) {
-          isForDocType = true;
-        } else if (cleanKey === 'work_experience' && (blobNameLower.includes('work_experience') || blobNameLower.includes('wes') || blobNameLower.includes('experience'))) {
-          isForDocType = true;
-        } else if (cleanKey === 'eligibility' && (blobNameLower.includes('eligibility') || blobNameLower.includes('coe'))) {
-          isForDocType = true;
-        } else if (cleanKey === 'tor' && (blobNameLower.includes('transcript') || blobNameLower.includes('tor'))) {
-          isForDocType = true;
-        } else if (cleanKey === 'prc' && (blobNameLower.includes('prc') || blobNameLower.includes('license') || blobNameLower.includes('id'))) {
-          isForDocType = true;
-        } else if (cleanKey === 'diploma' && blobNameLower.includes('diploma')) {
-          isForDocType = true;
-        } else if (cleanKey === 'resume' && (blobNameLower.includes('resume') || blobNameLower.includes('cv'))) {
-          isForDocType = true;
-        } else if (cleanKey === 'performance_rating' && (blobNameLower.includes('performance') || blobNameLower.includes('rating'))) {
-          isForDocType = true;
-        } else if (cleanKey === 'training_certificates' && (blobNameLower.includes('training') || blobNameLower.includes('certificate'))) {
-          isForDocType = true;
-        } else if (cleanKey === 'application_education' && (blobNameLower.includes('application_education') || blobNameLower.includes('app_education'))) {
-          isForDocType = true;
-        } else if (cleanKey === 'application_learning' && (blobNameLower.includes('application_learning') || blobNameLower.includes('app_learning') || blobNameLower.includes('learning_and_development') || blobNameLower.includes('l&d'))) {
-          isForDocType = true;
-        }
-        
-        if (isForApplicant && isForDocType) {
-          return blob.name;
-        }
-      }
-      return '';
+    const getFolderFromKey = (k) => {
+      if (k === 'pds') return 'personal-data-sheet';
+      if (k === 'work_experience') return 'work-experience-sheet';
+      if (k === 'eligibility') return 'certificate-of-eligibility';
+      if (k === 'tor') return 'transcript-of-records';
+      if (k === 'prc') return 'updated-prc-license-id';
+      if (k === 'diploma') return 'diploma--optional-';
+      if (k === 'outstandingAccomplishment') return 'outstanding-accomplishments';
+      if (k === 'application_education') return 'application-of-education';
+      if (k === 'application_learning') return 'application-of-learning-and-development';
+      return k.replace(/_/g, '-');
     };
 
-    let matchedBlobName = findBlob(applicantCode);
-    if (!matchedBlobName && applicantCode !== 'AGAP-0001') {
-      console.log(`[Azure Storage] Blob matching "${key}" not found for "${applicantCode}". Trying sample fallback "AGAP-0001"...`);
-      matchedBlobName = findBlob('AGAP-0001');
+    const findBlob = (appRow) => {
+      const appNum = appRow ? appRow.id : '1';
+      const folderName = getFolderFromKey(key);
+      const prefix = `applicant-${appNum}/${folderName}/`.toLowerCase();
+      
+      const matched = allBlobs.find(b => b.name.toLowerCase().startsWith(prefix));
+      return matched ? matched.name : '';
+    };
+
+    let matchedBlobName = findBlob(app);
+    if (!matchedBlobName && app && app.id !== 8) {
+      console.log(`[Azure Storage] Blob matching "${key}" not found for applicant ID "${app.id}". Trying sample fallback ID 8...`);
+      const fallbackQuery = await pool.query("SELECT id, code FROM applicants WHERE id = 8 OR applicant_number = 'AGAP-0003' LIMIT 1");
+      if (fallbackQuery.rows.length > 0) {
+        matchedBlobName = findBlob(fallbackQuery.rows[0]);
+      }
     }
 
     // 3. Fallback/diagnostics list if no direct matching blob is resolved
@@ -749,7 +732,7 @@ export async function exportCar(req, res) {
     sheet.getCell('B5').value = {
       richText: [
         { text: 'Office/Bureau/Service/Unit where the vacancy exists: ', font: { ...carFont } },
-        { text: schoolDiv, font: { ...carFont, bold: true } }
+        { text: '', font: { ...carFont, bold: true } }
       ]
     };
     sheet.getCell('M5').value = {
@@ -785,6 +768,15 @@ export async function exportCar(req, res) {
       row.getCell(12).value = Number(areaScores.potential || 0); // L: Potential
       row.getCell(13).value = Number(app.fit || app.overall_fit || 0); // M: Total
       row.getCell(14).value = ''; // N: Remarks
+
+      const rowFont = { name: 'Bookman Old Style', size: 11, bold: true };
+      const refRow = sheet.getRow(9);
+      for (let colIdx = 2; colIdx <= 14; colIdx++) {
+        row.getCell(colIdx).font = rowFont;
+        if (refRow && refRow.getCell(colIdx).alignment) {
+          row.getCell(colIdx).alignment = refRow.getCell(colIdx).alignment;
+        }
+      }
 
       row.commit();
     });
@@ -866,8 +858,66 @@ export async function exportIer(req, res) {
 
       const name = app.applicant || app.applicant_name || `Applicant #${idx + 1}`;
       const code = app.code || app.applicant_code || '—';
-      const address = appObj.residential_address || appObj.permanent_address || '—';
-      const age = calculateAge(appObj.date_of_birth);
+      const formatAddress = (addr) => {
+        if (!addr || addr === '—') return '—';
+        let obj = addr;
+        if (typeof addr === 'string') {
+          try { obj = JSON.parse(addr); } catch (e) { return addr; }
+        }
+        if (obj && typeof obj === 'object') {
+          const psgcNames = {
+            '11': 'Region XI (Davao Region)',
+            '1125': 'Davao del Sur',
+            '112503': 'Davao City',
+            '13': 'NCR',
+            '1339': 'NCR, Third District',
+            '1374': 'NCR, Second District',
+            '1375': 'NCR, Fourth District',
+            '1376': 'Manila',
+            '137601': 'Manila',
+            '137404': 'Quezon City',
+            '137401': 'Mandaluyong',
+            '137402': 'Marikina',
+            '137403': 'Pasig',
+            '137405': 'San Juan',
+            '133901': 'Caloocan',
+            '133902': 'Malabon',
+            '133903': 'Navotas',
+            '133904': 'Valenzuela',
+            '137501': 'Las Piñas',
+            '137502': 'Makati',
+            '137503': 'Muntinlupa',
+            '137504': 'Parañaque',
+            '137505': 'Pasay',
+            '137506': 'Pateros',
+            '137507': 'Taguig'
+          };
+          
+          const getVal = (v) => {
+            const clean = String(v || '').trim();
+            if (!clean || clean.toLowerCase() === 'null') return '';
+            return psgcNames[clean] || clean;
+          };
+
+          const parts = [
+            getVal(obj.house),
+            getVal(obj.street),
+            getVal(obj.subdivision),
+            getVal(obj.barangay),
+            getVal(obj.city),
+            getVal(obj.province),
+            getVal(obj.region),
+            getVal(obj.zip)
+          ].filter(Boolean);
+
+          if (parts.length > 0) return parts.join(', ');
+        }
+        return String(addr);
+      };
+
+      const rawAddress = appObj.residential_address || appObj.permanent_address || '—';
+      const address = formatAddress(rawAddress);
+      const age = appObj.age || calculateAge(appObj.date_of_birth) || '—';
       const sex = appObj.sex || '—';
       const civilStatus = appObj.civil_status || '—';
       const religion = appObj.religion || '—';
@@ -906,6 +956,15 @@ export async function exportIer(req, res) {
       row.getCell(19).value = eligibility; // S: Eligibility
       row.getCell(20).value = remarks; // T: Remarks (Qualified or Disqualified)
 
+      const rowFont = { name: 'Bookman Old Style', size: 11, bold: true };
+      const refRow = sheet.getRow(15);
+      for (let colIdx = 2; colIdx <= 20; colIdx++) {
+        row.getCell(colIdx).font = rowFont;
+        if (refRow && refRow.getCell(colIdx).alignment) {
+          row.getCell(colIdx).alignment = refRow.getCell(colIdx).alignment;
+        }
+      }
+
       row.commit();
     });
 
@@ -917,6 +976,67 @@ export async function exportIer(req, res) {
     res.end();
   } catch (error) {
     console.error('Error exporting IER Excel:', error);
+    res.status(500).json({ error: error.message });
+  }
+}
+
+export async function downloadNoticeOfAppointment(req, res) {
+  try {
+    const { id } = req.params;
+    const userQuery = await pool.query('SELECT region, division FROM users WHERE id = $1', [req.user.id]);
+    const user = userQuery.rows[0];
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    const { region, division } = user;
+    const list = await getHydratedApplications(null, region, division);
+    const app = list.find(a => a.id === id);
+    if (!app) {
+      return res.status(404).json({ error: 'Application not found or unauthorized' });
+    }
+
+    const templatePath = path.resolve(__dirname, '../../templates/Notice_of_Appointment_Template.docx');
+    if (!fs.existsSync(templatePath)) {
+      return res.status(404).json({ error: 'Notice of Appointment template not found' });
+    }
+
+    const content = fs.readFileSync(templatePath, 'binary');
+    const zip = new PizZip(content);
+    
+    const doc = new Docxtemplater(zip, {
+      paragraphLoop: true,
+      linebreaks: true
+    });
+
+    const getSalaryByGrade = (sg) => {
+      if (!sg) return '27,000.00';
+      const grade = parseInt(String(sg).replace(/\D/g, ''), 10);
+      const sgMap = {
+        1: '13,000.00', 2: '13,819.00', 3: '14,678.00', 4: '15,586.00', 5: '16,543.00',
+        6: '17,553.00', 7: '18,620.00', 8: '19,744.00', 9: '21,211.00', 10: '23,176.00',
+        11: '27,000.00', 12: '29,165.00', 13: '31,320.00', 14: '33,843.00', 15: '36,619.00',
+        16: '39,672.00', 17: '43,030.00', 18: '46,725.00', 19: '51,357.00', 20: '57,347.00',
+        21: '63,997.00', 22: '71,511.00', 23: '80,003.00', 24: '90,078.00', 25: '102,690.00'
+      };
+      return sgMap[grade] || '27,000.00';
+    };
+
+    doc.render({
+      name: String(app.applicant || '').toUpperCase(),
+      positionTitle: app.positionTitle || app.vacancy || '—',
+      natureOfAppointment: 'PERMANENT',
+      office: app.school || app.division || 'SDO Manila',
+      salary: getSalaryByGrade(app.salaryGrade),
+      itemNo: app.itemNo || 'N/A'
+    });
+
+    const buf = doc.getZip().generate({ type: 'nodebuffer' });
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    res.setHeader('Content-Disposition', `attachment; filename="Notice_of_Appointment_${String(app.applicant || '').replace(/\s+/g, '_')}.docx"`);
+    res.send(buf);
+  } catch (error) {
+    console.error('Error generating notice:', error);
     res.status(500).json({ error: error.message });
   }
 }

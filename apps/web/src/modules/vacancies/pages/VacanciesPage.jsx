@@ -1239,7 +1239,7 @@ export default function VacanciesPage() {
               <h2>Add Vacancy from NOSCA</h2>
               <button className="secondary" onClick={() => { setShowNosca(false); setDetectedItems([]); setSelectedNoscaItemNos([]); }}>Close</button>
             </div>
-            <div>
+            <div style={{ padding: '0 24px 24px', overflowY: 'auto', flex: 1 }}>
               <p className="small" style={{ marginBottom: '16px', lineHeight: 1.4, fontSize: '13px', fontWeight: '700', color: 'var(--muted)' }}>
                 Upload a NOSCA (Notice of Organization, Staffing and Compensation Action) to auto-detect authorized item numbers and position titles, then tick the items to add. Added items default to <b>Closed</b>.
               </p>
