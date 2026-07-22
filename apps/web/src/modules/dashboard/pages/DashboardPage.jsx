@@ -66,6 +66,11 @@ export default function DashboardPage() {
       if (homeFilters.itemStatus && itemStatusVal !== homeFilters.itemStatus) return false;
       if (homeFilters.postingStatus && v.status?.toLowerCase() !== homeFilters.postingStatus.toLowerCase()) return false;
       if (homeFilters.status && !applications.some(a => a.vacancyId === v.jobClusterId && matchStatus(a.status, homeFilters.status))) return false;
+      if (homeFilters.assessmentStatus && !applications.some(a => {
+        if (a.vacancyId !== v.jobClusterId) return false;
+        const statusVal = a.assessmentStatus || 'marked_qualified';
+        return statusVal.toLowerCase() === homeFilters.assessmentStatus.toLowerCase();
+      })) return false;
       return true;
     });
   }, [vacancies, applications, homeFilters]);
