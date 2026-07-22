@@ -688,7 +688,7 @@ export default function DashboardPage() {
           box-shadow: 0 0 0 3px rgba(11, 60, 93, 0.15) !important;
         }
       `}</style>
-      <div className="filterbar data-control-card" style={{ 
+      <div className="filterbar" style={{ 
         marginBottom: '14px', 
         padding: '8px 16px', 
         display: 'inline-flex', 
@@ -698,7 +698,8 @@ export default function DashboardPage() {
         border: '1.5px solid #E2E8F0',
         borderRadius: '12px',
         boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03)',
-        width: 'fit-content'
+        width: 'fit-content',
+        overflow: 'visible'
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
