@@ -562,8 +562,9 @@ export default function DashboardPage() {
           border: 1.5px solid #E2E8F0 !important;
         }
         .control-select-wrap:hover {
-          border-color: #CBD5E1 !important;
+          border-color: #94A3B8 !important;
           background: #ffffff !important;
+          box-shadow: 0 2px 4px 0 rgba(0, 0, 0, 0.05) !important;
         }
         .control-select-wrap:focus-within {
           border-color: #0B3C5D !important;
@@ -588,28 +589,27 @@ export default function DashboardPage() {
       `}</style>
       <div className="filterbar data-control-card" style={{ 
         marginBottom: '14px', 
-        padding: '12px 20px', 
-        display: 'flex', 
+        padding: '8px 16px', 
+        display: 'inline-flex', 
         alignItems: 'center', 
-        justifyContent: 'space-between',
-        flexWrap: 'wrap',
         gap: '16px',
         background: '#ffffff',
         border: '1.5px solid #E2E8F0',
         borderRadius: '12px',
-        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03)'
+        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03)',
+        width: 'fit-content'
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap', width: '100%' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0B3C5D" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>
             </svg>
-            <h2 style={{ margin: 0, fontSize: '14px', fontWeight: '700', color: '#0F172A', letterSpacing: '-0.02em', textTransform: 'uppercase' }}>Data Filters</h2>
+            <h2 style={{ margin: 0, fontSize: '13px', fontWeight: '700', color: '#0F172A', letterSpacing: '-0.02em', textTransform: 'uppercase' }}>Data Filters</h2>
           </div>
           
-          <div className="hidden-mobile" style={{ width: '1px', height: '20px', background: '#E2E8F0' }}></div>
+          <div style={{ width: '1px', height: '24px', background: '#E2E8F0', flexShrink: 0 }}></div>
           
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', flex: 1 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
             {/* Position Select */}
             <div style={{ 
               display: 'flex', 
