@@ -1,6 +1,17 @@
 import React, { useState, useMemo } from 'react';
 import { useAppData } from '../../../middleware/DataProvider.jsx';
 
+const matchStatus = (appStatus, filterStatus) => {
+  if (!filterStatus) return true;
+  const appStatusLower = (appStatus || '').toLowerCase();
+  const filterStatusLower = filterStatus.toLowerCase();
+  
+  if (filterStatusLower === 'qualified') {
+    return appStatusLower === 'qualified' || appStatusLower === 'for_comparative_assessment';
+  }
+  return appStatusLower === filterStatusLower;
+};
+
 export default function DashboardPage() {
   const { positions, vacancies, applications } = useAppData();
 
@@ -33,15 +44,15 @@ export default function DashboardPage() {
   const dashboardRows = useMemo(() => {
     return applications.filter(app => {
       if (homeFilters.positionId && app.vacancyObj.positionId !== homeFilters.positionId) return false;
-      if (homeFilters.status && app.status !== homeFilters.status) return false;
+      if (homeFilters.status && !matchStatus(app.status, homeFilters.status)) return false;
       const isFilled = app.appointmentStatus?.toLowerCase() === 'appointed' || app.appointmentStatus?.toUpperCase() === 'FOR APPOINTMENT' || app.vacancyObj?.fillingUpStatus?.toUpperCase() === 'FILLED';
       const itemStatusVal = isFilled ? 'filled' : 'unfilled';
       if (homeFilters.itemStatus && itemStatusVal !== homeFilters.itemStatus) return false;
       if (homeFilters.assessmentStatus) {
-        const statusVal = app.appObj?.assessmentStatus || 'marked_qualified';
-        if (statusVal !== homeFilters.assessmentStatus) return false;
+        const statusVal = app.assessmentStatus || 'marked_qualified';
+        if (statusVal.toLowerCase() !== homeFilters.assessmentStatus.toLowerCase()) return false;
       }
-      if (homeFilters.postingStatus && app.vacancyObj.status !== homeFilters.postingStatus) return false;
+      if (homeFilters.postingStatus && app.vacancyObj?.status?.toLowerCase() !== homeFilters.postingStatus.toLowerCase()) return false;
       return true;
     });
   }, [applications, homeFilters]);
@@ -53,8 +64,8 @@ export default function DashboardPage() {
       const isFilled = v.fillingUpStatus?.toUpperCase() === 'FILLED';
       const itemStatusVal = isFilled ? 'filled' : 'unfilled';
       if (homeFilters.itemStatus && itemStatusVal !== homeFilters.itemStatus) return false;
-      if (homeFilters.postingStatus && v.status !== homeFilters.postingStatus) return false;
-      if (homeFilters.status && !applications.some(a => a.vacancyId === v.jobClusterId && a.status === homeFilters.status)) return false;
+      if (homeFilters.postingStatus && v.status?.toLowerCase() !== homeFilters.postingStatus.toLowerCase()) return false;
+      if (homeFilters.status && !applications.some(a => a.vacancyId === v.jobClusterId && matchStatus(a.status, homeFilters.status))) return false;
       return true;
     });
   }, [vacancies, applications, homeFilters]);
