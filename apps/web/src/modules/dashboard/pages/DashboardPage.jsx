@@ -567,17 +567,71 @@ export default function DashboardPage() {
           </div>
         </div>
         <div className="data-control-body">
-          <div className="dashboard-controls" style={{ display: 'flex', gap: '16px' }}>
-            <div>
-              <label>Position</label>
-              <select value={positionId} onChange={e => setPositionId(e.target.value)}>
+          <div className="dashboard-controls" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <label style={{ fontSize: '11px', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748B' }}>Position</label>
+              <select
+                value={positionId}
+                onChange={e => setPositionId(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '10px 14px',
+                  borderRadius: '10px',
+                  border: '1.5px solid #E2E8F0',
+                  backgroundColor: '#F8FAFC',
+                  fontSize: '13px',
+                  fontWeight: '600',
+                  color: '#334155',
+                  outline: 'none',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                  boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)'
+                }}
+                onFocus={(e) => {
+                  e.target.style.borderColor = '#0284C7';
+                  e.target.style.backgroundColor = '#ffffff';
+                  e.target.style.boxShadow = '0 0 0 3px rgba(2, 132, 199, 0.15)';
+                }}
+                onBlur={(e) => {
+                  e.target.style.borderColor = '#E2E8F0';
+                  e.target.style.backgroundColor = '#F8FAFC';
+                  e.target.style.boxShadow = '0 1px 2px 0 rgba(0, 0, 0, 0.05)';
+                }}
+              >
                 <option value="">All positions</option>
                 {positions.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
               </select>
             </div>
-            <div>
-              <label>Distribution by</label>
-              <select value={homeDistributionBy} onChange={e => setHomeDistributionBy(e.target.value)}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <label style={{ fontSize: '11px', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748B' }}>Distribution by</label>
+              <select
+                value={homeDistributionBy}
+                onChange={e => setHomeDistributionBy(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '10px 14px',
+                  borderRadius: '10px',
+                  border: '1.5px solid #E2E8F0',
+                  backgroundColor: '#F8FAFC',
+                  fontSize: '13px',
+                  fontWeight: '600',
+                  color: '#334155',
+                  outline: 'none',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                  boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)'
+                }}
+                onFocus={(e) => {
+                  e.target.style.borderColor = '#0284C7';
+                  e.target.style.backgroundColor = '#ffffff';
+                  e.target.style.boxShadow = '0 0 0 3px rgba(2, 132, 199, 0.15)';
+                }}
+                onBlur={(e) => {
+                  e.target.style.borderColor = '#E2E8F0';
+                  e.target.style.backgroundColor = '#F8FAFC';
+                  e.target.style.boxShadow = '0 1px 2px 0 rgba(0, 0, 0, 0.05)';
+                }}
+              >
                 <option value="item_status">Item Status</option>
                 <option value="status">Application Status</option>
                 <option value="assessment_status">Assessment Status</option>
