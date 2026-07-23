@@ -1570,15 +1570,17 @@ export default function VacanciesPage() {
               <h2>Confirm NOSCA Items</h2>
               <button className="secondary" onClick={() => setShowNoscaConfirm(false)}>Cancel</button>
             </div>
-            <p className="small" style={{ fontSize: '14px', fontWeight: '800', color: 'var(--navy)', lineHeight: '1.5', margin: '10px 0 20px' }}>
-              Do you confirm that all the items in the NOSCA reflected correctly?
-            </p>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-              <button className="secondary" onClick={() => setShowNoscaConfirm(false)}>Cancel</button>
-              <button className="good" onClick={() => {
-                setShowNoscaConfirm(false);
-                handleAddNoscaVacancies();
-              }}>Yes, Confirm</button>
+            <div className="modal-body" style={{ padding: '20px 24px' }}>
+              <p className="small" style={{ fontSize: '14px', fontWeight: '800', color: 'var(--navy)', lineHeight: '1.5', margin: '0 0 20px' }}>
+                Do you confirm that all the items in the NOSCA reflected correctly?
+              </p>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                <button className="secondary" onClick={() => setShowNoscaConfirm(false)}>Cancel</button>
+                <button className="good" onClick={() => {
+                  setShowNoscaConfirm(false);
+                  handleAddNoscaVacancies();
+                }}>Yes, Confirm</button>
+              </div>
             </div>
           </div>
         </div>
