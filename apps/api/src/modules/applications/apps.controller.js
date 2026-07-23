@@ -812,6 +812,7 @@ export async function exportIer(req, res) {
     const userQuery = await pool.query('SELECT region, division FROM users WHERE id = $1', [userId]);
     const user = userQuery.rows[0] || {};
 
+    const { vacancyId } = req.query;
     let list = await getHydratedApplications(vacancyId || null, user.region || null, user.division || null);
     list = list.filter(app => String(app.status || '').toLowerCase() === 'qualified');
 
