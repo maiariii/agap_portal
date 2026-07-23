@@ -72,8 +72,8 @@ export async function getVacancies(req, res) {
         p.title as position_title, p.track as position_track,
         p.required_bachelor_degree as position_required_bachelor_degree,
         p.required_degree_keywords as position_required_degree_keywords,
-        p.min_years_experience as position_min_years_experience,
-        p.min_training_hours as position_min_training_hours,
+        p.years_experience as position_min_years_experience,
+        p.training_hours as position_min_training_hours,
         p.eligibility_required as position_eligibility_required
       FROM vacancies v
       JOIN positions p ON v.position_id = p.id
@@ -369,7 +369,7 @@ export async function importNosca(req, res) {
         if (!pos) {
           const newPosId = crypto.randomUUID();
           const { rows: newPosRows } = await pool.query(
-            `INSERT INTO positions (id, title, track, required_bachelor_degree, required_degree_keywords, min_years_experience, min_training_hours, eligibility_required)
+            `INSERT INTO positions (id, title, track, required_bachelor_degree, required_degree_keywords, years_experience, training_hours, eligibility_required)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
             [
               newPosId,

@@ -40,8 +40,8 @@ export async function getHydratedApplications(vacancyId = null, region = null, d
       p.track as position_track,
       p.required_bachelor_degree as position_required_bachelor_degree,
       p.required_degree_keywords as position_required_degree_keywords,
-      p.min_years_experience as position_min_years_experience,
-      p.min_training_hours as position_min_training_hours,
+      p.years_experience as position_min_years_experience,
+      p.training_hours as position_min_training_hours,
       p.eligibility_required as position_eligibility_required,
       (
         SELECT COALESCE(json_agg(h ORDER BY h.at DESC), '[]'::json)

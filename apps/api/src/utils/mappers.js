@@ -6,8 +6,8 @@ export function mapPosition(row) {
     track: row.track,
     requiredBachelorDegree: row.required_bachelor_degree,
     requiredDegreeKeywords: Array.isArray(row.required_degree_keywords) ? row.required_degree_keywords : (row.required_degree_keywords ? row.required_degree_keywords.split(',') : []),
-    minYearsExperience: row.min_years_experience,
-    minTrainingHours: row.min_training_hours,
+    minYearsExperience: row.min_years_experience !== undefined ? row.min_years_experience : row.years_experience,
+    minTrainingHours: row.min_training_hours !== undefined ? row.min_training_hours : row.training_hours,
     eligibilityRequired: row.eligibility_required,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at)
