@@ -812,8 +812,8 @@ export async function exportIer(req, res) {
     const userQuery = await pool.query('SELECT region, division FROM users WHERE id = $1', [userId]);
     const user = userQuery.rows[0] || {};
 
-    const { vacancyId } = req.query;
-    const list = await getHydratedApplications(vacancyId || null, user.region || null, user.division || null);
+    let list = await getHydratedApplications(vacancyId || null, user.region || null, user.division || null);
+    list = list.filter(app => String(app.status || '').toLowerCase() === 'qualified');
 
     const templatePath = path.resolve(__dirname, '../../templates/Annex_D_Initial_Evaluation_Results.xlsx');
     const workbook = new ExcelJS.Workbook();
