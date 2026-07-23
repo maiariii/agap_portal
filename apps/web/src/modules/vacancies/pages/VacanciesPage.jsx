@@ -1060,17 +1060,13 @@ export default function VacanciesPage() {
 
         return (
           <div className="modal open">
-            <div className="modal-box" style={{ width: 'min(980px, 98vw)', maxHeight: '92vh', padding: '0 24px 24px' }}>
+            <div className="modal-box" style={{ width: 'min(980px, 98vw)', maxHeight: '92vh' }}>
               <div className="modal-head" style={{
                 paddingTop: '24px',
                 paddingBottom: '12px',
-                background: 'white',
-                position: 'sticky',
-                top: 0,
-                zIndex: 10,
-                margin: '0 -24px 16px',
                 paddingLeft: '24px',
                 paddingRight: '24px',
+                background: 'white',
                 borderBottom: '1px solid #E2E8F0',
                 display: 'flex',
                 justifyContent: 'space-between',
@@ -1079,152 +1075,154 @@ export default function VacanciesPage() {
                 <h2 style={{ margin: 0 }}>Set Posting Schedule</h2>
                 <button className="secondary" onClick={() => setShowCalendar(false)}>Close</button>
               </div>
-              <div className="posting-schedule-layout">
-                <aside className="posting-left-stack">
-                  <section className="position-detail-panel">
+              <div style={{ overflowY: 'auto', flex: 1, padding: '0 24px 24px' }}>
+                <div className="posting-schedule-layout" style={{ marginTop: '16px' }}>
+                  <aside className="posting-left-stack">
+                    <section className="position-detail-panel">
+                      <div className="posting-card-head">
+                        <div className="position-detail-eyebrow">Position Details</div>
+                        <h4>{position.title || calVacancy.title}</h4>
+                        <p>Review the item details before opening the posting.</p>
+                      </div>
+                      <div className="position-info-grid">
+                        <div className="position-info-tile">
+                          <b>Item No.</b>
+                          <span>{calVacancy.itemNo}</span>
+                        </div>
+                        <div className="position-info-tile">
+                          <b>Salary Grade</b>
+                          <span>{calVacancy.salaryGrade || position.salaryGrade || '11'}</span>
+                        </div>
+                        <div className="position-info-tile">
+                          <b>School</b>
+                          <span>{calVacancy.school || 'Not Specified'}</span>
+                        </div>
+                        <div className="position-info-tile">
+                          <b>Division</b>
+                          <span>{calVacancy.division || 'SDO Manila'}</span>
+                        </div>
+                      </div>
+                    </section>
+
+                    <section className="position-qs-card">
+                      <div className="position-qs-card-head">
+                        <div className="position-detail-eyebrow">Qualification Standards</div>
+                        <h4>Minimum Requirements</h4>
+                      </div>
+                      <div className="position-qs-list">
+                        <div className="position-qs-item">
+                          <b>Bachelor's Degree</b>
+                          <span>{position.requiredBachelorDegree || 'No minimum specified'}</span>
+                        </div>
+                        <div className="position-qs-item">
+                          <b>Years of Experience</b>
+                          <span>{position.minYearsExperience !== undefined ? `${position.minYearsExperience} minimum year(s)` : '0 minimum year(s)'}</span>
+                        </div>
+                        <div className="position-qs-item">
+                          <b>Hours of Training</b>
+                          <span>{position.minTrainingHours !== undefined ? `${position.minTrainingHours} minimum hour(s)` : '0 minimum hour(s)'}</span>
+                        </div>
+                        <div className="position-qs-item">
+                          <b>Eligibility</b>
+                          <span>{position.eligibilityRequired || 'Not specified'}</span>
+                        </div>
+                      </div>
+                    </section>
+                  </aside>
+
+                  <section className="posting-calendar-panel">
                     <div className="posting-card-head">
-                      <div className="position-detail-eyebrow">Position Details</div>
-                      <h4>{position.title || calVacancy.title}</h4>
-                      <p>Review the item details before opening the posting.</p>
+                      <div className="position-detail-eyebrow">Posting Calendar</div>
+                      <h4>Set Posting Schedule</h4>
+                      <p>Choose the posting start date and deadline for <b>{calVacancy.itemNo}</b>.</p>
                     </div>
-                    <div className="position-info-grid">
-                      <div className="position-info-tile">
-                        <b>Item No.</b>
-                        <span>{calVacancy.itemNo}</span>
+
+                    <div className="cal-fields" style={{ display: 'flex', alignItems: 'center', gap: '10px', background: '#F8FCFF', border: '2.5px solid var(--line)', borderRadius: '18px', padding: '10px' }}>
+                      <button
+                        type="button"
+                        className={`cal-field ${calField === 'start' ? 'active' : ''}`}
+                        onClick={() => setCalField('start')}
+                        style={{
+                          flex: 1,
+                          padding: '10px',
+                          borderRadius: '12px',
+                          border: calField === 'start' ? '2.5px solid var(--blue)' : '1.5px solid var(--line)',
+                          background: 'white',
+                          textAlign: 'left',
+                          cursor: 'pointer',
+                          transition: 'all 0.15s ease'
+                        }}
+                      >
+                        <span className="cf-label" style={{ display: 'block', fontSize: '9px', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: '800' }}>Start date</span>
+                        <span className="cf-value" style={{ fontSize: '14px', fontWeight: '900', color: 'var(--navy)' }}>{formatBtnDate(calStart)}</span>
+                      </button>
+                      <span className="cal-arrow" style={{ fontSize: '20px', color: 'var(--muted)' }}>→</span>
+                      <button
+                        type="button"
+                        className={`cal-field ${calField === 'end' ? 'active' : ''}`}
+                        onClick={() => setCalField('end')}
+                        style={{
+                          flex: 1,
+                          padding: '10px',
+                          borderRadius: '12px',
+                          border: calField === 'end' ? '2.5px solid var(--blue)' : '1.5px solid var(--line)',
+                          background: 'white',
+                          textAlign: 'left',
+                          cursor: 'pointer',
+                          transition: 'all 0.15s ease'
+                        }}
+                      >
+                        <span className="cf-label" style={{ display: 'block', fontSize: '9px', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: '800' }}>Deadline</span>
+                        <span className="cf-value" style={{ fontSize: '14px', fontWeight: '900', color: 'var(--navy)' }}>{formatBtnDate(calEnd)}</span>
+                      </button>
+                    </div>
+
+                    <div style={{ border: '2px solid var(--line)', borderRadius: '18px', padding: '16px', background: 'white' }}>
+                      <div className="cal-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                        <button className="cal-nav" onClick={() => calShift(-1)} style={{ padding: '4px 10px', fontSize: '18px', fontWeight: 'bold', background: 'var(--blue-100)', color: 'var(--blue)', borderRadius: '8px', border: 'none', cursor: 'pointer' }}>‹</button>
+                        <div style={{ display: 'flex', gap: '6px' }}>
+                          <select
+                            value={calMonth}
+                            onChange={e => setCalMonth(Number(e.target.value))}
+                            style={{ padding: '6px 12px', borderRadius: '10px', border: '1.5px solid var(--line)', fontWeight: '800', background: '#F8FCFF', color: 'var(--navy)' }}
+                          >
+                            {monthNames.map((m, idx) => <option key={idx} value={idx}>{m}</option>)}
+                          </select>
+                          <select
+                            value={calYear}
+                            onChange={e => setCalYear(Number(e.target.value))}
+                            style={{ padding: '6px 12px', borderRadius: '10px', border: '1.5px solid var(--line)', fontWeight: '800', background: '#F8FCFF', color: 'var(--navy)' }}
+                          >
+                            {yearOpts.map(y => <option key={y} value={y}>{y}</option>)}
+                          </select>
+                        </div>
+                        <button className="cal-nav" onClick={() => calShift(1)} style={{ padding: '4px 10px', fontSize: '18px', fontWeight: 'bold', background: 'var(--blue-100)', color: 'var(--blue)', borderRadius: '8px', border: 'none', cursor: 'pointer' }}>›</button>
                       </div>
-                      <div className="position-info-tile">
-                        <b>Salary Grade</b>
-                        <span>{calVacancy.salaryGrade || position.salaryGrade || '11'}</span>
+                      
+                      <div className="cal-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '6px', justifyItems: 'center' }}>
+                        {dows.map(d => (
+                          <div key={d} className="cal-dow" style={{ fontSize: '9px', fontWeight: '950', textTransform: 'uppercase', color: 'var(--muted)', paddingBottom: '6px' }}>{d}</div>
+                        ))}
+                        {cells}
                       </div>
-                      <div className="position-info-tile">
-                        <b>School</b>
-                        <span>{calVacancy.school || 'Not Specified'}</span>
-                      </div>
-                      <div className="position-info-tile">
-                        <b>Division</b>
-                        <span>{calVacancy.division || 'SDO Manila'}</span>
-                      </div>
+                    </div>
+
+                    <div className="cal-duration" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', border: '2.5px solid var(--blue)', borderRadius: '18px', background: 'var(--blue-50)', padding: '12px 10px', textAlign: 'center' }}>
+                      <span className="cd-num" style={{ fontSize: '32px', fontWeight: '950', color: 'var(--blue-800)', fontFamily: 'var(--font-heading)', lineHeight: 1 }}>{durationDays}</span>
+                      <span className="cd-unit" style={{ fontSize: '9px', fontWeight: '950', color: 'var(--blue-800)', letterSpacing: '0.08em', textTransform: 'uppercase', marginTop: '4px' }}>Calendar Day(s) Open for Posting</span>
+                      <span className="cd-hint" style={{ fontSize: '11px', color: 'var(--muted)', fontWeight: '700', marginTop: '2px' }}>Weekends are included.</span>
+                    </div>
+
+                    <div className="cal-summary" style={{ textAlign: 'center', fontSize: '12px', fontWeight: '700', color: 'var(--navy)' }}>
+                      <span dangerouslySetInnerHTML={{ __html: getCalSummaryText() }}></span>
+                    </div>
+
+                    <div className="decision-row" style={{ justifyContent: 'flex-end', gap: '10px', marginTop: '6px' }}>
+                      <button className="secondary" onClick={() => setShowCalendar(false)}>Cancel</button>
+                      <button className="good cal-confirm" onClick={handleConfirmSchedule}>Open Posting</button>
                     </div>
                   </section>
-
-                  <section className="position-qs-card">
-                    <div className="position-qs-card-head">
-                      <div className="position-detail-eyebrow">Qualification Standards</div>
-                      <h4>Minimum Requirements</h4>
-                    </div>
-                    <div className="position-qs-list">
-                      <div className="position-qs-item">
-                        <b>Bachelor's Degree</b>
-                        <span>{position.requiredBachelorDegree || 'No minimum specified'}</span>
-                      </div>
-                      <div className="position-qs-item">
-                        <b>Years of Experience</b>
-                        <span>{position.minYearsExperience !== undefined ? `${position.minYearsExperience} minimum year(s)` : '0 minimum year(s)'}</span>
-                      </div>
-                      <div className="position-qs-item">
-                        <b>Hours of Training</b>
-                        <span>{position.minTrainingHours !== undefined ? `${position.minTrainingHours} minimum hour(s)` : '0 minimum hour(s)'}</span>
-                      </div>
-                      <div className="position-qs-item">
-                        <b>Eligibility</b>
-                        <span>{position.eligibilityRequired || 'Not specified'}</span>
-                      </div>
-                    </div>
-                  </section>
-                </aside>
-
-                <section className="posting-calendar-panel">
-                  <div className="posting-card-head">
-                    <div className="position-detail-eyebrow">Posting Calendar</div>
-                    <h4>Set Posting Schedule</h4>
-                    <p>Choose the posting start date and deadline for <b>{calVacancy.itemNo}</b>.</p>
-                  </div>
-
-                  <div className="cal-fields" style={{ display: 'flex', alignItems: 'center', gap: '10px', background: '#F8FCFF', border: '2.5px solid var(--line)', borderRadius: '18px', padding: '10px' }}>
-                    <button
-                      type="button"
-                      className={`cal-field ${calField === 'start' ? 'active' : ''}`}
-                      onClick={() => setCalField('start')}
-                      style={{
-                        flex: 1,
-                        padding: '10px',
-                        borderRadius: '12px',
-                        border: calField === 'start' ? '2.5px solid var(--blue)' : '1.5px solid var(--line)',
-                        background: 'white',
-                        textAlign: 'left',
-                        cursor: 'pointer',
-                        transition: 'all 0.15s ease'
-                      }}
-                    >
-                      <span className="cf-label" style={{ display: 'block', fontSize: '9px', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: '800' }}>Start date</span>
-                      <span className="cf-value" style={{ fontSize: '14px', fontWeight: '900', color: 'var(--navy)' }}>{formatBtnDate(calStart)}</span>
-                    </button>
-                    <span className="cal-arrow" style={{ fontSize: '20px', color: 'var(--muted)' }}>→</span>
-                    <button
-                      type="button"
-                      className={`cal-field ${calField === 'end' ? 'active' : ''}`}
-                      onClick={() => setCalField('end')}
-                      style={{
-                        flex: 1,
-                        padding: '10px',
-                        borderRadius: '12px',
-                        border: calField === 'end' ? '2.5px solid var(--blue)' : '1.5px solid var(--line)',
-                        background: 'white',
-                        textAlign: 'left',
-                        cursor: 'pointer',
-                        transition: 'all 0.15s ease'
-                      }}
-                    >
-                      <span className="cf-label" style={{ display: 'block', fontSize: '9px', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: '800' }}>Deadline</span>
-                      <span className="cf-value" style={{ fontSize: '14px', fontWeight: '900', color: 'var(--navy)' }}>{formatBtnDate(calEnd)}</span>
-                    </button>
-                  </div>
-
-                  <div style={{ border: '2px solid var(--line)', borderRadius: '18px', padding: '16px', background: 'white' }}>
-                    <div className="cal-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                      <button className="cal-nav" onClick={() => calShift(-1)} style={{ padding: '4px 10px', fontSize: '18px', fontWeight: 'bold', background: 'var(--blue-100)', color: 'var(--blue)', borderRadius: '8px', border: 'none', cursor: 'pointer' }}>‹</button>
-                      <div style={{ display: 'flex', gap: '6px' }}>
-                        <select
-                          value={calMonth}
-                          onChange={e => setCalMonth(Number(e.target.value))}
-                          style={{ padding: '6px 12px', borderRadius: '10px', border: '1.5px solid var(--line)', fontWeight: '800', background: '#F8FCFF', color: 'var(--navy)' }}
-                        >
-                          {monthNames.map((m, idx) => <option key={idx} value={idx}>{m}</option>)}
-                        </select>
-                        <select
-                          value={calYear}
-                          onChange={e => setCalYear(Number(e.target.value))}
-                          style={{ padding: '6px 12px', borderRadius: '10px', border: '1.5px solid var(--line)', fontWeight: '800', background: '#F8FCFF', color: 'var(--navy)' }}
-                        >
-                          {yearOpts.map(y => <option key={y} value={y}>{y}</option>)}
-                        </select>
-                      </div>
-                      <button className="cal-nav" onClick={() => calShift(1)} style={{ padding: '4px 10px', fontSize: '18px', fontWeight: 'bold', background: 'var(--blue-100)', color: 'var(--blue)', borderRadius: '8px', border: 'none', cursor: 'pointer' }}>›</button>
-                    </div>
-                    
-                    <div className="cal-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '6px', justifyItems: 'center' }}>
-                      {dows.map(d => (
-                        <div key={d} className="cal-dow" style={{ fontSize: '9px', fontWeight: '950', textTransform: 'uppercase', color: 'var(--muted)', paddingBottom: '6px' }}>{d}</div>
-                      ))}
-                      {cells}
-                    </div>
-                  </div>
-
-                  <div className="cal-duration" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', border: '2.5px solid var(--blue)', borderRadius: '18px', background: 'var(--blue-50)', padding: '12px 10px', textAlign: 'center' }}>
-                    <span className="cd-num" style={{ fontSize: '32px', fontWeight: '950', color: 'var(--blue-800)', fontFamily: 'var(--font-heading)', lineHeight: 1 }}>{durationDays}</span>
-                    <span className="cd-unit" style={{ fontSize: '9px', fontWeight: '950', color: 'var(--blue-800)', letterSpacing: '0.08em', textTransform: 'uppercase', marginTop: '4px' }}>Calendar Day(s) Open for Posting</span>
-                    <span className="cd-hint" style={{ fontSize: '11px', color: 'var(--muted)', fontWeight: '700', marginTop: '2px' }}>Weekends are included.</span>
-                  </div>
-
-                  <div className="cal-summary" style={{ textAlign: 'center', fontSize: '12px', fontWeight: '700', color: 'var(--navy)' }}>
-                    <span dangerouslySetInnerHTML={{ __html: getCalSummaryText() }}></span>
-                  </div>
-
-                  <div className="decision-row" style={{ justifyContent: 'flex-end', gap: '10px', marginTop: '6px' }}>
-                    <button className="secondary" onClick={() => setShowCalendar(false)}>Cancel</button>
-                    <button className="good cal-confirm" onClick={handleConfirmSchedule}>Open Posting</button>
-                  </div>
-                </section>
+                </div>
               </div>
             </div>
           </div>
