@@ -1,7 +1,7 @@
 import jwt from 'jsonwebtoken';
 import { pool } from '../../config/db.js';
 
-const MAX_HANDOFF_TTL_SECONDS = 5 * 60;
+const MAX_HANDOFF_TTL_SECONDS = 24 * 60 * 60;
 const PORTAL_SESSION_TTL = '2h';
 
 export class HqSsoConfigurationError extends Error {}
@@ -16,7 +16,27 @@ function getHandoffSecret() {
 }
 
 function getPortalJwtSecret() {
-  return process.env.JWT_SECRET || 'super-secret-jwt-key-change-in-production';
+  const secret = process.env.JWT_SECRET?.trim();
+  if (!secret) {
+    throw new HqSsoConfigurationError('JWT_SECRET is required');
+  }
+  return secret;
+}
+
+function getAuthorizedHqEmail() {
+  const email = process.env.AGAP_PORTAL_SSO_EMAIL?.trim().toLowerCase();
+  if (!email) {
+    throw new HqSsoConfigurationError('AGAP_PORTAL_SSO_EMAIL is required');
+  }
+  return email;
+}
+
+function getMappedPortalUsername() {
+  const username = process.env.AGAP_PORTAL_SSO_USERNAME?.trim();
+  if (!username) {
+    throw new HqSsoConfigurationError('AGAP_PORTAL_SSO_USERNAME is required');
+  }
+  return username;
 }
 
 function isUnixTimestamp(value) {
@@ -28,8 +48,6 @@ function verifyHandoffToken(token, now = Math.floor(Date.now() / 1000)) {
   try {
     claims = jwt.verify(token, getHandoffSecret(), {
       algorithms: ['HS256'],
-      issuer: 'insighted-hq',
-      audience: 'agap-portal',
       clockTimestamp: now,
     });
   } catch (error) {
@@ -39,12 +57,10 @@ function verifyHandoffToken(token, now = Math.floor(Date.now() / 1000)) {
 
   if (
     typeof claims !== 'object' ||
-    claims.type !== 'hq_sso' ||
+    typeof claims.email !== 'string' ||
+    !claims.email.trim() ||
     typeof claims.username !== 'string' ||
     !claims.username.trim() ||
-    claims.sub !== claims.username ||
-    typeof claims.jti !== 'string' ||
-    !claims.jti ||
     !isUnixTimestamp(claims.iat) ||
     !isUnixTimestamp(claims.exp) ||
     claims.iat > now + 30 ||
@@ -54,7 +70,13 @@ function verifyHandoffToken(token, now = Math.floor(Date.now() / 1000)) {
     throw new HqSsoAuthenticationError('Invalid HQ sign-in token payload');
   }
 
-  return claims.username.trim();
+  const email = claims.email.trim().toLowerCase();
+  const username = claims.username.trim();
+  if (email !== getAuthorizedHqEmail() || username !== getMappedPortalUsername()) {
+    throw new HqSsoAuthenticationError('This HQ account is not authorized for AGAP Portal access');
+  }
+
+  return username;
 }
 
 export async function exchangeHqSsoToken(token) {

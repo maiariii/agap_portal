@@ -86,15 +86,14 @@ async function main() {
     console.log("Seeding 25 mock applications for School Counselor Associate I...");
     for (let i = 0; i < 25; i++) {
       const degree = degreePool[i % degreePool.length];
-      const name = `${firstNames[i % firstNames.length]} ${lastNames[i % lastNames.length]}`;
       const email = `zoro_applicant_${i + 1}@deped.gov.ph`;
       const codeVal = `ZORO-2026-${String(100000 + i + 1).padStart(6, "0")}`;
 
       const { rows: applicantRows } = await pool.query(
-        `INSERT INTO applicants (surname, first_name, email_address, name, code, local_resident, bachelor_degree, major, years_experience, training_hours, eligibility, applicant_number)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        `INSERT INTO applicants (surname, first_name, email_address, code, local_resident, bachelor_degree, major, years_experience, training_hours, eligibility, applicant_number)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
          RETURNING id`,
-        [lastNames[i % lastNames.length], firstNames[i % firstNames.length], email, name, codeVal, true, degree.degree, degree.major, (i * 2) % 6, (i * 8) % 40, degree.elig, codeVal]
+        [lastNames[i % lastNames.length], firstNames[i % firstNames.length], email, codeVal, true, degree.degree, degree.major, (i * 2) % 6, (i * 8) % 40, degree.elig, codeVal]
       );
       const applicantId = applicantRows[0].id;
 

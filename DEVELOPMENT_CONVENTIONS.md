@@ -1,6 +1,6 @@
-# Clean Code Guidelines: Anti-Spaghetti Code Blueprint
+# Development Conventions: Clean Code & Responsive Design
 
-This document defines the coding standards, patterns, and refactoring guidelines to prevent "spaghetti code" inside the **AGAP Portal** codebase. These principles keep the system scalable, readable, and highly maintainable.
+This document defines the coding standards, interface design philosophies, and architectural best practices to keep the **AGAP Portal** codebase clean, scalable, and responsive.
 
 ---
 
@@ -37,7 +37,7 @@ Avoid deep nesting (`if-else` blocks) that makes code hard to read. Use **early 
 
 ---
 
-## ⚛️ React-Specific Anti-Spaghetti Standards
+## ⚛️ React-Specific Code Standards
 
 ### 1. Component Size Constraints
 Keep components focused and compact:
@@ -57,23 +57,23 @@ Avoid defining complex business or computational logic directly inside inline ha
     }}>Next</button>
     ```
 *   **Good**: Extract the handler to a named function or custom hook:
-      ```javascript
-      const handleAdvancePipeline = async () => {
-        try {
-          await advanceCandidatePipeline(app.id);
-          setToast({ message: 'Candidate advanced successfully', type: 'success' });
-        } catch (err) {
-          setToast({ message: err.message, type: 'error' });
-        }
-      };
-      ```
+    ```javascript
+    const handleAdvancePipeline = async () => {
+      try {
+        await advanceCandidatePipeline(app.id);
+        setToast({ message: 'Candidate advanced successfully', type: 'success' });
+      } catch (err) {
+        setToast({ message: err.message, type: 'error' });
+      }
+    };
+    ```
 
 ### 3. Pure Renders: No State Mutations in Render Loops
 Never trigger state changes or side effects directly in the render path, `useMemo`, or `useCallback`. This prevents infinite re-render loops.
 
 ---
 
-## ⚙️ Backend-Specific Anti-Spaghetti Standards
+## ⚙️ Backend-Specific Code Standards
 
 ### 1. Separate Routing from Logic
 Express route definitions must be lightweight, delegating implementation to controllers:
@@ -96,3 +96,73 @@ Never write raw SQL queries scattered across route files. Keep SQL queries in **
 Define shared configurations, enums, and pipeline stages in constant objects rather than hardcoding strings:
 *   **Bad**: `if (app.status === 'qualified')`
 *   **Good**: Use standard enums or shared configurations (e.g. `QUAL_PIPELINE` or `DOC_REQUIREMENTS`).
+
+---
+
+## 📱 Responsive Design Guidelines & Layout Philosophy
+
+### Fluidity Over Rigidity
+*   **Timeless Rule**: Never design for a single screen size. Web layouts must be fluid.
+*   **Percentages and Relative Units**: Prefer relative units (`%`, `vh`, `vw`, `em`, `rem`, `ch`) over hardcoded pixel heights and widths (`px`). 
+*   **Min/Max Constraints**: Always anchor fluid widths with safety boundaries:
+    ```css
+    .card {
+      width: 100%;
+      max-width: 600px;
+      min-width: 280px;
+    }
+    ```
+
+### Progressive Enhancement & Mobile-First
+*   Start with a single-column, screen-agnostic layout.
+*   Enhance the layout for larger viewports using media queries. This guarantees readability on screen readers, smartwatch browsers, and low-end devices first.
+
+### Modern CSS Layout Strategies
+*   **Flexbox (1-Dimensional Layouts)**: Use Flexbox for rows, columns, toolbars, and aligned lists.
+    ```css
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap; /* Prevent overflow on narrow viewports */
+      gap: 12px;
+      align-items: center;
+      justify-content: space-between;
+    }
+    ```
+*   **CSS Grid (2-Dimensional Layouts)**: Use Grid for page dashboards, control panels, and auto-sizing cards. Avoid hardcoding column numbers. Use `auto-fit` or `auto-fill` with `minmax()`:
+    ```css
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 16px;
+    }
+    ```
+*   **Container Queries (Component-Level Responsiveness)**: Allow components to adapt to the space *actually available to them* inside their parents:
+    ```css
+    .sidebar-card-wrapper {
+      container-type: inline-size;
+      container-name: card-container;
+    }
+    @container card-container (max-width: 350px) {
+      .card-inner {
+        flex-direction: column;
+        padding: 8px;
+      }
+    }
+    ```
+
+### Fluid Typography & Spacing
+*   Use `clamp()` to scale typography smoothly:
+    ```css
+    h1 {
+      font-size: clamp(1.75rem, 4vw + 1rem, 3rem);
+      line-height: 1.2;
+    }
+    ```
+*   Use `rem` for typography, margin, and padding to respect user font preferences.
+*   Use `em` for local padding inside buttons or badges so they scale proportionally.
+
+### The Responsive Checklist
+1.  **Touch Targets**: Interactive buttons and links must be at least `44px` by `44px`.
+2.  **Prevent Horizontal Scroll**: Resolve overflow issues rather than applying `overflow-x: hidden`.
+3.  **Flexible Media**: Scale images/videos with `max-width: 100%; height: auto;`.
+4.  **Table Wraps**: Wrap wide tables in an `overflow-x: auto` container.

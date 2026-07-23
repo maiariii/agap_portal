@@ -16,7 +16,11 @@ pg.types.setTypeParser(1114, function(stringValue) {
 
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_URL && process.env.DATABASE_URL.includes('azure')
+  ssl: process.env.DATABASE_URL && (
+    process.env.DATABASE_URL.includes('azure') ||
+    process.env.DATABASE_URL.includes('sslmode=require') ||
+    process.env.NODE_ENV === 'production'
+  )
     ? { rejectUnauthorized: false }
     : false
 });

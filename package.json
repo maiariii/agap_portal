@@ -12,5 +12,11 @@
     "build:shared": "npm run build --workspace=packages/shared",
     "build:web": "npm run build --workspace=apps/web",
     "start:api": "npm run start --workspace=apps/api"
+  },
+  "dependencies": {
+    "exceljs": "^4.4.0",
+    "pdfkit": "^0.19.1",
+    "pdfkit-table": "^0.2.11",
+    "puppeteer-core": "^25.3.0"
   }
 }

@@ -1093,7 +1093,8 @@ button.gold {
   padding: 3px 10px;
   border-radius: 999px;
   font-size: 12px;
-  font-weight: 900
+  font-weight: 900;
+  white-space: nowrap;
 }
 
 .green {
@@ -2088,8 +2089,12 @@ body:has(.sidebar:hover) .modal {
   border-radius: 24px;
   width: min(1180px, 96vw);
   max-height: 88vh;
-  overflow: auto;
-  padding: 22px
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+  box-sizing: border-box;
+  box-shadow: 0 24px 60px rgba(8, 49, 95, 0.2);
 }
 
 .modal-head {
@@ -2097,13 +2102,35 @@ body:has(.sidebar:hover) .modal {
   justify-content: space-between;
   gap: 12px;
   align-items: center;
-  margin-bottom: 12px;
-  position: sticky;
-  top: 0;
+  margin: 0;
+  padding: 18px 24px;
   background: white;
-  z-index: 2;
-  padding-bottom: 10px;
-  border-bottom: 1px solid #E2E8F0
+  z-index: 20;
+  border-bottom: 1px solid #E2E8F0;
+  flex-shrink: 0;
+}
+
+.modal-body {
+  padding: 20px 24px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.modal-body > * {
+  flex-shrink: 0;
+}
+
+.modal-box > .decision-row {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 24px;
+  background: white;
+  border-top: 1px solid #E2E8F0;
+  flex-shrink: 0;
+  margin: 0;
+  z-index: 20;
 }
 
 .qs-grid {
@@ -2825,11 +2852,12 @@ body:has(.sidebar:hover) .modal {
 
 .qualified-card-head {
   position: relative;
-  padding: 16px 18px;
+  padding: 20px 24px;
   background: linear-gradient(135deg, var(--navy), var(--blue));
   color: white;
   margin: 0 0 16px;
-  min-height: 116px
+  min-height: auto;
+  box-sizing: border-box;
 }
 
 .qualified-card-head .position-detail-eyebrow {
@@ -2851,18 +2879,15 @@ body:has(.sidebar:hover) .modal {
   font-weight: 800;
   color: #E0F2FE;
   line-height: 1.35;
-  max-width: calc(100% - 210px)
+  max-width: 100%;
 }
 
 .qualified-card-head .qs-matrix-summary {
-  position: absolute;
-  right: 18px;
-  top: 50%;
-  transform: translateY(-50%);
-  margin: 0;
-  justify-content: flex-end;
+  position: static;
+  transform: none;
+  display: flex;
   align-items: center;
-  gap: 10px
+  gap: 16px;
 }
 
 .qualified-save-top {
@@ -4453,4 +4478,122 @@ body:has(.sidebar:hover) .modal {
 .register-trigger-btn:hover::after {
   transform: scaleX(1);
   background-color: var(--navy);
+}
+
+/* Executive 10+ Yr Lead Designer Quick Action Export Card (AGAP Theme Matched) */
+.export-quick-action-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  background: white;
+  border: 1px solid var(--line, #BAE6FD);
+  border-top: 3px solid var(--blue-600, #0284C7);
+  border-radius: 16px;
+  padding: 16px;
+  box-shadow: 0 4px 16px -2px rgba(8, 49, 95, 0.06), 0 2px 6px -1px rgba(8, 49, 95, 0.04);
+  box-sizing: border-box;
+  gap: 12px;
+}
+
+.action-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.action-card-icon-badge {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--blue-50, #F0F9FF);
+  border: 1px solid var(--line, #BAE6FD);
+  color: var(--blue-600, #0284C7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.action-title-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.action-kicker {
+  font-family: var(--font-heading);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.8px;
+  color: var(--muted, #64748B);
+  text-transform: uppercase;
+}
+
+.action-title {
+  font-family: var(--font-heading);
+  font-size: 13.5px;
+  font-weight: 800;
+  color: var(--navy, #08315F);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.export-report-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 14px;
+  background: linear-gradient(135deg, var(--blue-600, #0284C7) 0%, var(--blue, #075985) 100%);
+  color: white;
+  font-family: var(--font-heading);
+  font-weight: 750;
+  font-size: 13px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  box-sizing: border-box;
+  box-shadow: 0 4px 12px rgba(2, 132, 199, 0.25);
+}
+
+.export-report-btn:hover {
+  background: linear-gradient(135deg, var(--blue, #075985) 0%, var(--navy, #08315F) 100%);
+  box-shadow: 0 6px 16px rgba(7, 89, 133, 0.35);
+  transform: translateY(-1px);
+}
+
+.export-report-btn:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 6px rgba(7, 89, 133, 0.2);
+}
+
+.export-btn-badge {
+  font-family: var(--font-heading);
+  font-size: 10px;
+  font-weight: 850;
+  background: rgba(255, 255, 255, 0.22);
+  color: white;
+  padding: 2px 7px;
+  border-radius: 5px;
+  letter-spacing: 0.5px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.action-card-footer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted, #64748B);
+}
+
+.action-card-footer .footer-check {
+  color: var(--green, #16A34A);
+  font-weight: 800;
 }

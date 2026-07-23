@@ -316,13 +316,37 @@ export default function ApplicationsPage() {
     }
   };
 
-  const handleExportIER = () => {
-    const qualRows = filteredApps.filter(app => getApplicationDisplayStatus(app).toLowerCase() === 'qualified');
-    const headers = ["No.", "Applicant", "Applicant Number", "Date of Application", "Deadline", "Bachelor's Degree", "Years Experience", "Hours Training", "Vacancy", "Status"];
-    const rows = qualRows.map((r, i) => [
-      i + 1, r.applicant, r.code, r.dateApplied, r.deadline, r.bachelorDegree, r.yearsExperience, r.trainingHours, r.vacancy, getApplicationDisplayStatus(r)
-    ]);
-    downloadCSV(headers, rows, `IER-qualified-applicants-${new Date().toISOString().slice(0, 10)}.csv`);
+  const handleExportIER = async () => {
+    try {
+      const token = localStorage.getItem('agap_token');
+      const params = new URLSearchParams();
+      if (appVacancyFilter) params.append('vacancyId', appVacancyFilter);
+
+      const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/applications/export-ier?${params.toString()}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || 'Failed to export IER Excel file');
+      }
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const dateStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
+      a.download = `IER_Annex_D_${dateStr}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error(err);
+      alert('Failed to download IER Excel file: ' + err.message);
+    }
   };
 
   const handleOpenReview = (appRow) => {
@@ -492,10 +516,36 @@ export default function ApplicationsPage() {
           </div>
         </div>
 
-        <div className="card action-card">
-          <div className="action-title">Quick actions</div>
-          <div className="action-buttons" style={{ gridTemplateColumns: '1fr' }}>
-            <button onClick={handleExportIER}>Download IER</button>
+        <div className="card action-card export-quick-action-card">
+          <div className="action-card-header">
+            <div className="action-card-icon-badge">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+                <path d="M8 13h8" />
+                <path d="M8 17h8" />
+                <path d="M10 9h1" />
+              </svg>
+            </div>
+            <div className="action-title-group">
+              <span className="action-kicker">EXPORT REPORT</span>
+              <span className="action-title">DepEd Order 7 · Annex D (IER)</span>
+            </div>
+          </div>
+          <button className="export-report-btn" onClick={handleExportIER}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+              <span>Download IER Excel</span>
+            </div>
+            <span className="export-btn-badge">.XLSX</span>
+          </button>
+          <div className="action-card-footer">
+            <span className="footer-check">✓</span>
+            <span>Auto-formatted official template</span>
           </div>
         </div>
       </div>
@@ -512,6 +562,17 @@ export default function ApplicationsPage() {
         </div>
         <div className="table-wrap">
           <table style={{ width: '100%', tableLayout: 'fixed' }}>
+            <colgroup>
+              <col style={{ width: '4%' }} />
+              <col style={{ width: '15%' }} />
+              <col style={{ width: '10%' }} />
+              <col style={{ width: '10%' }} />
+              <col style={{ width: '17%' }} />
+              <col style={{ width: '7%' }} />
+              <col style={{ width: '7%' }} />
+              <col style={{ width: '15%' }} />
+              <col style={{ width: '15%' }} />
+            </colgroup>
             <thead>
               <tr>
                 <th className="row-num">No.</th>
@@ -686,7 +747,7 @@ export default function ApplicationsPage() {
                           </span>
                         </td>
                         <td>{r.vacancy}</td>
-                        <td><span className={`badge ${cls(getApplicationDisplayStatus(r))}`}>{getApplicationDisplayStatus(r)}</span></td>
+                        <td style={{ textAlign: 'center' }}><span className={`badge ${cls(getApplicationDisplayStatus(r))}`}>{getApplicationDisplayStatus(r)}</span></td>
                       </tr>
                     ))}
                   </VacancyClusterAccordion>
@@ -726,23 +787,9 @@ export default function ApplicationsPage() {
 
       {/* MODAL: INITIAL EVALUATION REVIEW */}
       {reviewId && reviewApp && (
-        <div className="modal open">
-          <div className="modal-box" style={{ width: 'min(960px, 96vw)', padding: '0 24px 24px', maxHeight: '92vh', overflow: 'auto' }}>
-            <div className="modal-head" style={{
-              paddingTop: '24px',
-              paddingBottom: '12px',
-              background: 'white',
-              position: 'sticky',
-              top: 0,
-              zIndex: 10,
-              margin: '0 -24px 16px',
-              paddingLeft: '24px',
-              paddingRight: '24px',
-              borderBottom: '1px solid #E2E8F0',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center'
-            }}>
+        <div className="modal open" style={{ zIndex: 1000 }}>
+          <div className="modal-box" style={{ width: 'min(960px, 96vw)' }}>
+            <div className="modal-head">
               <h2 style={{ margin: 0 }}>Initial Evaluation Review — {reviewApp.applicant}</h2>
               <div style={{ display: 'flex', gap: '8px' }}>
                 <button type="button" className="secondary" onClick={() => setShowReviewDocsVault(!showReviewDocsVault)}>
@@ -751,8 +798,8 @@ export default function ApplicationsPage() {
                 <button className="secondary" onClick={handleCloseReviewModal}>Close</button>
               </div>
             </div>
-
-            <div className="qs-matrix-wrap">
+            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              <div className="qs-matrix-wrap">
               <div className="qs-matrix-head">
                 <div>
                   <div className="position-detail-eyebrow">Qualification Standards</div>
@@ -956,30 +1003,19 @@ export default function ApplicationsPage() {
               </div>
             </div>
           </div>
+        </div>
 
       {/* SUB-MODAL: DOCUMENT VAULT PREVIEW */}
       {showReviewDocsVault && reviewApp && (
         <div className="modal open" style={{ zIndex: 100002 }}>
-          <div className="modal-box" style={{ padding: '0 24px 24px', maxHeight: '92vh', overflow: 'auto', width: 'min(1100px, 98vw)' }}>
-            <div className="modal-head" style={{
-              paddingTop: '24px',
-              paddingBottom: '12px',
-              background: 'white',
-              position: 'sticky',
-              top: 0,
-              zIndex: 10,
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              borderBottom: '1px solid var(--line)'
-            }}>
+          <div className="modal-box" style={{ width: 'min(1100px, 98vw)' }}>
+            <div className="modal-head">
               <h2 style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: 0 }}>
                 📂 Document Vault — {reviewApp.applicant}
               </h2>
               <button className="secondary" onClick={() => setShowReviewDocsVault(false)}>Close Vault</button>
             </div>
-
-            <div className="modal-body" style={{ marginTop: '20px', display: 'grid', gridTemplateColumns: '320px 1fr', gap: '20px', alignItems: 'start' }}>
+            <div className="modal-body" style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: '20px', alignItems: 'start' }}>
               {/* Document Checklist Sidebar */}
               <div style={{ border: '1px solid var(--line)', borderRadius: '12px', overflow: 'hidden', background: '#F8FAFC' }}>
                 <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)', background: 'white' }}>
@@ -987,6 +1023,7 @@ export default function ApplicationsPage() {
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', background: 'white' }}>
                   {[
+                    { key: 'letter_of_intent', label: 'Letter of Intent', required: true },
                     { key: 'pds', label: 'Personal Data Sheet', required: true },
                     { key: 'work_experience', label: 'Work Experience Sheet', required: true },
                     { key: 'eligibility', label: 'Certificate of Eligibility', required: true },
@@ -994,6 +1031,7 @@ export default function ApplicationsPage() {
                     { key: 'prc', label: 'Updated PRC License/ID', required: true },
                     { key: 'diploma', label: 'Diploma (optional)', required: false },
                     { key: 'resume', label: 'Resume', required: true },
+                    { key: 'outstanding_accomplishments', label: 'Outstanding Accomplishments', required: false },
                     { key: 'performance_rating', label: 'Performance Rating', required: false },
                     { key: 'training_certificates', label: 'Training Certificates', required: false },
                     { key: 'application_education', label: 'Application of Education', required: false },
@@ -1048,6 +1086,7 @@ export default function ApplicationsPage() {
                       <circle cx="12" cy="12" r="3" />
                     </svg>
                     Document Viewer: {
+                      selectedDocKey === 'letter_of_intent' ? 'Letter of Intent' :
                       selectedDocKey === 'pds' ? 'Personal Data Sheet (PDS)' :
                       selectedDocKey === 'work_experience' ? 'Work Experience Sheet' :
                       selectedDocKey === 'eligibility' ? 'Certificate of Eligibility' :
@@ -1055,6 +1094,7 @@ export default function ApplicationsPage() {
                       selectedDocKey === 'prc' ? 'Updated PRC License/ID' :
                       selectedDocKey === 'diploma' ? 'Diploma' :
                       selectedDocKey === 'resume' ? 'Resume' :
+                      selectedDocKey === 'outstanding_accomplishments' ? 'Outstanding Accomplishments' :
                       selectedDocKey === 'performance_rating' ? 'Performance Rating' :
                       selectedDocKey === 'training_certificates' ? 'Training Certificates' :
                       selectedDocKey === 'application_education' ? 'Application of Education' :
@@ -1171,9 +1211,11 @@ export default function ApplicationsPage() {
               <h2>Unsaved changes</h2>
               <button className="secondary" onClick={() => setShowUnsavedPrompt(false)}>Keep Editing</button>
             </div>
-            <p className="small" style={{ fontSize: '14px', fontWeight: '800', color: 'var(--navy)', lineHeight: '1.5', margin: '0 0 16px' }}>
-              You have unsaved evaluation changes. Save first, or discard the changes and close this review.
-            </p>
+            <div className="modal-body">
+              <p className="small" style={{ fontSize: '14px', fontWeight: '800', color: 'var(--navy)', lineHeight: '1.5', margin: 0 }}>
+                You have unsaved evaluation changes. Save first, or discard the changes and close this review.
+              </p>
+            </div>
             <div className="decision-row" style={{ justifyContent: 'flex-end', gap: '8px' }}>
               <button className="secondary" onClick={handleDiscardChanges}>Discard Changes</button>
               <button className="good" onClick={async () => {
