@@ -533,7 +533,7 @@ export default function App() {
         {/* REGISTER MODAL */}
         {showRegister && (
           <div className="modal open" style={{ zIndex: 100001, left: 0, background: 'rgba(15, 23, 42, 0.45)', backdropFilter: 'blur(16px)' }}>
-            <div className="modal-box" style={{ width: 'min(520px, 96vw)', padding: '0 40px 40px 40px', borderRadius: '28px', background: 'white', border: '1px solid rgba(15, 23, 42, 0.08)', borderTop: '6px solid #0284c7', boxShadow: '0 24px 60px rgba(0, 0, 0, 0.15)', backdropFilter: 'none' }}>
+            <div className="modal-box" style={{ width: 'min(520px, 96vw)', maxHeight: '90vh', overflowY: 'auto', padding: '0 40px 40px 40px', borderRadius: '28px', background: 'white', border: '1px solid rgba(15, 23, 42, 0.08)', borderTop: '6px solid #0284c7', boxShadow: '0 24px 60px rgba(0, 0, 0, 0.15)', backdropFilter: 'none' }}>
               <div className="modal-head" style={{ paddingTop: '40px', marginBottom: '28px', borderBottom: 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'white', position: 'sticky', top: 0, zIndex: 10 }}>
                 <h2 style={{ margin: 0, fontSize: '26px', fontWeight: '850', color: 'var(--navy)', fontFamily: 'var(--font-heading)', letterSpacing: '-0.5px' }}>Create Account</h2>
                 <button 
