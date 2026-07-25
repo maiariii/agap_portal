@@ -134,8 +134,8 @@ export async function createVacancy(req, res) {
         division,
         region,
         'open',
-        postingStart ? new Date(postingStart) : null,
-        postingEnd ? new Date(postingEnd) : null,
+        parseOrFormatDateParam(postingStart),
+        parseOrFormatDateParam(postingEnd),
         salaryGrade ? parseInt(salaryGrade) : null,
         jobClusterId
       ]
@@ -163,11 +163,11 @@ export async function toggleVacancyStatus(req, res) {
     }
     if (postingStart !== undefined) {
       fields.push(`posting_start = $${idx++}`);
-      values.push(postingStart ? new Date(postingStart) : null);
+      values.push(parseOrFormatDateParam(postingStart));
     }
     if (postingEnd !== undefined) {
       fields.push(`posting_end = $${idx++}`);
-      values.push(postingEnd ? new Date(postingEnd) : null);
+      values.push(parseOrFormatDateParam(postingEnd));
     }
 
     values.push(id);
