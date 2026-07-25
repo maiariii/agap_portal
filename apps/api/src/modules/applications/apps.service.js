@@ -7,7 +7,7 @@ async function getPositionCols() {
   if (cachedPositionCols) return cachedPositionCols;
   try {
     const { rows } = await pool.query(
-      "SELECT column_name FROM information_schema.columns WHERE table_name = 'positions'"
+      "SELECT column_name FROM information_schema.columns WHERE table_name = 'positions' AND table_schema = CURRENT_SCHEMA()"
     );
     const cols = rows.map(r => r.column_name.toLowerCase());
     const exp = cols.includes('min_years_experience') ? 'min_years_experience' : (cols.includes('years_experience') ? 'years_experience' : 'years_experience');

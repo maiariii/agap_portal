@@ -117,10 +117,9 @@ def main():
         f"npm install --omit=dev --legacy-peer-deps --prefer-offline --no-audit --no-fund 2>&1 | tail -n 5 && "
         # Setup directories for logs
         f"mkdir -p apps/api/logs && "
-        # Start server with PM2 and reload Nginx to purge stale static asset cache
+        # Start server with PM2
         f"pm2 delete {PM2_NAME} 2>/dev/null || true && "
         f"pm2 start {ECOSYSTEM_CONFIG} && "
-        f"sudo nginx -t && sudo nginx -s reload 2>/dev/null || true && "
         f"rm -f {ARCHIVE_NAME}"
     )
 
