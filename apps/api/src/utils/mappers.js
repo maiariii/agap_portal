@@ -16,13 +16,15 @@ export function mapPosition(row) {
 
 function formatDateOnly(d) {
   if (!d) return null;
-  if (typeof d === 'string') return d.slice(0, 10);
+  if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d.trim())) return d.trim();
   const dt = new Date(d);
   if (isNaN(dt.getTime())) return null;
-  const year = dt.getFullYear();
-  const month = String(dt.getMonth() + 1).padStart(2, '0');
-  const day = String(dt.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(dt);
 }
 
 export function mapVacancy(row) {
