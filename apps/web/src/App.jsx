@@ -40,8 +40,8 @@ export default function App() {
   const location = useLocation();
 
   // Login Form State
-  const [username, setUsername] = useState('hr_officer');
-  const [password, setPassword] = useState('password');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState('');
   const ssoToken = useMemo(
     () => new URLSearchParams(location.search).get('sso_token'),
@@ -495,7 +495,7 @@ export default function App() {
                       type="text"
                       value={username}
                       onChange={e => setUsername(e.target.value)}
-                      placeholder="your.email@deped.gov.ph"
+                      placeholder="user@deped.gov.ph"
                       required
                     />
                   </div>

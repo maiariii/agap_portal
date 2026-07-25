@@ -14,6 +14,17 @@ export function mapPosition(row) {
   };
 }
 
+function formatDateOnly(d) {
+  if (!d) return null;
+  if (typeof d === 'string') return d.slice(0, 10);
+  const dt = new Date(d);
+  if (isNaN(dt.getTime())) return null;
+  const year = dt.getFullYear();
+  const month = String(dt.getMonth() + 1).padStart(2, '0');
+  const day = String(dt.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 export function mapVacancy(row) {
   if (!row) return null;
   return {
@@ -28,8 +39,8 @@ export function mapVacancy(row) {
     schoolLevel: row.school_level,
     schoolId: row.school_id,
     fillingUpStatus: row.filling_up_status || 'UNFILLED',
-    postingStart: row.posting_start ? new Date(row.posting_start) : null,
-    postingEnd: row.posting_end ? new Date(row.posting_end) : null,
+    postingStart: formatDateOnly(row.posting_start),
+    postingEnd: formatDateOnly(row.posting_end),
     salaryGrade: row.salary_grade,
     jobClusterId: row.job_cluster_id,
     createdAt: new Date(row.created_at),

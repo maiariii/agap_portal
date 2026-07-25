@@ -645,9 +645,7 @@ export default function VacanciesPage() {
         const startD = new Date(iso + "T00:00:00");
         const endD = new Date(calEnd + "T00:00:00");
         const diffDays = Math.round((endD - startD) / 86400000);
-        if (diffDays > 10) {
-          setCalEnd('');
-        } else if (iso > calEnd) {
+        if (diffDays > 10 || iso > calEnd) {
           setCalEnd('');
         }
       }

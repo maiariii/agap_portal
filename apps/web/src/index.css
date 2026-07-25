@@ -4404,7 +4404,8 @@ body:has(.sidebar:hover) .modal {
 }
 
 .login-card input::placeholder {
-  color: #475569;
+  color: #94a3b8;
+  opacity: 0.6;
 }
 
 .login-error {
