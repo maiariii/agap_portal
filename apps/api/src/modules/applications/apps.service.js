@@ -1,7 +1,26 @@
 import { pool } from '../../config/db.js';
 import { computeFit } from '@agap/shared';
 
+let cachedPositionCols = null;
+
+async function getPositionCols() {
+  if (cachedPositionCols) return cachedPositionCols;
+  try {
+    const { rows } = await pool.query(
+      "SELECT column_name FROM information_schema.columns WHERE table_name = 'positions'"
+    );
+    const cols = rows.map(r => r.column_name.toLowerCase());
+    const exp = cols.includes('min_years_experience') ? 'min_years_experience' : (cols.includes('years_experience') ? 'years_experience' : 'years_experience');
+    const train = cols.includes('min_training_hours') ? 'min_training_hours' : (cols.includes('training_hours') ? 'training_hours' : 'training_hours');
+    cachedPositionCols = { exp, train };
+    return cachedPositionCols;
+  } catch (e) {
+    return { exp: 'years_experience', train: 'training_hours' };
+  }
+}
+
 export async function getHydratedApplications(vacancyId = null, region = null, division = null) {
+  const posCols = await getPositionCols();
   let query = `
     SELECT 
       a.*,
@@ -40,8 +59,8 @@ export async function getHydratedApplications(vacancyId = null, region = null, d
       p.track as position_track,
       p.required_bachelor_degree as position_required_bachelor_degree,
       p.required_degree_keywords as position_required_degree_keywords,
-      p.years_experience as position_min_years_experience,
-      p.training_hours as position_min_training_hours,
+      p.${posCols.exp} as position_min_years_experience,
+      p.${posCols.train} as position_min_training_hours,
       p.eligibility_required as position_eligibility_required,
       (
         SELECT COALESCE(json_agg(h ORDER BY h.at DESC), '[]'::json)
