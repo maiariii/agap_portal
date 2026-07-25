@@ -29,17 +29,3 @@ pool.on('connect', (client) => {
   client.query('SET search_path TO public;');
   client.query("SET timezone = 'Asia/Manila';");
 });
-
-// Auto-run schema compatibility migrations
-(async () => {
-  try {
-    await pool.query(`
-      ALTER TABLE positions ADD COLUMN IF NOT EXISTS min_years_experience INTEGER;
-      ALTER TABLE positions ADD COLUMN IF NOT EXISTS min_training_hours INTEGER;
-      UPDATE positions SET min_years_experience = COALESCE(min_years_experience, years_experience, 0);
-      UPDATE positions SET min_training_hours = COALESCE(min_training_hours, training_hours, 0);
-    `);
-  } catch (err) {
-    console.error('Schema compatibility check error:', err.message);
-  }
-})();
