@@ -47,10 +47,6 @@ export async function login(req, res) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    if (user.status === 'locked' && user.locked_until && new Date(user.locked_until) > new Date()) {
-      return res.status(403).json({ error: 'Account is locked. Please try again later.' });
-    }
-
     let validPassword = await bcrypt.compare(password, user.password_hash);
     if (!validPassword && user.passcode_hash) {
       if (password === user.passcode_hash) {
@@ -61,23 +57,12 @@ export async function login(req, res) {
     }
 
     if (!validPassword) {
-      const attempts = (user.failed_login_attempts || 0) + 1;
-      let status = user.status;
-      let lockedUntil = user.locked_until;
-      if (attempts >= 5) {
-        status = 'locked';
-        lockedUntil = new Date(Date.now() + 15 * 60 * 1000); // 15 mins
-      }
-      await pool.query(
-        'UPDATE users SET failed_login_attempts = $1, status = $2, locked_until = $3 WHERE id = $4',
-        [attempts, status, lockedUntil, user.id]
-      );
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    // Reset failed attempts
+    // Update last login
     await pool.query(
-      'UPDATE users SET failed_login_attempts = 0, locked_until = null, last_login_at = $1 WHERE id = $2',
+      'UPDATE users SET last_login_at = $1 WHERE id = $2',
       [new Date(), user.id]
     );
 
