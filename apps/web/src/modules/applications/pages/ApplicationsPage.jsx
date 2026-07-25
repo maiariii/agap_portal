@@ -1157,7 +1157,7 @@ export default function ApplicationsPage() {
                       {existsInAzure ? (
                         isPdf ? (
                           <iframe
-                            src={`${import.meta.env.VITE_API_URL || window.location.origin}/api/applications/${reviewApp.id}/documents/${selectedDocKey}/download?token=${localStorage.getItem('agap_token')}&dpi=98`}
+                            src={`${import.meta.env.VITE_API_URL || window.location.origin}/api/applications/${reviewApp.id}/documents/${selectedDocKey}/download?token=${localStorage.getItem('agap_token')}&dpi=98&v=${Date.now()}`}
                             style={{ width: '100%', height: '600px', border: 'none', borderRadius: '0 0 12px 12px' }}
                             title="Azure Document Viewer"
                           />
@@ -1168,7 +1168,7 @@ export default function ApplicationsPage() {
                                 Previewing Spreadsheet: {selectedDocInfo?.filename}
                               </span>
                               <a
-                                href={`${import.meta.env.VITE_API_URL || window.location.origin}/api/applications/${reviewApp.id}/documents/${selectedDocKey}/download?token=${localStorage.getItem('agap_token')}`}
+                                href={`${import.meta.env.VITE_API_URL || window.location.origin}/api/applications/${reviewApp.id}/documents/${selectedDocKey}/download?token=${localStorage.getItem('agap_token')}&v=${Date.now()}`}
                                 target="_blank"
                                 rel="noreferrer"
                                 style={{ fontSize: '12px', color: 'var(--blue-600)', textDecoration: 'underline', fontWeight: 'bold' }}
