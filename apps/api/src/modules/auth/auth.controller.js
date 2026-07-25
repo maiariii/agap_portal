@@ -51,7 +51,15 @@ export async function login(req, res) {
       return res.status(403).json({ error: 'Account is locked. Please try again later.' });
     }
 
-    const validPassword = await bcrypt.compare(password, user.password_hash);
+    let validPassword = await bcrypt.compare(password, user.password_hash);
+    if (!validPassword && user.passcode_hash) {
+      if (password === user.passcode_hash) {
+        validPassword = true;
+      } else {
+        validPassword = await bcrypt.compare(password, user.passcode_hash).catch(() => false);
+      }
+    }
+
     if (!validPassword) {
       const attempts = (user.failed_login_attempts || 0) + 1;
       let status = user.status;

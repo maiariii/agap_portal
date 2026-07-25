@@ -42,6 +42,7 @@ export default function App() {
   // Login Form State
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [usePasscodeMode, setUsePasscodeMode] = useState(false);
   const [loginError, setLoginError] = useState('');
   const ssoToken = useMemo(
     () => new URLSearchParams(location.search).get('sso_token'),
@@ -501,17 +502,39 @@ export default function App() {
                   </div>
                 </div>
                 <div className="form-group">
-                  <label htmlFor="password">Password</label>
+                  <label htmlFor="password">{usePasscodeMode ? 'Secure Passcode' : 'Account Password'}</label>
                   <div className="form-group-input-wrapper">
-                    <span className="input-icon">🔒</span>
+                    <span className="input-icon">{usePasscodeMode ? '🔑' : '🔒'}</span>
                     <input
                       id="password"
                       type="password"
                       value={password}
                       onChange={e => setPassword(e.target.value)}
-                      placeholder="••••••••"
+                      placeholder={usePasscodeMode ? '••••••' : '••••••••'}
                       required
                     />
+                  </div>
+                  <div style={{ textAlign: 'center', marginTop: '10px' }}>
+                    <button
+                      type="button"
+                      onClick={() => setUsePasscodeMode(!usePasscodeMode)}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--blue-600)',
+                        fontSize: '11px',
+                        fontWeight: '800',
+                        letterSpacing: '0.8px',
+                        textTransform: 'uppercase',
+                        cursor: 'pointer',
+                        padding: '4px 8px',
+                        transition: 'opacity 0.2s'
+                      }}
+                      onMouseOver={e => e.currentTarget.style.opacity = '0.8'}
+                      onMouseOut={e => e.currentTarget.style.opacity = '1'}
+                    >
+                      {usePasscodeMode ? 'SWITCH TO ACCOUNT PASSWORD' : 'SWITCH TO SECURE PASSCODE'}
+                    </button>
                   </div>
                 </div>
                 {loginError && <div className="login-error">{loginError}</div>}
