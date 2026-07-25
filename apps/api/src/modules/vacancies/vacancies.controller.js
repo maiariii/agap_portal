@@ -13,6 +13,20 @@ import crypto from 'crypto';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+function parseOrFormatDateParam(val) {
+  if (!val) return null;
+  if (typeof val === 'string') {
+    return val.slice(0, 10);
+  }
+  if (val instanceof Date) {
+    const y = val.getFullYear();
+    const m = String(val.getMonth() + 1).padStart(2, '0');
+    const d = String(val.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  return String(val).slice(0, 10);
+}
+
 export async function getPositions(req, res) {
   try {
     const { rows } = await pool.query('SELECT * FROM positions');
@@ -187,6 +201,11 @@ export async function toggleVacancyStatus(req, res) {
     if (postingEnd !== undefined) {
       fields.push(`posting_end = $${idx++}`);
       values.push(parseOrFormatDateParam(postingEnd));
+    }
+
+    if (fields.length === 0) {
+      const { rows } = await pool.query('SELECT * FROM vacancies WHERE id = $1', [id]);
+      return res.json(mapVacancy(rows[0]));
     }
 
     values.push(id);
