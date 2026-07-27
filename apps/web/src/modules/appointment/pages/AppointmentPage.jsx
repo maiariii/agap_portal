@@ -662,8 +662,9 @@ export default function AppointmentPage() {
                     { key: 'eligibility', label: 'Certificate of Eligibility', required: true },
                     { key: 'tor', label: 'Transcript of Records', required: true },
                     { key: 'prc', label: 'Updated PRC License/ID', required: true },
-                    { key: 'diploma', label: 'Diploma (optional)', required: false },
-                    { key: 'resume', label: 'Resume', required: true },
+                    { key: 'sworn_declaration', label: 'Certification on the Authenticity and Veracity (CAV)', required: true },
+                    { key: 'diploma', label: 'Diploma', required: false },
+                    { key: 'resume', label: 'Resume', required: false },
                     { key: 'outstanding_accomplishments', label: 'Outstanding Accomplishments', required: false },
                     { key: 'performance_rating', label: 'Performance Rating', required: false },
                     { key: 'training_certificates', label: 'Training Certificates', required: false },
@@ -726,6 +727,7 @@ export default function AppointmentPage() {
                       selectedDocKey === 'tor' ? 'Transcript of Records (TOR)' :
                       selectedDocKey === 'prc' ? 'Updated PRC License/ID' :
                       selectedDocKey === 'diploma' ? 'Diploma' :
+                      selectedDocKey === 'sworn_declaration' ? 'Certification on the Authenticity and Veracity (CAV)' :
                       selectedDocKey === 'resume' ? 'Resume' :
                       selectedDocKey === 'outstanding_accomplishments' ? 'Outstanding Accomplishments' :
                       selectedDocKey === 'performance_rating' ? 'Performance Rating' :
