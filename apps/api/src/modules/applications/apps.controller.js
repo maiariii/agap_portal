@@ -1115,7 +1115,29 @@ export async function exportIer(req, res) {
       row.getCell(19).value = eligibility; // S: Eligibility
       row.getCell(20).value = remarks; // T: Remarks (Qualified or Disqualified)
 
-      row.height = 40.5;
+      const estimateLines = (val, approxWidth = 22) => {
+        if (!val || val === '—') return 1;
+        const str = String(val).trim();
+        if (!str) return 1;
+        const lines = str.split('\n');
+        let count = 0;
+        for (const line of lines) {
+          count += Math.max(1, Math.ceil(line.length / approxWidth));
+        }
+        return count;
+      };
+
+      const maxLines = Math.max(
+        estimateLines(name, 22),
+        estimateLines(address, 28),
+        estimateLines(education, 22),
+        estimateLines(trainingTitle, 22),
+        estimateLines(expDetails, 22),
+        estimateLines(eligibility, 22),
+        1
+      );
+
+      row.height = Math.max(45, maxLines * 18 + 14);
       const rowFont = { name: 'Bookman Old Style', size: 11, bold: true };
       const refRow = sheet.getRow(15);
       const thinBorder = {
@@ -1125,13 +1147,18 @@ export async function exportIer(req, res) {
         right: { style: 'thin' }
       };
 
+      const centerCols = [2, 6, 7, 8, 9, 10, 11, 16, 18, 20];
+
       for (let colIdx = 2; colIdx <= 20; colIdx++) {
         const cell = row.getCell(colIdx);
         cell.font = rowFont;
         cell.border = thinBorder;
-        if (refRow && refRow.getCell(colIdx).alignment) {
-          cell.alignment = refRow.getCell(colIdx).alignment;
-        }
+        const refAlign = refRow ? refRow.getCell(colIdx).alignment : null;
+        cell.alignment = {
+          vertical: 'middle',
+          horizontal: refAlign?.horizontal || (centerCols.includes(colIdx) ? 'center' : 'left'),
+          wrapText: true
+        };
       }
 
       row.commit();
