@@ -181,7 +181,11 @@ export async function getRegionsDivisions(req, res) {
       allDivisions: Array.from(allDivisionsSet).sort()
     });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Server error fetching regions and divisions.' });
+    console.error('Error fetching regions and divisions:', error.message);
+    res.json({
+      regions: ['CAR','CARAGA','MIMAROPA','NCR','NIR','REGION I','REGION II','REGION III','REGION IV-A','REGION IX','REGION V','REGION VI','REGION VII','REGION VIII','REGION X','REGION XI','REGION XII'],
+      divisionsByRegion: {},
+      allDivisions: []
+    });
   }
 }

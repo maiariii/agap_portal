@@ -62,7 +62,7 @@ export async function getVacancies(req, res) {
     const userQuery = await pool.query('SELECT region, division FROM users WHERE id = $1', [req.user.id]);
     const user = userQuery.rows[0];
     if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+      return res.status(401).json({ error: 'User not found' });
     }
     const { region, division } = user;
 

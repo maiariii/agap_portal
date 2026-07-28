@@ -28,6 +28,7 @@ export const pool = new Pool({
 });
 
 pool.on('connect', (client) => {
-  client.query('SET search_path TO public;');
-  client.query("SET timezone = 'Asia/Manila';");
+  client.query("SET search_path TO public; SET timezone = 'Asia/Manila';").catch(err => {
+    console.error('[DB Connect Error]', err.message);
+  });
 });

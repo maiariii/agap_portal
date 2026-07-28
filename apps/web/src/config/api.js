@@ -8,19 +8,20 @@ export const apiFetch = async (path, options = {}) => {
     const apiPath = (import.meta.env.VITE_API_URL || '') + path;
     const res = await fetch(apiPath, { ...options, headers });
     if (!res.ok) {
+      let errMsg = `Server returned status ${res.status}`;
+      try {
+        const err = await res.json();
+        errMsg = err.error || errMsg;
+      } catch(e) {}
+
       if (
-        (res.status === 401 || res.status === 403) &&
+        (res.status === 401 || res.status === 403 || (typeof errMsg === 'string' && errMsg.includes('User not found'))) &&
         path !== '/api/auth/login' &&
         path !== '/api/auth/hq-sso'
       ) {
         window.dispatchEvent(new Event('agap-session-expired'));
         throw new Error('Your session has expired. Please log in again.');
       }
-      let errMsg = `Server returned status ${res.status}`;
-      try {
-        const err = await res.json();
-        errMsg = err.error || errMsg;
-      } catch(e) {}
       throw new Error(errMsg);
     }
     return await res.json();

@@ -20,7 +20,7 @@ export async function getApplications(req, res) {
     const userQuery = await pool.query('SELECT region, division FROM users WHERE id = $1', [req.user.id]);
     const user = userQuery.rows[0];
     if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+      return res.status(401).json({ error: 'User not found' });
     }
     const { region, division } = user;
 
@@ -474,7 +474,7 @@ export async function getApplicationDocuments(req, res) {
   console.log(`[Azure Storage] Scanning documents in container "${AZURE_FOLDER_NAME}" for application ID "${id}"...`);
   
   const appQuery = await pool.query(
-    `SELECT ap.id, ap.applicant_number, ap.code, ap.surname, ap.first_name 
+    `SELECT a.letter_of_intent, a.sworn_document, a.sworn_document as sworn_declaration, ap.id, ap.applicant_number, ap.code, ap.surname, ap.first_name 
      FROM applications a 
      JOIN applicants ap ON a.applicant_id = ap.id 
      WHERE a.id = $1`,
@@ -616,10 +616,21 @@ export async function getApplicationDocuments(req, res) {
       };
 
       documents.forEach(doc => {
-        const matchedBlob = findMatchingBlob(app, doc.key);
-        if (matchedBlob) {
+        if (doc.key === 'letter_of_intent' && app?.letter_of_intent) {
           doc.existsInAzure = true;
-          doc.filename = matchedBlob.name;
+          doc.filename = app.letter_of_intent;
+          doc.url = `/api/applications/${id}/documents/${doc.key}/download`;
+        } else if ((doc.key === 'sworn_declaration' || doc.key === 'cav') && app?.sworn_declaration) {
+          doc.existsInAzure = true;
+          doc.filename = app.sworn_declaration;
+          doc.url = `/api/applications/${id}/documents/${doc.key}/download`;
+        } else {
+          const matchedBlob = findMatchingBlob(app, doc.key);
+          if (matchedBlob) {
+            doc.existsInAzure = true;
+            doc.filename = matchedBlob.name;
+            doc.url = `/api/applications/${id}/documents/${doc.key}/download`;
+          }
         }
       });
 
@@ -660,7 +671,7 @@ export async function downloadApplicationDocument(req, res) {
   try {
     console.log(`[Azure Storage] Downsampling file download stream to ${requestedDpi} DPI for faster loading.`);
     const appQuery = await pool.query(
-      `SELECT ap.id, ap.applicant_number, ap.code, ap.surname, ap.first_name 
+      `SELECT a.letter_of_intent, a.sworn_document, a.sworn_document as sworn_declaration, ap.id, ap.applicant_number, ap.code, ap.surname, ap.first_name 
        FROM applications a 
        JOIN applicants ap ON a.applicant_id = ap.id 
        WHERE a.id = $1`,
@@ -668,7 +679,7 @@ export async function downloadApplicationDocument(req, res) {
     );
     const app = appQuery.rows[0];
     const applicantCode = app ? (app.code || app.applicant_number || '') : '';
-    
+
     console.log(`[Azure Storage] Finding blob for key "${key}" and applicant code "${applicantCode}" in container "${AZURE_FOLDER_NAME}"...`);
 
     const blobServiceClient = BlobServiceClient.fromConnectionString(connString);
@@ -678,6 +689,24 @@ export async function downloadApplicationDocument(req, res) {
     for await (const blob of containerClient.listBlobsFlat()) {
       allBlobs.push(blob);
     }
+
+    const extractBlobPath = (urlOrPath) => {
+      if (!urlOrPath) return '';
+      if (urlOrPath.startsWith('http://') || urlOrPath.startsWith('https://')) {
+        try {
+          const u = new URL(urlOrPath);
+          let p = u.pathname;
+          if (p.startsWith('/')) p = p.slice(1);
+          if (p.startsWith(AZURE_FOLDER_NAME + '/')) {
+            p = p.slice(AZURE_FOLDER_NAME.length + 1);
+          }
+          return p;
+        } catch (e) {
+          return urlOrPath;
+        }
+      }
+      return urlOrPath;
+    };
 
     const getFolderAliasesFromKey = (k) => {
       const cleanK = (k || '').toLowerCase().trim();
@@ -762,6 +791,19 @@ export async function downloadApplicationDocument(req, res) {
     };
 
     const findBlob = (appRow) => {
+      if (key === 'letter_of_intent' && appRow?.letter_of_intent) {
+        const extracted = extractBlobPath(appRow.letter_of_intent);
+        const found = allBlobs.find(b => b.name === extracted || b.name.endsWith(extracted) || extracted.endsWith(b.name));
+        if (found) return found.name;
+        return extracted;
+      }
+      if ((key === 'sworn_declaration' || key === 'cav') && appRow?.sworn_declaration) {
+        const extracted = extractBlobPath(appRow.sworn_declaration);
+        const found = allBlobs.find(b => b.name === extracted || b.name.endsWith(extracted) || extracted.endsWith(b.name));
+        if (found) return found.name;
+        return extracted;
+      }
+
       const applicantPrefixes = getApplicantFolderPrefixes(appRow);
       const folderAliases = getFolderAliasesFromKey(key);
 
