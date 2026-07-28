@@ -9,15 +9,15 @@ import agadLogo from './agadlogo.png';
 
 const TOUR_STEPS = [
   { view: "home", sel: ".kpis", title: "Headline metrics", body: "These KPI cards give you an at-a-glance summary of the data module you're currently viewing." },
-  { view: "home", sel: ".filterbar", title: "Data controls", body: "Filter the dashboard by position and status. Open Advanced Controls to change how the charts are grouped and measured." },
-  { view: "home", sel: ".chart-list", title: "Visualizations", body: "Explore stacked bars, a donut, a histogram, and a breakdown table. Use the chart header to switch the bars to a heat map." },
+  { view: "home", sel: ".visualizations-section", title: "Visualizations", body: "Explore stacked bars, a donut, a histogram, and a breakdown table. Use the chart header to switch the bars to a heat map." },
+  { view: "home", sel: ".activity-trendline-card", title: "Activity Trendline", body: "Tracks daily change counts over time across your selected time range (1 Week, 15 Days, 30 Days, or All). Use it to monitor update momentum and activity spikes." },
   { view: "vacancies", sel: "table", title: "Vacancy postings", body: "Review each authorized item and toggle it between Open for Application and Closed." },
   { view: "vacancies", sel: ".action-card", title: "Quick action · Add Vacancy", body: "Opens the NOSCA uploader, which auto-detects authorized item numbers and position titles so you can add them in a few clicks." },
   { view: "vacancies", modal: "nosca", title: "Modal · Add Vacancy from NOSCA", body: "This uploader scans an approved NOSCA, auto-detects the authorized item numbers and position titles, and lets you tick which items to add. Newly added items start as Closed." },
   { view: "applications", sel: ".toolbar", title: "Search & filter applicants", body: "Search across applicants, then narrow the list by vacancy and application status. Each table column also has its own filter." },
   { view: "applications", sel: "table", title: "Application table", body: "Rows are fully sortable and filterable. Click any applicant row to open the Initial Evaluation Review." },
   { view: "applications", modal: "review", title: "Modal · Initial Evaluation Review", body: "Opened when you click an applicant row. Confirm documentary completeness, compare the applicant against each qualification standard and mark Pass or Fail — the result (Qualified, Disqualified, or Excluded) is then set automatically." },
-  { view: "applications", sel: ".action-buttons", title: "Quick action · Download IER", body: "Exports the Initial Evaluation Result — a CSV of every qualified applicant that matches your current search and filters." },
+  { view: "applications", sel: ".action-card", title: "Quick action · Download IER", body: "Exports the Initial Evaluation Result (DepEd Order 7 · Annex D) — an official Excel file (.xlsx) of every qualified applicant that matches your current search and filters." },
   { view: "applications", sel: ".pager-controls", title: "Pagination", body: "Choose how many rows show per page and jump to any page. Every table in the portal shares this same control." },
   { view: "qualified", sel: "table", title: "Assessment", body: "This is where you input the comparative assessment scores for the qualified applicants. Click a row to open the scoring screen." },
   { view: "qualified", sel: ".action-card", title: "Quick action · Download CAR", body: "Exports the Comparative Assessment Result as a CSV for the applicants currently shown." },
@@ -316,15 +316,15 @@ export default function App() {
       }
 
       const rect = el.getBoundingClientRect();
-      const inViewport = rect.top >= 60 && rect.bottom <= window.innerHeight - 60;
+      const isTopVisible = rect.top >= 60 && rect.top <= window.innerHeight - 140;
 
-      if (!inViewport) {
+      if (!isTopVisible) {
         try {
-          el.scrollIntoView({ block: "center", inline: "nearest", behavior: "auto" });
+          el.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
         } catch (e) { }
       }
 
-      const delay = inViewport ? 0 : 220;
+      const delay = isTopVisible ? 0 : 180;
 
       setTimeout(() => {
         if (!tourActive) return;

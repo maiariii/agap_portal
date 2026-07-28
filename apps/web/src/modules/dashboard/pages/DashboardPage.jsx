@@ -797,108 +797,110 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <div className="card">
-        <div className="chart-card-head">
-          <div>
-            <h2>Item Status & Pipeline Distribution</h2>
-            <p className="small">Visual breakdown across positions</p>
+      <div className="visualizations-section">
+        <div className="card">
+          <div className="chart-card-head">
+            <div>
+              <h2>Item Status & Pipeline Distribution</h2>
+              <p className="small">Visual breakdown across positions</p>
+            </div>
+            <div className="legend">
+              {activeDashboardData.segments.map((seg, idx) => (
+                <span key={idx}><span className={`dot ${seg.colorClass}`}></span>{seg.label}</span>
+              ))}
+            </div>
           </div>
-          <div className="legend">
-            {activeDashboardData.segments.map((seg, idx) => (
-              <span key={idx}><span className={`dot ${seg.colorClass}`}></span>{seg.label}</span>
-            ))}
-          </div>
-        </div>
 
-        <div className="chart-list">
-          {positionDistribution.map(pos => {
-            const getPct = (val) => pos.total > 0 ? (val / pos.total) * 100 : 0;
-            return (
-              <div className="chart-row" key={pos.id}>
-                <div className="chart-label">{pos.title}</div>
-                <div className="bar-track">
-                  {pos.total > 0 ? (
-                    activeDashboardData.segments.map((seg, idx) => {
-                      const count = pos.counts[seg.key] || 0;
-                      if (!count) return null;
-                      return (
-                        <div key={idx} className={`stack-seg ${seg.colorClass}`} style={{ width: `${getPct(count)}%` }} title={`${seg.label}: ${count}`}>
-                          {count || ''}
-                        </div>
-                      );
-                    })
-                  ) : (
-                    <div style={{ paddingLeft: '12px', alignSelf: 'center', fontSize: '11px', color: 'var(--muted)' }}>No records match</div>
-                  )}
+          <div className="chart-list">
+            {positionDistribution.map(pos => {
+              const getPct = (val) => pos.total > 0 ? (val / pos.total) * 100 : 0;
+              return (
+                <div className="chart-row" key={pos.id}>
+                  <div className="chart-label">{pos.title}</div>
+                  <div className="bar-track">
+                    {pos.total > 0 ? (
+                      activeDashboardData.segments.map((seg, idx) => {
+                        const count = pos.counts[seg.key] || 0;
+                        if (!count) return null;
+                        return (
+                          <div key={idx} className={`stack-seg ${seg.colorClass}`} style={{ width: `${getPct(count)}%` }} title={`${seg.label}: ${count}`}>
+                            {count || ''}
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <div style={{ paddingLeft: '12px', alignSelf: 'center', fontSize: '11px', color: 'var(--muted)' }}>No records match</div>
+                    )}
+                  </div>
+                  <div className="num-col" style={{ fontWeight: 'bold' }}>{pos.total}</div>
                 </div>
-                <div className="num-col" style={{ fontWeight: 'bold' }}>{pos.total}</div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="dashboard-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', alignItems: 'stretch', marginBottom: '14px' }}>
+          <div className="card eq-card" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+            <div className="chart-card-head">
+              <div>
+                <h2>{activeDashboardData.overallTitle}</h2>
+                <p className="small">{activeDashboardData.overallSubtitle}</p>
               </div>
-            );
-          })}
+            </div>
+            <div className="donut-split" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', alignItems: 'center', flex: 1 }}>
+              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                {donutChartHtml.total > 0 ? (
+                  <svg className="donut-svg" viewBox="0 0 120 120" style={{ width: 'min(380px, 100%)', height: 'auto', overflow: 'visible' }}>
+                    <circle cx="60" cy="60" r="46" stroke="#E2E8F0" strokeWidth="18" fill="none"></circle>
+                    {donutChartHtml.circles}
+                    <text x="60" y="56" textAnchor="middle" fontFamily="Plus Jakarta Sans" fontSize="16" fontWeight="900" fill="#075985">{donutChartHtml.total}</text>
+                    <text x="60" y="70" textAnchor="middle" fontFamily="DM Sans" fontSize="6" fontWeight="800" fill="#64748B">{activeDashboardData.centerLabel}</text>
+                  </svg>
+                ) : (
+                  <p className="small" style={{ color: 'var(--muted)' }}>No records match the selected filters.</p>
+                )}
+              </div>
+              <div>
+                {donutChartHtml.total > 0 ? (
+                  <table className="legend-table">
+                    <thead>
+                      <tr>
+                        <th>Category</th>
+                        <th className="num-col">Count</th>
+                        <th className="num-col">Share</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {donutChartHtml.tableRows}
+                    </tbody>
+                    <tfoot>
+                      <tr>
+                        <td>Total</td>
+                        <td className="num-col">{donutChartHtml.total}</td>
+                        <td className="num-col">100%</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                ) : (
+                  <p className="small" style={{ color: 'var(--muted)' }}>No records match the selected filters.</p>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="card eq-card" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+            <div className="chart-card-head">
+              <div>
+                <h2>{activeDashboardData.tableLabel} Breakdown</h2>
+                <p className="small">{activeDashboardData.overallSubtitle}</p>
+              </div>
+            </div>
+            {histogramHtml}
+          </div>
         </div>
       </div>
 
-      <div className="dashboard-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', alignItems: 'stretch', marginBottom: '14px' }}>
-        <div className="card eq-card" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-          <div className="chart-card-head">
-            <div>
-              <h2>{activeDashboardData.overallTitle}</h2>
-              <p className="small">{activeDashboardData.overallSubtitle}</p>
-            </div>
-          </div>
-          <div className="donut-split" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', alignItems: 'center', flex: 1 }}>
-            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-              {donutChartHtml.total > 0 ? (
-                <svg className="donut-svg" viewBox="0 0 120 120" style={{ width: 'min(380px, 100%)', height: 'auto', overflow: 'visible' }}>
-                  <circle cx="60" cy="60" r="46" stroke="#E2E8F0" strokeWidth="18" fill="none"></circle>
-                  {donutChartHtml.circles}
-                  <text x="60" y="56" textAnchor="middle" fontFamily="Plus Jakarta Sans" fontSize="16" fontWeight="900" fill="#075985">{donutChartHtml.total}</text>
-                  <text x="60" y="70" textAnchor="middle" fontFamily="DM Sans" fontSize="6" fontWeight="800" fill="#64748B">{activeDashboardData.centerLabel}</text>
-                </svg>
-              ) : (
-                <p className="small" style={{ color: 'var(--muted)' }}>No records match the selected filters.</p>
-              )}
-            </div>
-            <div>
-              {donutChartHtml.total > 0 ? (
-                <table className="legend-table">
-                  <thead>
-                    <tr>
-                      <th>Category</th>
-                      <th className="num-col">Count</th>
-                      <th className="num-col">Share</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {donutChartHtml.tableRows}
-                  </tbody>
-                  <tfoot>
-                    <tr>
-                      <td>Total</td>
-                      <td className="num-col">{donutChartHtml.total}</td>
-                      <td className="num-col">100%</td>
-                    </tr>
-                  </tfoot>
-                </table>
-              ) : (
-                <p className="small" style={{ color: 'var(--muted)' }}>No records match the selected filters.</p>
-              )}
-            </div>
-          </div>
-        </div>
-
-        <div className="card eq-card" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-          <div className="chart-card-head">
-            <div>
-              <h2>{activeDashboardData.tableLabel} Breakdown</h2>
-              <p className="small">{activeDashboardData.overallSubtitle}</p>
-            </div>
-          </div>
-          {histogramHtml}
-        </div>
-      </div>
-
-      <div className="card full-width-card" style={{ gridColumn: '1 / -1', marginBottom: '14px', position: 'relative' }}>
+      <div className="card full-width-card activity-trendline-card" style={{ gridColumn: '1 / -1', marginBottom: '14px', position: 'relative' }}>
         <style>{`
           .trend-header {
             display: flex;
