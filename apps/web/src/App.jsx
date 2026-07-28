@@ -184,6 +184,17 @@ export default function App() {
     e.preventDefault();
     setRegError('');
     setRegSuccess('');
+
+    if (!regFirstName.trim() || !regLastName.trim() || !regRegion || !regDivision || !regEmail.trim() || !regPassword || !regConfirm || !regPasscode.trim()) {
+      setToast({ message: 'All fields are required. Please fill out all fields.', type: 'error' });
+      return setRegError('All fields are required. Please fill out all fields.');
+    }
+
+    if (!regEmail.trim().toLowerCase().endsWith('@deped.gov.ph')) {
+      setToast({ message: 'DepEd Email must end with @deped.gov.ph.', type: 'error' });
+      return setRegError('DepEd Email must end with @deped.gov.ph.');
+    }
+
     if (regPassword !== regConfirm) {
       setToast({ message: 'Passwords do not match.', type: 'error' });
       return setRegError('Passwords do not match.');
@@ -223,7 +234,7 @@ export default function App() {
 
     const r = el.getBoundingClientRect();
     const pad = 6;
-    
+
     if (hl) {
       if (disableTransition) hl.classList.add("no-transition");
       else hl.classList.remove("no-transition");
@@ -239,20 +250,20 @@ export default function App() {
     if (tip) {
       if (disableTransition) tip.classList.add("no-transition");
       else tip.classList.remove("no-transition");
-      
+
       tip.classList.add("active");
       tip.style.visibility = "hidden";
-      
+
       const tw = tip.offsetWidth, th = tip.offsetHeight, vw = window.innerWidth, vh = window.innerHeight;
       let top, left;
-      
+
       if (r.bottom + gap + th <= vh) top = r.bottom + gap;
       else if (r.top - gap - th >= 0) top = r.top - gap - th;
       else top = Math.max(gap, (vh - th) / 2);
-      
+
       left = r.left + r.width / 2 - tw / 2;
       left = Math.min(Math.max(gap, left), vw - tw - gap);
-      
+
       tip.style.top = top + "px";
       tip.style.left = left + "px";
       tip.style.visibility = "visible";
@@ -284,7 +295,7 @@ export default function App() {
         else tip.classList.remove("no-transition");
         tip.classList.add("active");
         tip.style.visibility = "hidden";
-        
+
         const tw = tip.offsetWidth, th = tip.offsetHeight, gap = 20, vw = window.innerWidth, vh = window.innerHeight;
         tip.style.top = Math.max(gap, vh - th - gap) + "px";
         tip.style.left = Math.min(Math.max(gap, (vw - tw) / 2), vw - tw - gap) + "px";
@@ -310,7 +321,7 @@ export default function App() {
       if (!inViewport) {
         try {
           el.scrollIntoView({ block: "center", inline: "nearest", behavior: "auto" });
-        } catch (e) {}
+        } catch (e) { }
       }
 
       const delay = inViewport ? 0 : 220;
@@ -556,17 +567,17 @@ export default function App() {
         {/* REGISTER MODAL */}
         {showRegister && (
           <div className="modal open" style={{ zIndex: 100001, left: 0, background: 'rgba(15, 23, 42, 0.45)', backdropFilter: 'blur(16px)' }}>
-            <div className="modal-box" style={{ width: 'min(520px, 96vw)', maxHeight: '90vh', overflowY: 'auto', padding: '0 40px 40px 40px', borderRadius: '28px', background: 'white', border: '1px solid rgba(15, 23, 42, 0.08)', borderTop: '6px solid #0284c7', boxShadow: '0 24px 60px rgba(0, 0, 0, 0.15)', backdropFilter: 'none' }}>
-              <div className="modal-head" style={{ paddingTop: '40px', marginBottom: '28px', borderBottom: 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'white', position: 'sticky', top: 0, zIndex: 10 }}>
-                <h2 style={{ margin: 0, fontSize: '26px', fontWeight: '850', color: 'var(--navy)', fontFamily: 'var(--font-heading)', letterSpacing: '-0.5px' }}>Create Account</h2>
-                <button 
-                  className="secondary" 
-                  onClick={() => navigate('/')} 
-                  style={{ 
-                    borderRadius: '12px', 
-                    padding: '8px 16px', 
-                    background: '#f1f5f9', 
-                    border: '1px solid #e2e8f0', 
+            <div className="modal-box" style={{ width: 'min(520px, 96vw)', maxHeight: '90vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: 0, borderRadius: '28px', background: 'white', border: '1px solid rgba(15, 23, 42, 0.08)', borderTop: '6px solid #0284c7', boxShadow: '0 24px 60px rgba(0, 0, 0, 0.15)', backdropFilter: 'none' }}>
+              <div className="modal-head" style={{ padding: '24px 32px 18px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'white', flexShrink: 0 }}>
+                <h2 style={{ margin: 0, fontSize: '24px', fontWeight: '850', color: 'var(--navy)', fontFamily: 'var(--font-heading)', letterSpacing: '-0.5px' }}>Create Account</h2>
+                <button
+                  className="secondary"
+                  onClick={() => navigate('/')}
+                  style={{
+                    borderRadius: '12px',
+                    padding: '8px 16px',
+                    background: '#f1f5f9',
+                    border: '1px solid #e2e8f0',
                     color: '#475569',
                     fontWeight: '700',
                     fontSize: '13px',
@@ -580,175 +591,177 @@ export default function App() {
                 </button>
               </div>
 
-              {regSuccess ? (
-                <div style={{ padding: '24px 0', textAlign: 'center' }}>
-                  <div style={{ fontSize: '48px', marginBottom: '16px' }}>✨</div>
-                  <p style={{ fontWeight: '800', color: 'var(--navy)', fontSize: '18px', margin: '0 0 12px', fontFamily: 'var(--font-heading)' }}>{regSuccess}</p>
-                  <button className="login-btn" style={{ marginTop: '16px', maxWidth: '240px' }} onClick={() => navigate('/')}>Go to Sign In</button>
-                </div>
-              ) : (
-                <form onSubmit={handleRegister} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+              <div style={{ overflowY: 'auto', padding: '24px 32px 32px' }}>
+                {regSuccess ? (
+                  <div style={{ padding: '24px 0', textAlign: 'center' }}>
+                    <div style={{ fontSize: '48px', marginBottom: '16px' }}>✨</div>
+                    <p style={{ fontWeight: '800', color: 'var(--navy)', fontSize: '18px', margin: '0 0 12px', fontFamily: 'var(--font-heading)' }}>{regSuccess}</p>
+                    <button className="login-btn" style={{ marginTop: '16px', maxWidth: '240px' }} onClick={() => navigate('/')}>Go to Sign In</button>
+                  </div>
+                ) : (
+                  <form onSubmit={handleRegister} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                      <div className="form-group" style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        <label style={{ color: 'var(--navy)', fontWeight: 750, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px' }}>First Name</label>
+                        <div className="form-group-input-wrapper">
+                          <span className="input-icon">👤</span>
+                          <input
+                            type="text"
+                            value={regFirstName}
+                            onChange={e => setRegFirstName(e.target.value)}
+                            placeholder="Juan"
+                            required
+                            style={{ padding: '12px 14px 12px 42px', borderRadius: '12px', border: '1.5px solid rgba(8, 49, 95, 0.15)', background: '#fff', color: 'var(--text)', fontSize: '13.5px' }}
+                          />
+                        </div>
+                      </div>
+                      <div className="form-group" style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        <label style={{ color: 'var(--navy)', fontWeight: 750, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px' }}>Last Name</label>
+                        <div className="form-group-input-wrapper">
+                          <span className="input-icon">👤</span>
+                          <input
+                            type="text"
+                            value={regLastName}
+                            onChange={e => setRegLastName(e.target.value)}
+                            placeholder="Dela Cruz"
+                            required
+                            style={{ padding: '12px 14px 12px 42px', borderRadius: '12px', border: '1.5px solid rgba(8, 49, 95, 0.15)', background: '#fff', color: 'var(--text)', fontSize: '13.5px' }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                      <div className="form-group" style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        <label style={{ color: 'var(--navy)', fontWeight: 750, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px' }}>Region</label>
+                        <div className="form-group-input-wrapper">
+                          <span className="input-icon">📍</span>
+                          <select
+                            value={regRegion}
+                            onChange={e => {
+                              setRegRegion(e.target.value);
+                              setRegDivision('');
+                            }}
+                            required
+                            style={{ padding: '12px 14px 12px 42px', borderRadius: '12px', border: '1.5px solid rgba(8, 49, 95, 0.15)', background: '#fff', color: 'var(--text)', fontSize: '13.5px', width: '100%', height: '47px' }}
+                          >
+                            <option value="">Select Region</option>
+                            {regions.map(r => (
+                              <option key={r} value={r}>{r}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                      <div className="form-group" style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        <label style={{ color: 'var(--navy)', fontWeight: 750, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px' }}>Division</label>
+                        <div className="form-group-input-wrapper">
+                          <span className="input-icon">📍</span>
+                          <select
+                            value={regDivision}
+                            onChange={e => setRegDivision(e.target.value)}
+                            required
+                            disabled={!regRegion}
+                            style={{ padding: '12px 14px 12px 42px', borderRadius: '12px', border: '1.5px solid rgba(8, 49, 95, 0.15)', background: regRegion ? '#fff' : '#f1f5f9', color: 'var(--text)', fontSize: '13.5px', width: '100%', height: '47px' }}
+                          >
+                            <option value="">{regRegion ? 'Select Division' : 'Select region first'}</option>
+                            {(divisionsByRegion[regRegion] || []).map(d => (
+                              <option key={d} value={d}>{d}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+
                     <div className="form-group" style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                      <label style={{ color: 'var(--navy)', fontWeight: 750, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px' }}>First Name</label>
+                      <label style={{ color: 'var(--navy)', fontWeight: 750, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px' }}>Position</label>
                       <div className="form-group-input-wrapper">
-                        <span className="input-icon">👤</span>
+                        <span className="input-icon">💼</span>
                         <input
                           type="text"
-                          value={regFirstName}
-                          onChange={e => setRegFirstName(e.target.value)}
-                          placeholder="Juan"
-                          required
-                          style={{ padding: '12px 14px 12px 42px', borderRadius: '12px', border: '1.5px solid rgba(8, 49, 95, 0.15)', background: '#fff', color: 'var(--text)', fontSize: '13.5px' }}
+                          value="HRMO"
+                          disabled
+                          style={{ padding: '12px 14px 12px 42px', borderRadius: '12px', border: '1.5px solid rgba(15, 23, 42, 0.08)', background: '#f8fafc', color: '#64748b', cursor: 'not-allowed', fontSize: '13.5px', width: '100%' }}
                         />
                       </div>
                     </div>
+
                     <div className="form-group" style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                      <label style={{ color: 'var(--navy)', fontWeight: 750, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px' }}>Last Name</label>
+                      <label style={{ color: 'var(--navy)', fontWeight: 750, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px' }}>DepEd Email</label>
                       <div className="form-group-input-wrapper">
-                        <span className="input-icon">👤</span>
+                        <span className="input-icon">📧</span>
+                        <input
+                          type="email"
+                          value={regEmail}
+                          onChange={e => setRegEmail(e.target.value)}
+                          placeholder="your.email@deped.gov.ph"
+                          required
+                          style={{ padding: '12px 14px 12px 42px', borderRadius: '12px', border: '1.5px solid rgba(8, 49, 95, 0.15)', background: '#fff', color: 'var(--text)', fontSize: '13.5px', width: '100%' }}
+                        />
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                      <div className="form-group" style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        <label style={{ color: 'var(--navy)', fontWeight: 750, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px' }}>Password</label>
+                        <div className="form-group-input-wrapper">
+                          <span className="input-icon">🔒</span>
+                          <input
+                            type="password"
+                            value={regPassword}
+                            onChange={e => setRegPassword(e.target.value)}
+                            placeholder="Min 6 chars"
+                            required
+                            style={{ padding: '12px 14px 12px 42px', borderRadius: '12px', border: '1.5px solid rgba(8, 49, 95, 0.15)', background: '#fff', color: 'var(--text)', fontSize: '13.5px' }}
+                          />
+                        </div>
+                      </div>
+                      <div className="form-group" style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        <label style={{ color: 'var(--navy)', fontWeight: 750, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px' }}>Repeat Password</label>
+                        <div className="form-group-input-wrapper">
+                          <span className="input-icon">🔒</span>
+                          <input
+                            type="password"
+                            value={regConfirm}
+                            onChange={e => setRegConfirm(e.target.value)}
+                            placeholder="Repeat password"
+                            required
+                            style={{ padding: '12px 14px 12px 42px', borderRadius: '12px', border: '1.5px solid rgba(8, 49, 95, 0.15)', background: '#fff', color: 'var(--text)', fontSize: '13.5px' }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="form-group" style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      <label style={{ color: 'var(--navy)', fontWeight: 750, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px' }}>Passcode (for confirming decisions)</label>
+                      <div className="form-group-input-wrapper">
+                        <span className="input-icon">🔑</span>
                         <input
                           type="text"
-                          value={regLastName}
-                          onChange={e => setRegLastName(e.target.value)}
-                          placeholder="Dela Cruz"
+                          inputMode="numeric"
+                          maxLength={6}
+                          value={regPasscode}
+                          onChange={e => setRegPasscode(e.target.value.replace(/\D/g, ''))}
+                          placeholder="6-digit passcode"
                           required
-                          style={{ padding: '12px 14px 12px 42px', borderRadius: '12px', border: '1.5px solid rgba(8, 49, 95, 0.15)', background: '#fff', color: 'var(--text)', fontSize: '13.5px' }}
+                          style={{ padding: '12px 14px 12px 42px', borderRadius: '12px', border: '1.5px solid rgba(8, 49, 95, 0.15)', background: '#fff', color: 'var(--text)', fontSize: '13.5px', width: '100%' }}
                         />
                       </div>
                     </div>
-                  </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
-                    <div className="form-group" style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                      <label style={{ color: 'var(--navy)', fontWeight: 750, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px' }}>Region</label>
-                      <div className="form-group-input-wrapper">
-                        <span className="input-icon">📍</span>
-                        <select
-                          value={regRegion}
-                          onChange={e => {
-                            setRegRegion(e.target.value);
-                            setRegDivision('');
-                          }}
-                          required
-                          style={{ padding: '12px 14px 12px 42px', borderRadius: '12px', border: '1.5px solid rgba(8, 49, 95, 0.15)', background: '#fff', color: 'var(--text)', fontSize: '13.5px', width: '100%', height: '47px' }}
-                        >
-                          <option value="">Select Region</option>
-                          {regions.map(r => (
-                            <option key={r} value={r}>{r}</option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-                    <div className="form-group" style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                      <label style={{ color: 'var(--navy)', fontWeight: 750, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px' }}>Division</label>
-                      <div className="form-group-input-wrapper">
-                        <span className="input-icon">📍</span>
-                        <select
-                          value={regDivision}
-                          onChange={e => setRegDivision(e.target.value)}
-                          required
-                          disabled={!regRegion}
-                          style={{ padding: '12px 14px 12px 42px', borderRadius: '12px', border: '1.5px solid rgba(8, 49, 95, 0.15)', background: regRegion ? '#fff' : '#f1f5f9', color: 'var(--text)', fontSize: '13.5px', width: '100%', height: '47px' }}
-                        >
-                          <option value="">{regRegion ? 'Select Division' : 'Select region first'}</option>
-                          {(divisionsByRegion[regRegion] || []).map(d => (
-                            <option key={d} value={d}>{d}</option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="form-group" style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    <label style={{ color: 'var(--navy)', fontWeight: 750, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px' }}>Position</label>
-                    <div className="form-group-input-wrapper">
-                      <span className="input-icon">💼</span>
-                      <input
-                        type="text"
-                        value="HRMO"
-                        disabled
-                        style={{ padding: '12px 14px 12px 42px', borderRadius: '12px', border: '1.5px solid rgba(15, 23, 42, 0.08)', background: '#f8fafc', color: '#64748b', cursor: 'not-allowed', fontSize: '13.5px', width: '100%' }}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="form-group" style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    <label style={{ color: 'var(--navy)', fontWeight: 750, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px' }}>DepEd Email</label>
-                    <div className="form-group-input-wrapper">
-                      <span className="input-icon">📧</span>
-                      <input
-                        type="email"
-                        value={regEmail}
-                        onChange={e => setRegEmail(e.target.value)}
-                        placeholder="your.email@deped.gov.ph"
-                        required
-                        style={{ padding: '12px 14px 12px 42px', borderRadius: '12px', border: '1.5px solid rgba(8, 49, 95, 0.15)', background: '#fff', color: 'var(--text)', fontSize: '13.5px', width: '100%' }}
-                      />
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
-                    <div className="form-group" style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                      <label style={{ color: 'var(--navy)', fontWeight: 750, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px' }}>Password</label>
-                      <div className="form-group-input-wrapper">
-                        <span className="input-icon">🔒</span>
-                        <input
-                          type="password"
-                          value={regPassword}
-                          onChange={e => setRegPassword(e.target.value)}
-                          placeholder="Min 6 chars"
-                          required
-                          style={{ padding: '12px 14px 12px 42px', borderRadius: '12px', border: '1.5px solid rgba(8, 49, 95, 0.15)', background: '#fff', color: 'var(--text)', fontSize: '13.5px' }}
-                        />
-                      </div>
-                    </div>
-                    <div className="form-group" style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                      <label style={{ color: 'var(--navy)', fontWeight: 750, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px' }}>Repeat Password</label>
-                      <div className="form-group-input-wrapper">
-                        <span className="input-icon">🔒</span>
-                        <input
-                          type="password"
-                          value={regConfirm}
-                          onChange={e => setRegConfirm(e.target.value)}
-                          placeholder="Repeat password"
-                          required
-                          style={{ padding: '12px 14px 12px 42px', borderRadius: '12px', border: '1.5px solid rgba(8, 49, 95, 0.15)', background: '#fff', color: 'var(--text)', fontSize: '13.5px' }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="form-group" style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    <label style={{ color: 'var(--navy)', fontWeight: 750, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px' }}>Passcode (for confirming decisions)</label>
-                    <div className="form-group-input-wrapper">
-                      <span className="input-icon">🔑</span>
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        maxLength={6}
-                        value={regPasscode}
-                        onChange={e => setRegPasscode(e.target.value.replace(/\D/g, ''))}
-                        placeholder="6-digit passcode"
-                        required
-                        style={{ padding: '12px 14px 12px 42px', borderRadius: '12px', border: '1.5px solid rgba(8, 49, 95, 0.15)', background: '#fff', color: 'var(--text)', fontSize: '13.5px', width: '100%' }}
-                      />
-                    </div>
-                  </div>
-
-                  {regError && (
-                    <div className="login-error" style={{ margin: '8px 0 0', padding: '10px 14px', borderRadius: '10px' }}>{regError}</div>
-                  )}
-                  <button
-                    type="submit"
-                    className="login-btn"
-                    disabled={regLoading}
-                    style={{ marginTop: '12px', padding: '13px', borderRadius: '12px' }}
-                  >
-                    {regLoading ? 'Creating account…' : 'Create Account'}
-                  </button>
-                </form>
-              )}
+                    {regError && (
+                      <div className="login-error" style={{ margin: '8px 0 0', padding: '10px 14px', borderRadius: '10px' }}>{regError}</div>
+                    )}
+                    <button
+                      type="submit"
+                      className="login-btn"
+                      disabled={regLoading}
+                      style={{ marginTop: '12px', padding: '13px', borderRadius: '12px' }}
+                    >
+                      {regLoading ? 'Creating account…' : 'Create Account'}
+                    </button>
+                  </form>
+                )}
+              </div>
             </div>
           </div>
         )}
