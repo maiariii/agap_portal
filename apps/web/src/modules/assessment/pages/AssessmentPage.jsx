@@ -7,6 +7,33 @@ import VacancyClusterAccordion from '../../../components/VacancyClusterAccordion
 
 const QUAL_NOT_SELECTED = { key: "not_selected", phase: 2, label: "Not Selected", badge: "red", next: "Did not advance past HRMPSB deliberation" };
 
+const renderApplicantCell = (r) => {
+  if (!r) return null;
+  const obj = r.applicantObj || r.appObj || r;
+  const email = obj.email_address || obj.emailAddress || obj.email || r.email_address || r.email || '';
+  const mobile = obj.mobile_no || obj.mobileNo || obj.mobile || r.mobile_no || r.mobile || '';
+  const telephone = obj.telephone_no || obj.telephoneNo || obj.telephone || r.telephone_no || r.telephone || '';
+  const phone = mobile ? mobile : telephone;
+
+  return (
+    <span>
+      <b>{r.applicant}</b>
+      {email ? (
+        <a
+          href={`mailto:${email}`}
+          onClick={(e) => e.stopPropagation()}
+          style={{ display: 'block', fontSize: '10px', color: '#64748B', lineHeight: '1.25', marginTop: '2px', wordBreak: 'break-word', userSelect: 'text', cursor: 'text', textDecoration: 'none' }}
+          title="Right-click to copy email address"
+        >
+          {email}
+        </a>
+      ) : null}
+      {phone ? <span style={{ display: 'block', fontSize: '10px', color: '#64748B', lineHeight: '1.25', marginTop: '1px', userSelect: 'text', cursor: 'text' }}>{phone}</span> : null}
+      {!email && !phone && (r.code || r.applicantCode) ? <span style={{ display: 'block', fontSize: '10px', color: '#64748B', lineHeight: '1.25', marginTop: '2px' }}>{r.code || r.applicantCode}</span> : null}
+    </span>
+  );
+};
+
 const QUAL_PIPELINE = [
   { key: "qualified", phase: 1, label: "Qualified — IER pending", badge: "blue", next: "Post the Initial Evaluation Result (IER)" },
   { key: "ier_posted", phase: 1, label: "IER Posted", badge: "blue", next: "Begin comparative assessment" },
@@ -50,6 +77,11 @@ export default function AssessmentPage() {
   const [selectedDocKey, setSelectedDocKey] = useState('pds');
   const [availableDocs, setAvailableDocs] = useState([]);
   const [docsLoading, setDocsLoading] = useState(false);
+  const [docIframeLoading, setDocIframeLoading] = useState(true);
+
+  useEffect(() => {
+    setDocIframeLoading(true);
+  }, [selectedDocKey, showDocsModal]);
 
   useEffect(() => {
     if (selectedQualApp?.id) {
@@ -711,8 +743,8 @@ export default function AssessmentPage() {
           <table style={{ width: '100%', minWidth: '100%', tableLayout: 'fixed' }}>
             <colgroup>
               <col style={{ width: '4%' }} />
-              <col style={{ width: '14%' }} />
-              <col style={{ width: '13%' }} />
+              <col style={{ width: '19%' }} />
+              <col style={{ width: '8%' }} />
               <col style={{ width: '13%' }} />
               <col style={{ width: '9%' }} />
               <col style={{ width: '7%' }} />
@@ -961,7 +993,7 @@ export default function AssessmentPage() {
                       return (
                         <tr key={r.id} className="clickable-row" onClick={() => openQualifiedScoringModal(r)}>
                           <td className="row-num">{((qualPage - 1) * qualPageSize) + i + 1}</td>
-                          <td><b>{r.applicant}</b><br/><span className="small">{r.code}</span></td>
+                          <td>{renderApplicantCell(r)}</td>
                           <td>{r.bachelorDegree || '—'}</td>
                           <td>{r.vacancy}</td>
                           <td className="num-col">
@@ -1053,18 +1085,54 @@ export default function AssessmentPage() {
 
             <div className="modal-body">
               <div className="qs-matrix-wrap qualified-tab-card">
-                <div className="qualified-card-head" style={{ padding: '24px' }}>
-                  <div className="position-detail-eyebrow">Qualification Standards</div>
-                  <h4>Qualification Standards Matrix</h4>
-                  <p className="small">Matrix view of the applicant against the position's qualification standards.</p>
-                </div>
-                <div className="qualified-card-body" style={{ padding: '0 24px 24px' }}>
-                  <div className="qs-matrix-meta" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '20px', padding: '16px', backgroundColor: 'var(--blue-50)', borderRadius: '12px' }}>
-                    <div className="meta-tile"><b>Applicant</b><br/>{selectedQualApp.applicant}</div>
-                    <div className="meta-tile"><b>Applicant number</b><br/>{selectedQualApp.code}</div>
-                    <div className="meta-tile"><b>Vacancy</b><br/>{selectedQualApp.vacancy}</div>
-                    <div className="meta-tile"><b>Deadline</b><br/>{selectedQualApp.deadline || '—'}</div>
+                <div className="qualified-card-head" style={{ padding: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', background: 'linear-gradient(135deg, var(--navy), var(--blue))', color: 'white', borderRadius: '18px 18px 0 0' }}>
+                  <div>
+                    <div className="position-detail-eyebrow" style={{ color: 'var(--gold)', margin: '0 0 5px' }}>Qualification Standards</div>
+                    <h4 style={{ margin: 0, fontSize: '18px', fontWeight: 950, color: 'white' }}>Qualification Standards Matrix</h4>
+                    <p className="small" style={{ margin: '5px 0 0', color: '#E0F2FE', fontSize: '12px', fontWeight: 800 }}>Matrix view of the applicant against the position's qualification standards.</p>
                   </div>
+                  <div style={{ display: 'flex', gap: '10px' }}>
+                    <div className="meta-tile" style={{ background: 'rgba(255, 255, 255, 0.12)', backdropFilter: 'blur(4px)', border: '1px solid rgba(255, 255, 255, 0.25)', borderRadius: '12px', padding: '10px 16px', color: '#fff', minWidth: '150px' }}>
+                      <b style={{ color: '#93C5FD', fontSize: '11px', display: 'block', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>VACANCY</b>
+                      <span style={{ fontSize: '14px', fontWeight: '700', color: '#fff', display: 'block', lineHeight: '1.3' }}>{selectedQualApp.vacancy}</span>
+                    </div>
+                    <div className="meta-tile" style={{ background: 'rgba(255, 255, 255, 0.12)', backdropFilter: 'blur(4px)', border: '1px solid rgba(255, 255, 255, 0.25)', borderRadius: '12px', padding: '10px 16px', color: '#fff', minWidth: '130px' }}>
+                      <b style={{ color: '#93C5FD', fontSize: '11px', display: 'block', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>DEADLINE</b>
+                      <span style={{ fontSize: '14px', fontWeight: '700', color: '#fff', display: 'block', lineHeight: '1.3' }}>{selectedQualApp.deadline || '—'}</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="qualified-card-body" style={{ padding: '24px' }}>
+                  {(() => {
+                    const obj = selectedQualApp.applicantObj || selectedQualApp.appObj || selectedQualApp;
+                    const email = obj.email_address || obj.emailAddress || obj.email || selectedQualApp.email_address || selectedQualApp.email || '—';
+                    const mobile = obj.mobile_no || obj.mobileNo || obj.mobile || selectedQualApp.mobile_no || selectedQualApp.mobile || '';
+                    const telephone = obj.telephone_no || obj.telephoneNo || obj.telephone || selectedQualApp.telephone_no || selectedQualApp.telephone || '';
+                    const phone = mobile ? mobile : (telephone || '—');
+
+                    return (
+                      <div className="qs-matrix-meta" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '20px', padding: '16px', backgroundColor: 'var(--blue-50)', borderRadius: '12px' }}>
+                        <div className="meta-tile" style={{ userSelect: 'text' }}><b>Applicant</b><br/>{selectedQualApp.applicant}</div>
+                        <div className="meta-tile" style={{ userSelect: 'text' }}><b>Applicant number</b><br/>{selectedQualApp.code}</div>
+                        <div className="meta-tile" style={{ userSelect: 'text' }}>
+                          <b>Email Address</b><br/>
+                          {email && email !== '—' ? (
+                            <a
+                              href={`mailto:${email}`}
+                              onClick={(e) => e.stopPropagation()}
+                              style={{ color: 'inherit', textDecoration: 'none', wordBreak: 'break-word', userSelect: 'text', cursor: 'text' }}
+                              title="Right-click to copy email address"
+                            >
+                              {email}
+                            </a>
+                          ) : (
+                            <span>—</span>
+                          )}
+                        </div>
+                        <div className="meta-tile" style={{ userSelect: 'text' }}><b>Contact No.</b><br/><span style={{ userSelect: 'text', cursor: 'text' }}>{phone}</span></div>
+                      </div>
+                    );
+                  })()}
                   <div className="qs-matrix-table-wrap">
                     <table className="qs-matrix-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
                       <thead>
@@ -1630,11 +1698,46 @@ export default function AssessmentPage() {
                     }}>
                       {existsInAzure ? (
                         isPdf ? (
-                          <iframe
-                            src={`${import.meta.env.VITE_API_URL || window.location.origin}/api/applications/${selectedQualApp.id}/documents/${selectedDocKey}/download?token=${localStorage.getItem('agap_token')}&dpi=98`}
-                            style={{ width: '100%', height: '550px', border: 'none', borderRadius: '0 0 12px 12px' }}
-                            title="Azure Document Viewer"
-                          />
+                          <div style={{ width: '100%', height: '550px', position: 'relative' }}>
+                            {docIframeLoading && (
+                              <div style={{
+                                backgroundColor: '#f8fafc',
+                                height: '550px',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                justifyContent: 'center',
+                                alignItems: 'center',
+                                gap: '12px',
+                                width: '100%',
+                                color: '#64748B',
+                                padding: '40px',
+                                boxSizing: 'border-box'
+                              }}>
+                                <style>{`
+                                  @keyframes spin {
+                                    0% { transform: rotate(0deg); }
+                                    100% { transform: rotate(360deg); }
+                                  }
+                                `}</style>
+                                <div style={{
+                                  border: '4px solid #e2e8f0',
+                                  borderTop: '4px solid var(--blue)',
+                                  borderRadius: '50%',
+                                  width: '32px',
+                                  height: '32px',
+                                  animation: 'spin 1s linear infinite'
+                                }} />
+                                <b style={{ fontSize: '14px' }}>Loading Documents...</b>
+                                <span style={{ fontSize: '12px' }}>Checking file attachments</span>
+                              </div>
+                            )}
+                            <iframe
+                              src={`${import.meta.env.VITE_API_URL || window.location.origin}/api/applications/${selectedQualApp.id}/documents/${selectedDocKey}/download?token=${localStorage.getItem('agap_token')}&dpi=98`}
+                              onLoad={() => setDocIframeLoading(false)}
+                              style={{ width: '100%', height: '550px', border: 'none', borderRadius: '0 0 12px 12px', display: docIframeLoading ? 'none' : 'block' }}
+                              title="Azure Document Viewer"
+                            />
+                          </div>
                         ) : (
                           <div style={{ width: '100%', display: 'flex', flexDirection: 'column', backgroundColor: 'white', border: '1px solid var(--line)', borderRadius: '12px', overflow: 'hidden' }}>
                             <div style={{ padding: '12px 16px', borderBottom: '1px solid #e2e8f0', background: '#f8fafc', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1652,8 +1755,35 @@ export default function AssessmentPage() {
                             </div>
                             <div style={{ overflow: 'auto', padding: '16px', boxSizing: 'border-box', maxHeight: '480px' }}>
                               {csvLoading ? (
-                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '200px', gap: '8px', color: '#64748B' }}>
-                                  <span style={{ fontSize: '13px' }}>Loading sheet data...</span>
+                                <div style={{
+                                  backgroundColor: '#f8fafc',
+                                  height: '300px',
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  justifyContent: 'center',
+                                  alignItems: 'center',
+                                  gap: '12px',
+                                  width: '100%',
+                                  color: '#64748B',
+                                  padding: '40px',
+                                  boxSizing: 'border-box'
+                                }}>
+                                  <style>{`
+                                    @keyframes spin {
+                                      0% { transform: rotate(0deg); }
+                                      100% { transform: rotate(360deg); }
+                                    }
+                                  `}</style>
+                                  <div style={{
+                                    border: '4px solid #e2e8f0',
+                                    borderTop: '4px solid var(--blue)',
+                                    borderRadius: '50%',
+                                    width: '32px',
+                                    height: '32px',
+                                    animation: 'spin 1s linear infinite'
+                                  }} />
+                                  <b style={{ fontSize: '14px' }}>Loading Documents...</b>
+                                  <span style={{ fontSize: '12px' }}>Checking file attachments</span>
                                 </div>
                               ) : csvError ? (
                                 <div style={{ color: '#EF4444', padding: '16px', textAlign: 'center', fontSize: '13px' }}>

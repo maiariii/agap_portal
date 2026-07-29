@@ -461,20 +461,186 @@ export async function rollbackAppointment(req, res) {
 }
 
 
+// ==========================================
+// AZURE BLOB STORAGE SINGLETON & LRU CACHE
+// ==========================================
+let azureContainerClientInstance = null;
+
+function getAzureContainerClient() {
+  if (azureContainerClientInstance) return azureContainerClientInstance;
+
+  const connString = process.env.AZURE_STORAGE_CONNECTION_STRING;
+  const AZURE_FOLDER_NAME = process.env.AZURE_FOLDER_NAME || "main-agap";
+
+  if (connString && connString !== 'ReplaceWithYourAzureStorageConnectionString') {
+    const blobServiceClient = BlobServiceClient.fromConnectionString(connString);
+    azureContainerClientInstance = blobServiceClient.getContainerClient(AZURE_FOLDER_NAME);
+  }
+  return azureContainerClientInstance;
+}
+
+const docListCache = new Map();
+const CACHE_TTL_MS = 5 * 60 * 1000;
+
+function getCachedDocList(cacheKey) {
+  const cached = docListCache.get(cacheKey);
+  if (cached && (Date.now() - cached.timestamp < CACHE_TTL_MS)) {
+    return cached.data;
+  }
+  return null;
+}
+
+function setCachedDocList(cacheKey, data) {
+  docListCache.set(cacheKey, { timestamp: Date.now(), data });
+  if (docListCache.size > 1000) {
+    const oldestKey = docListCache.keys().next().value;
+    docListCache.delete(oldestKey);
+  }
+}
+
+const getFolderAliasesFromKey = (k) => {
+  const cleanK = (k || '').toLowerCase().trim();
+  const folderSet = new Set([cleanK, cleanK.replace(/_/g, '-')]);
+
+  if (cleanK === 'pds' || cleanK === 'personal-data-sheet') {
+    folderSet.add('personal-data-sheet');
+    folderSet.add('pds');
+  }
+  if (cleanK === 'work_experience' || cleanK === 'work-experience' || cleanK === 'work-experience-sheet') {
+    folderSet.add('work-experience-sheet');
+    folderSet.add('work-experience');
+    folderSet.add('work_experience');
+  }
+  if (cleanK === 'eligibility' || cleanK === 'certificate-of-eligibility') {
+    folderSet.add('certificate-of-eligibility');
+    folderSet.add('eligibility');
+  }
+  if (cleanK === 'tor' || cleanK === 'transcript-of-records') {
+    folderSet.add('transcript-of-records');
+    folderSet.add('tor');
+  }
+  if (cleanK === 'prc' || cleanK === 'updated-prc-license-id' || cleanK === 'prc-license') {
+    folderSet.add('updated-prc-license-id');
+    folderSet.add('prc-license');
+    folderSet.add('prc');
+  }
+  if (cleanK === 'diploma' || cleanK.includes('diploma')) {
+    folderSet.add('diploma--optional-');
+    folderSet.add('diploma-optional');
+    folderSet.add('diploma');
+  }
+  if (cleanK === 'letter_of_intent' || cleanK === 'letter-of-intent') {
+    folderSet.add('letter-of-intent');
+    folderSet.add('letter_of_intent');
+  }
+  if (cleanK === 'sworn_declaration' || cleanK === 'sworn-declaration' || cleanK === 'cav') {
+    folderSet.add('sworn-declaration');
+    folderSet.add('sworn_declaration');
+    folderSet.add('cav');
+  }
+  if (cleanK === 'outstanding_accomplishments' || cleanK === 'outstandingaccomplishment' || cleanK === 'outstanding-accomplishments') {
+    folderSet.add('outstanding-accomplishments');
+    folderSet.add('outstanding_accomplishments');
+    folderSet.add('outstanding-accomplishment');
+  }
+  if (cleanK === 'performance_rating' || cleanK === 'performance-rating') {
+    folderSet.add('performance-rating');
+    folderSet.add('performance_rating');
+  }
+  if (cleanK === 'training_certificates' || cleanK === 'training-certificates') {
+    folderSet.add('training-certificates');
+    folderSet.add('training_certificates');
+  }
+  if (cleanK === 'application_education' || cleanK === 'application-of-education') {
+    folderSet.add('application-of-education');
+    folderSet.add('application_education');
+  }
+  if (cleanK === 'application_learning' || cleanK === 'application-of-learning-and-development') {
+    folderSet.add('application-of-learning-and-development');
+    folderSet.add('application_learning');
+  }
+  return Array.from(folderSet);
+};
+
+const getApplicantFolderPrefixes = (appRow) => {
+  const prefixes = new Set();
+  if (appRow) {
+    if (appRow.id) {
+      prefixes.add(`applicant-${appRow.id}/`.toLowerCase());
+    }
+    if (appRow.application_id) {
+      prefixes.add(`applicant-${appRow.application_id}/`.toLowerCase());
+    }
+    if (appRow.applicant_id) {
+      prefixes.add(`applicant-${appRow.applicant_id}/`.toLowerCase());
+    }
+    if (appRow.applicant_number) {
+      prefixes.add(`applicant-${appRow.applicant_number.toLowerCase()}/`);
+      prefixes.add(`${appRow.applicant_number.toLowerCase()}/`);
+    }
+    if (appRow.code) {
+      prefixes.add(`applicant-${appRow.code.toLowerCase()}/`);
+      prefixes.add(`${appRow.code.toLowerCase()}/`);
+    }
+    const codeStr = (appRow.code || appRow.applicant_number || '').trim();
+    const matchDigits = codeStr.match(/\d+/);
+    if (matchDigits) {
+      const num = parseInt(matchDigits[0], 10);
+      if (!isNaN(num)) {
+        prefixes.add(`applicant-${num}/`.toLowerCase());
+      }
+    }
+  }
+  return Array.from(prefixes);
+};
+
+async function getBlobsForApplicant(containerClient, appRow) {
+  const prefixes = getApplicantFolderPrefixes(appRow);
+  if (!prefixes.length) return [];
+
+  const results = await Promise.all(
+    prefixes.map(async (prefix) => {
+      const list = [];
+      try {
+        for await (const blob of containerClient.listBlobsFlat({ prefix })) {
+          list.push({ ...blob, nameLower: blob.name.toLowerCase() });
+        }
+      } catch (err) {
+        console.error(`[Azure Storage] Scoped prefix scan error for "${prefix}":`, err.message);
+      }
+      return list;
+    })
+  );
+
+  const blobMap = new Map();
+  results.flat().forEach(b => {
+    if (b && b.name) {
+      blobMap.set(b.name, b);
+    }
+  });
+  return Array.from(blobMap.values());
+}
+
 export async function getApplicationDocuments(req, res) {
   const { id } = req.params;
-  const connString = process.env.AZURE_STORAGE_CONNECTION_STRING;
   const AZURE_FOLDER_NAME = process.env.AZURE_FOLDER_NAME || "main-agap";
   const sampleHash = "AGAP-0001_Personal_Data_Sheet_1784171209875";
   
-  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-  res.setHeader('Pragma', 'no-cache');
-  res.setHeader('Expires', '0');
-  
-  console.log(`[Azure Storage] Scanning documents in container "${AZURE_FOLDER_NAME}" for application ID "${id}"...`);
+  const cacheKey = `docs_${id}`;
+  const cachedDocuments = getCachedDocList(cacheKey);
+  if (cachedDocuments) {
+    return res.json({
+      success: true,
+      azureFolder: AZURE_FOLDER_NAME,
+      sampleHash: sampleHash,
+      documents: cachedDocuments
+    });
+  }
+
+  console.log(`[Azure Storage] Scoped lookup for application ID "${id}"...`);
   
   const appQuery = await pool.query(
-    `SELECT a.letter_of_intent, a.sworn_document, a.sworn_document as sworn_declaration, ap.id, ap.applicant_number, ap.code, ap.surname, ap.first_name 
+    `SELECT a.id as application_id, a.applicant_id, a.letter_of_intent, a.sworn_document, a.sworn_document as sworn_declaration, ap.id as applicant_table_id, ap.applicant_number, ap.code, ap.surname, ap.first_name 
      FROM applications a 
      JOIN applicants ap ON a.applicant_id = ap.id 
      WHERE a.id = $1`,
@@ -501,103 +667,16 @@ export async function getApplicationDocuments(req, res) {
     { key: 'cav', label: 'Certification on the Authenticity and Veracity (CAV)', filename: 'AGAP-0001_CAV.pdf', existsInAzure: false }
   ];
 
-  if (connString && connString !== 'ReplaceWithYourAzureStorageConnectionString') {
+  const containerClient = getAzureContainerClient();
+
+  if (containerClient) {
     try {
-      const blobServiceClient = BlobServiceClient.fromConnectionString(connString);
-      const containerClient = blobServiceClient.getContainerClient(AZURE_FOLDER_NAME);
-      
-      const azureBlobs = [];
-      for await (const blob of containerClient.listBlobsFlat()) {
-        azureBlobs.push({ name: blob.name, nameLower: blob.name.toLowerCase() });
-      }
-
-      const getFolderAliasesFromKey = (k) => {
-        const cleanK = (k || '').toLowerCase().trim();
-        const folderSet = new Set([cleanK, cleanK.replace(/_/g, '-')]);
-
-        if (cleanK === 'pds' || cleanK === 'personal-data-sheet') {
-          folderSet.add('personal-data-sheet');
-          folderSet.add('pds');
-        }
-        if (cleanK === 'work_experience' || cleanK === 'work-experience' || cleanK === 'work-experience-sheet') {
-          folderSet.add('work-experience-sheet');
-          folderSet.add('work-experience');
-          folderSet.add('work_experience');
-        }
-        if (cleanK === 'eligibility' || cleanK === 'certificate-of-eligibility') {
-          folderSet.add('certificate-of-eligibility');
-          folderSet.add('eligibility');
-        }
-        if (cleanK === 'tor' || cleanK === 'transcript-of-records') {
-          folderSet.add('transcript-of-records');
-          folderSet.add('tor');
-        }
-        if (cleanK === 'prc' || cleanK === 'updated-prc-license-id' || cleanK === 'prc-license') {
-          folderSet.add('updated-prc-license-id');
-          folderSet.add('prc-license');
-          folderSet.add('prc');
-        }
-        if (cleanK === 'diploma' || cleanK.includes('diploma')) {
-          folderSet.add('diploma--optional-');
-          folderSet.add('diploma-optional');
-          folderSet.add('diploma');
-        }
-        if (cleanK === 'letter_of_intent' || cleanK === 'letter-of-intent') {
-          folderSet.add('letter-of-intent');
-          folderSet.add('letter_of_intent');
-        }
-        if (cleanK === 'sworn_declaration' || cleanK === 'sworn-declaration' || cleanK === 'cav') {
-          folderSet.add('sworn-declaration');
-          folderSet.add('sworn_declaration');
-          folderSet.add('cav');
-        }
-        if (cleanK === 'outstanding_accomplishments' || cleanK === 'outstandingaccomplishment' || cleanK === 'outstanding-accomplishments') {
-          folderSet.add('outstanding-accomplishments');
-          folderSet.add('outstanding_accomplishments');
-          folderSet.add('outstanding-accomplishment');
-        }
-        if (cleanK === 'performance_rating' || cleanK === 'performance-rating') {
-          folderSet.add('performance-rating');
-          folderSet.add('performance_rating');
-        }
-        if (cleanK === 'training_certificates' || cleanK === 'training-certificates') {
-          folderSet.add('training-certificates');
-          folderSet.add('training_certificates');
-        }
-        if (cleanK === 'application_education' || cleanK === 'application-of-education') {
-          folderSet.add('application-of-education');
-          folderSet.add('application_education');
-        }
-        if (cleanK === 'application_learning' || cleanK === 'application-of-learning-and-development') {
-          folderSet.add('application-of-learning-and-development');
-          folderSet.add('application_learning');
-        }
-        return Array.from(folderSet);
-      };
-
-      const getApplicantFolderPrefixes = (appRow) => {
-        const prefixes = new Set();
-        if (appRow) {
-          if (appRow.id) {
-            prefixes.add(`applicant-${appRow.id}/`.toLowerCase());
-          }
-          if (appRow.applicant_number) {
-            prefixes.add(`applicant-${appRow.applicant_number.toLowerCase()}/`);
-            prefixes.add(`${appRow.applicant_number.toLowerCase()}/`);
-          }
-          if (appRow.code) {
-            prefixes.add(`applicant-${appRow.code.toLowerCase()}/`);
-            prefixes.add(`${appRow.code.toLowerCase()}/`);
-          }
-        }
-        return Array.from(prefixes);
-      };
+      const azureBlobs = await getBlobsForApplicant(containerClient, app);
 
       const findMatchingBlob = (appRow, docKey) => {
         const applicantPrefixes = getApplicantFolderPrefixes(appRow);
         const folderAliases = getFolderAliasesFromKey(docKey);
 
-        // 1. Strict prefix matching: applicant-X/folder-name/
         for (const appPrefix of applicantPrefixes) {
           for (const folderAlias of folderAliases) {
             const prefix = `${appPrefix}${folderAlias}/`.toLowerCase();
@@ -605,7 +684,6 @@ export async function getApplicationDocuments(req, res) {
             if (matched) return matched;
           }
         }
-        // 2. Secondary matching: must start with applicant-X/ and contain folder-name
         for (const appPrefix of applicantPrefixes) {
           for (const folderAlias of folderAliases) {
             const matched = azureBlobs.find(b => b.nameLower.startsWith(appPrefix) && b.nameLower.includes(folderAlias));
@@ -634,6 +712,7 @@ export async function getApplicationDocuments(req, res) {
         }
       });
 
+      setCachedDocList(cacheKey, documents);
       console.log(`[Azure Storage] Resolved blobs for applicant "${applicantCode}":`, documents.filter(d => d.existsInAzure).map(d => d.key));
     } catch (err) {
       console.error('[Azure Listing Error in getApplicationDocuments]', err.message);
@@ -650,15 +729,14 @@ export async function getApplicationDocuments(req, res) {
 
 export async function downloadApplicationDocument(req, res) {
   const { id, key } = req.params;
-  const connString = process.env.AZURE_STORAGE_CONNECTION_STRING;
   const AZURE_FOLDER_NAME = process.env.AZURE_FOLDER_NAME || "main-agap";
   const requestedDpi = req.query.dpi || '98';
 
-  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-  res.setHeader('Pragma', 'no-cache');
-  res.setHeader('Expires', '0');
+  res.setHeader('Cache-Control', 'private, max-age=300');
 
-  if (!connString || connString === 'ReplaceWithYourAzureStorageConnectionString') {
+  const containerClient = getAzureContainerClient();
+
+  if (!containerClient) {
     console.log(`[Azure Storage] Connection string not configured. Serving local fallback optimized for ${requestedDpi} DPI.`);
     res.setHeader('Content-Type', 'application/pdf');
     const minimalPdf = Buffer.from(
@@ -669,9 +747,8 @@ export async function downloadApplicationDocument(req, res) {
   }
 
   try {
-    console.log(`[Azure Storage] Downsampling file download stream to ${requestedDpi} DPI for faster loading.`);
     const appQuery = await pool.query(
-      `SELECT a.letter_of_intent, a.sworn_document, a.sworn_document as sworn_declaration, ap.id, ap.applicant_number, ap.code, ap.surname, ap.first_name 
+      `SELECT a.id as application_id, a.applicant_id, a.letter_of_intent, a.sworn_document, a.sworn_document as sworn_declaration, ap.id as applicant_table_id, ap.applicant_number, ap.code, ap.surname, ap.first_name 
        FROM applications a 
        JOIN applicants ap ON a.applicant_id = ap.id 
        WHERE a.id = $1`,
@@ -680,15 +757,7 @@ export async function downloadApplicationDocument(req, res) {
     const app = appQuery.rows[0];
     const applicantCode = app ? (app.code || app.applicant_number || '') : '';
 
-    console.log(`[Azure Storage] Finding blob for key "${key}" and applicant code "${applicantCode}" in container "${AZURE_FOLDER_NAME}"...`);
-
-    const blobServiceClient = BlobServiceClient.fromConnectionString(connString);
-    const containerClient = blobServiceClient.getContainerClient(AZURE_FOLDER_NAME);
-    
-    const allBlobs = [];
-    for await (const blob of containerClient.listBlobsFlat()) {
-      allBlobs.push(blob);
-    }
+    const allBlobs = await getBlobsForApplicant(containerClient, app);
 
     const extractBlobPath = (urlOrPath) => {
       if (!urlOrPath) return '';
@@ -708,129 +777,49 @@ export async function downloadApplicationDocument(req, res) {
       return urlOrPath;
     };
 
-    const getFolderAliasesFromKey = (k) => {
-      const cleanK = (k || '').toLowerCase().trim();
-      const folderSet = new Set([cleanK, cleanK.replace(/_/g, '-')]);
-
-      if (cleanK === 'pds' || cleanK === 'personal-data-sheet') {
-        folderSet.add('personal-data-sheet');
-        folderSet.add('pds');
-      }
-      if (cleanK === 'work_experience' || cleanK === 'work-experience' || cleanK === 'work-experience-sheet') {
-        folderSet.add('work-experience-sheet');
-        folderSet.add('work-experience');
-        folderSet.add('work_experience');
-      }
-      if (cleanK === 'eligibility' || cleanK === 'certificate-of-eligibility') {
-        folderSet.add('certificate-of-eligibility');
-        folderSet.add('eligibility');
-      }
-      if (cleanK === 'tor' || cleanK === 'transcript-of-records') {
-        folderSet.add('transcript-of-records');
-        folderSet.add('tor');
-      }
-      if (cleanK === 'prc' || cleanK === 'updated-prc-license-id' || cleanK === 'prc-license') {
-        folderSet.add('updated-prc-license-id');
-        folderSet.add('prc-license');
-        folderSet.add('prc');
-      }
-      if (cleanK === 'diploma' || cleanK.includes('diploma')) {
-        folderSet.add('diploma--optional-');
-        folderSet.add('diploma-optional');
-        folderSet.add('diploma');
-      }
-      if (cleanK === 'letter_of_intent' || cleanK === 'letter-of-intent') {
-        folderSet.add('letter-of-intent');
-        folderSet.add('letter_of_intent');
-      }
-      if (cleanK === 'sworn_declaration' || cleanK === 'sworn-declaration' || cleanK === 'cav') {
-        folderSet.add('sworn-declaration');
-        folderSet.add('sworn_declaration');
-        folderSet.add('cav');
-      }
-      if (cleanK === 'outstanding_accomplishments' || cleanK === 'outstandingaccomplishment' || cleanK === 'outstanding-accomplishments') {
-        folderSet.add('outstanding-accomplishments');
-        folderSet.add('outstanding_accomplishments');
-        folderSet.add('outstanding-accomplishment');
-      }
-      if (cleanK === 'performance_rating' || cleanK === 'performance-rating') {
-        folderSet.add('performance-rating');
-        folderSet.add('performance_rating');
-      }
-      if (cleanK === 'training_certificates' || cleanK === 'training-certificates') {
-        folderSet.add('training-certificates');
-        folderSet.add('training_certificates');
-      }
-      if (cleanK === 'application_education' || cleanK === 'application-of-education') {
-        folderSet.add('application-of-education');
-        folderSet.add('application_education');
-      }
-      if (cleanK === 'application_learning' || cleanK === 'application-of-learning-and-development') {
-        folderSet.add('application-of-learning-and-development');
-        folderSet.add('application_learning');
-      }
-      return Array.from(folderSet);
-    };
-
-    const getApplicantFolderPrefixes = (appRow) => {
-      const prefixes = new Set();
-      if (appRow) {
-        if (appRow.id) {
-          prefixes.add(`applicant-${appRow.id}/`.toLowerCase());
-        }
-        if (appRow.applicant_number) {
-          prefixes.add(`applicant-${appRow.applicant_number.toLowerCase()}/`);
-          prefixes.add(`${appRow.applicant_number.toLowerCase()}/`);
-        }
-        if (appRow.code) {
-          prefixes.add(`applicant-${appRow.code.toLowerCase()}/`);
-          prefixes.add(`${appRow.code.toLowerCase()}/`);
-        }
-      }
-      return Array.from(prefixes);
-    };
-
     const findBlob = (appRow) => {
       if (key === 'letter_of_intent' && appRow?.letter_of_intent) {
         const extracted = extractBlobPath(appRow.letter_of_intent);
         const found = allBlobs.find(b => b.name === extracted || b.name.endsWith(extracted) || extracted.endsWith(b.name));
         if (found) return found.name;
-        return extracted;
       }
       if ((key === 'sworn_declaration' || key === 'cav') && appRow?.sworn_declaration) {
         const extracted = extractBlobPath(appRow.sworn_declaration);
         const found = allBlobs.find(b => b.name === extracted || b.name.endsWith(extracted) || extracted.endsWith(b.name));
         if (found) return found.name;
-        return extracted;
       }
 
       const applicantPrefixes = getApplicantFolderPrefixes(appRow);
       const folderAliases = getFolderAliasesFromKey(key);
 
-      // 1. Strict prefix matching: applicant-X/folder-name/
       for (const appPrefix of applicantPrefixes) {
         for (const folderAlias of folderAliases) {
           const prefix = `${appPrefix}${folderAlias}/`.toLowerCase();
-          const matched = allBlobs.find(b => b.name.toLowerCase().startsWith(prefix));
+          const matched = allBlobs.find(b => b.nameLower.startsWith(prefix));
           if (matched) return matched.name;
         }
       }
-      // 2. Secondary matching: must start with applicant-X/ and contain folder-name
       for (const appPrefix of applicantPrefixes) {
         for (const folderAlias of folderAliases) {
-          const matched = allBlobs.find(b => b.name.toLowerCase().startsWith(appPrefix) && b.name.toLowerCase().includes(folderAlias));
+          const matched = allBlobs.find(b => b.nameLower.startsWith(appPrefix) && b.nameLower.includes(folderAlias));
           if (matched) return matched.name;
         }
+      }
+
+      if (key === 'letter_of_intent' && appRow?.letter_of_intent) {
+        return extractBlobPath(appRow.letter_of_intent);
+      }
+      if ((key === 'sworn_declaration' || key === 'cav') && appRow?.sworn_declaration) {
+        return extractBlobPath(appRow.sworn_declaration);
       }
       return '';
     };
 
     const matchedBlobName = findBlob(app);
 
-    // 3. Fallback/diagnostics list if no direct matching blob is resolved
     if (!matchedBlobName) {
       const availableBlobs = allBlobs.map(b => b.name);
-      console.log(`[Azure Storage] Strict match failed for applicant "${applicantCode}". Container "${AZURE_FOLDER_NAME}" blobs:`, availableBlobs);
+      console.log(`[Azure Storage] Strict match failed for applicant "${applicantCode}". Scoped blobs:`, availableBlobs);
       return res.status(404).json({
         error: `Azure Blob matching key "${key}" for applicant "${applicantCode}" not found in folder applicant-${app ? app.id : 'unknown'}.`,
         availableBlobsInContainer: availableBlobs
@@ -846,7 +835,16 @@ export async function downloadApplicationDocument(req, res) {
     
     downloadBlockBlobResponse.readableStreamBody.pipe(res);
   } catch (err) {
-    console.error(`[Azure Storage Error] Failed to process blob download:`, err.message);
+    console.error(`[Azure Storage Error] Failed to process blob download for key "${key}":`, err.message);
+    if (err.statusCode === 404 || (err.message && (err.message.includes('does not exist') || err.message.includes('BlobNotFound')))) {
+      console.log(`[Azure Storage] Blob missing in Azure container. Serving fallback PDF.`);
+      res.setHeader('Content-Type', 'application/pdf');
+      const minimalPdf = Buffer.from(
+        'JVBERi0xLjUKMSAwIG9iago8PAovVHlwZSAvQ2F0YWxvZwovUGFnZXMgMiAwIFIKPj4KZW5kb2JqCjIgMCBvYmoKPDwKLVR5cGUgL1BhZ2VzCi9LaWRzIFszIDAgUl0KL0NvdW50IDEKPj4KZW5kb2JqCjMgMCBvYmoKPDwKLVR5cGUgL1BhcmVudCAyIDAgUgovTWVkaWFCb3ggWzAgMCA1OTUgODQyXQovQ29udGVudHMgNCAwIFIKPj4KZW5kb2JqCjQgMCBvYmoKPDwKL0xlbmd0aCA4Cj4+CnN0cmVhbQoKZW5kc3RyZWFtCmVuZG9iagp4cmVmCjAgNQowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwMTUgMDAwMDA meSAKMDAwMDAwMDA3MCAwMDAwMCBuIAowMDAwMDAwMTIwIDAwMDAwIGYgCjAwMDAwMDAyMDEgMDAwMDAgbiAKdHJhaWxlcgo8PAovU2l6ZSA1Ci9Sb290IDEgMCBSCj4+CnN0YXJ0eHJlZgoyNTcKJSVFT0YK',
+        'base64'
+      );
+      return res.send(minimalPdf);
+    }
     res.status(500).json({ error: `Azure Blob download failed: ${err.message}` });
   }
 }

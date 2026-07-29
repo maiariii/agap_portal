@@ -1,6 +1,23 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useAppData } from '../../../middleware/DataProvider.jsx';
 import { SCORE_AREAS } from '@agap/shared';
+const renderApplicantCell = (r) => {
+  if (!r) return null;
+  const obj = r.applicantObj || r.appObj || r;
+  const email = obj.email_address || obj.emailAddress || obj.email || r.email_address || r.email || '';
+  const mobile = obj.mobile_no || obj.mobileNo || obj.mobile || r.mobile_no || r.mobile || '';
+  const telephone = obj.telephone_no || obj.telephoneNo || obj.telephone || r.telephone_no || r.telephone || '';
+  const phone = mobile ? mobile : telephone;
+
+  return (
+    <span>
+      <b>{r.applicant}</b>
+      {email ? <span style={{ display: 'block', fontSize: '10px', color: '#64748B', lineHeight: '1.25', marginTop: '2px', wordBreak: 'break-word' }}>{email}</span> : null}
+      {phone ? <span style={{ display: 'block', fontSize: '10px', color: '#64748B', lineHeight: '1.25', marginTop: '1px' }}>{phone}</span> : null}
+      {!email && !phone && (r.code || r.applicantCode) ? <span style={{ display: 'block', fontSize: '10px', color: '#64748B', lineHeight: '1.25', marginTop: '2px' }}>{r.code || r.applicantCode}</span> : null}
+    </span>
+  );
+};
 
 const matchStatus = (appStatus, filterStatus) => {
   if (!filterStatus) return true;
@@ -260,7 +277,7 @@ export default function DashboardPage() {
         centerLabel: 'applications',
         tableLabel: 'Application Status',
         detailColumns: [
-          { label: 'Applicant', key: 'applicant', type: 'text', render: row => <span><b>{row.applicant}</b><br /><span className="small">{row.code}</span></span> },
+          { label: 'Applicant', key: 'applicant', type: 'text', render: row => renderApplicantCell(row) },
           { label: 'Vacancy', key: 'vacancy', type: 'categorical' },
           { label: 'Date Applied', key: 'dateApplied', type: 'text' },
           { label: 'Application Status', key: 'status', type: 'categorical', render: row => <span className={`badge ${cls(row.status)}`}>{row.status === 'Application Submitted' ? 'Application Submitted' : titleCase(row.status)}</span> }
@@ -322,7 +339,7 @@ export default function DashboardPage() {
         centerLabel: 'applications',
         tableLabel: 'Assessment Status',
         detailColumns: [
-          { label: 'Applicant', key: 'applicant', type: 'text', render: row => <span><b>{row.applicant}</b><br /><span className="small">{row.code}</span></span> },
+          { label: 'Applicant', key: 'applicant', type: 'text', render: row => renderApplicantCell(row) },
           { label: 'Vacancy', key: 'vacancy', type: 'categorical' },
           { label: 'Overall Fit', key: 'fit', type: 'numeric', render: row => `${row.fit}%` },
           {

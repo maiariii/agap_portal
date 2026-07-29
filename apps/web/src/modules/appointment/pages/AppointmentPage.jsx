@@ -2,7 +2,23 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useAppData } from '../../../middleware/DataProvider.jsx';
 import { useToast } from '../../../middleware/ToastProvider.jsx';
 import { apiFetch } from '../../../config/api.js';
-import VacancyClusterAccordion from '../../../components/VacancyClusterAccordion.jsx';
+const renderApplicantCell = (r) => {
+  if (!r) return null;
+  const obj = r.applicantObj || r.appObj || r;
+  const email = obj.email_address || obj.emailAddress || obj.email || r.email_address || r.email || '';
+  const mobile = obj.mobile_no || obj.mobileNo || obj.mobile || r.mobile_no || r.mobile || '';
+  const telephone = obj.telephone_no || obj.telephoneNo || obj.telephone || r.telephone_no || r.telephone || '';
+  const phone = mobile ? mobile : telephone;
+
+  return (
+    <span>
+      <b>{r.applicant}</b>
+      {email ? <span style={{ display: 'block', fontSize: '10px', color: '#64748B', lineHeight: '1.25', marginTop: '2px', wordBreak: 'break-word' }}>{email}</span> : null}
+      {phone ? <span style={{ display: 'block', fontSize: '10px', color: '#64748B', lineHeight: '1.25', marginTop: '1px' }}>{phone}</span> : null}
+      {!email && !phone && (r.code || r.applicantCode) ? <span style={{ display: 'block', fontSize: '10px', color: '#64748B', lineHeight: '1.25', marginTop: '2px' }}>{r.code || r.applicantCode}</span> : null}
+    </span>
+  );
+};
 
 export default function AppointmentPage() {
   const { vacancies, applications, loadAllData } = useAppData();
@@ -29,6 +45,11 @@ export default function AppointmentPage() {
   const [selectedDocKey, setSelectedDocKey] = useState('pds');
   const [availableDocs, setAvailableDocs] = useState([]);
   const [docsLoading, setDocsLoading] = useState(false);
+  const [docIframeLoading, setDocIframeLoading] = useState(true);
+
+  useEffect(() => {
+    setDocIframeLoading(true);
+  }, [selectedDocKey, showDocsModal]);
 
   // CSV viewer state
   const [csvData, setCsvData] = useState(null);
@@ -455,7 +476,7 @@ export default function AppointmentPage() {
                       return (
                         <tr key={r.id}>
                           <td className="row-num">{(apptPage - 1) * apptPageSize + i + 1}</td>
-                          <td><b>{r.applicant}</b><br/><span className="small">{r.code}</span></td>
+                          <td>{renderApplicantCell(r)}</td>
                           <td>{r.vacancy}</td>
                           <td>{r.itemNo}</td>
                           <td className="num-col">
@@ -791,11 +812,46 @@ export default function AppointmentPage() {
                     }}>
                       {existsInAzure ? (
                         isPdf ? (
-                          <iframe
-                            src={`${import.meta.env.VITE_API_URL || window.location.origin}/api/applications/${selectedDocApp.id}/documents/${selectedDocKey}/download?token=${localStorage.getItem('agap_token')}&dpi=98`}
-                            style={{ width: '100%', height: '550px', border: 'none', borderRadius: '0 0 12px 12px' }}
-                            title="Azure Document Viewer"
-                          />
+                          <div style={{ width: '100%', height: '550px', position: 'relative' }}>
+                            {docIframeLoading && (
+                              <div style={{
+                                backgroundColor: '#f8fafc',
+                                height: '550px',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                justifyContent: 'center',
+                                alignItems: 'center',
+                                gap: '12px',
+                                width: '100%',
+                                color: '#64748B',
+                                padding: '40px',
+                                boxSizing: 'border-box'
+                              }}>
+                                <style>{`
+                                  @keyframes spin {
+                                    0% { transform: rotate(0deg); }
+                                    100% { transform: rotate(360deg); }
+                                  }
+                                `}</style>
+                                <div style={{
+                                  border: '4px solid #e2e8f0',
+                                  borderTop: '4px solid var(--blue)',
+                                  borderRadius: '50%',
+                                  width: '32px',
+                                  height: '32px',
+                                  animation: 'spin 1s linear infinite'
+                                }} />
+                                <b style={{ fontSize: '14px' }}>Loading Documents...</b>
+                                <span style={{ fontSize: '12px' }}>Checking file attachments</span>
+                              </div>
+                            )}
+                            <iframe
+                              src={`${import.meta.env.VITE_API_URL || window.location.origin}/api/applications/${selectedDocApp.id}/documents/${selectedDocKey}/download?token=${localStorage.getItem('agap_token')}&dpi=98`}
+                              onLoad={() => setDocIframeLoading(false)}
+                              style={{ width: '100%', height: '550px', border: 'none', borderRadius: '0 0 12px 12px', display: docIframeLoading ? 'none' : 'block' }}
+                              title="Azure Document Viewer"
+                            />
+                          </div>
                         ) : (
                           <div style={{ width: '100%', display: 'flex', flexDirection: 'column', backgroundColor: 'white', border: '1px solid var(--line)', borderRadius: '12px', overflow: 'hidden' }}>
                             <div style={{ padding: '12px 16px', borderBottom: '1px solid #e2e8f0', background: '#f8fafc', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -813,8 +869,35 @@ export default function AppointmentPage() {
                             </div>
                             <div style={{ overflow: 'auto', padding: '16px', boxSizing: 'border-box', maxHeight: '480px' }}>
                               {csvLoading ? (
-                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '200px', gap: '8px', color: '#64748B' }}>
-                                  <span style={{ fontSize: '13px' }}>Loading sheet data...</span>
+                                <div style={{
+                                  backgroundColor: '#f8fafc',
+                                  height: '300px',
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  justifyContent: 'center',
+                                  alignItems: 'center',
+                                  gap: '12px',
+                                  width: '100%',
+                                  color: '#64748B',
+                                  padding: '40px',
+                                  boxSizing: 'border-box'
+                                }}>
+                                  <style>{`
+                                    @keyframes spin {
+                                      0% { transform: rotate(0deg); }
+                                      100% { transform: rotate(360deg); }
+                                    }
+                                  `}</style>
+                                  <div style={{
+                                    border: '4px solid #e2e8f0',
+                                    borderTop: '4px solid var(--blue)',
+                                    borderRadius: '50%',
+                                    width: '32px',
+                                    height: '32px',
+                                    animation: 'spin 1s linear infinite'
+                                  }} />
+                                  <b style={{ fontSize: '14px' }}>Loading Documents...</b>
+                                  <span style={{ fontSize: '12px' }}>Checking file attachments</span>
                                 </div>
                               ) : csvError ? (
                                 <div style={{ color: '#EF4444', padding: '16px', textAlign: 'center', fontSize: '13px' }}>

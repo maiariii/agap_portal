@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useAppData } from '../../../middleware/DataProvider.jsx';
 import { useToast } from '../../../middleware/ToastProvider.jsx';
 import { apiFetch } from '../../../config/api.js';
@@ -17,6 +17,32 @@ const DOC_REQUIREMENTS = [
   { key: "cav", label: "Checklist of Requirements and Omnibus Sworn Statement on the CAV of documents submitted and Data Privacy Consent Form" },
   { key: "other", label: "Other documents as may be required for comparative assessment (e.g. MOVs, or Performance Rating from relevant work experience)" }
 ];
+const renderApplicantCell = (r) => {
+  if (!r) return null;
+  const obj = r.applicantObj || r.appObj || r;
+  const email = obj.email_address || obj.emailAddress || obj.email || r.email_address || r.email || '';
+  const mobile = obj.mobile_no || obj.mobileNo || obj.mobile || r.mobile_no || r.mobile || '';
+  const telephone = obj.telephone_no || obj.telephoneNo || obj.telephone || r.telephone_no || r.telephone || '';
+  const phone = mobile ? mobile : telephone;
+
+  return (
+    <span>
+      <b>{r.applicant}</b>
+      {email ? (
+        <a
+          href={`mailto:${email}`}
+          onClick={(e) => e.stopPropagation()}
+          style={{ display: 'block', fontSize: '10px', color: '#64748B', lineHeight: '1.25', marginTop: '2px', wordBreak: 'break-word', userSelect: 'text', cursor: 'text', textDecoration: 'none' }}
+          title="Right-click to copy email address"
+        >
+          {email}
+        </a>
+      ) : null}
+      {phone ? <span style={{ display: 'block', fontSize: '10px', color: '#64748B', lineHeight: '1.25', marginTop: '1px', userSelect: 'text', cursor: 'text' }}>{phone}</span> : null}
+      {!email && !phone && (r.code || r.applicantCode) ? <span style={{ display: 'block', fontSize: '10px', color: '#64748B', lineHeight: '1.25', marginTop: '2px' }}>{r.code || r.applicantCode}</span> : null}
+    </span>
+  );
+};
 
 const getAdaptiveFontSize = (val) => {
   let text = '';
@@ -68,6 +94,11 @@ export default function ApplicationsPage() {
   const [availableDocs, setAvailableDocs] = useState([]);
   const [selectedDocKey, setSelectedDocKey] = useState('pds');
   const [docsLoading, setDocsLoading] = useState(false);
+  const [docIframeLoading, setDocIframeLoading] = useState(true);
+
+  useEffect(() => {
+    setDocIframeLoading(true);
+  }, [selectedDocKey, showReviewDocsVault]);
 
   React.useEffect(() => {
     const handleTourUpdate = () => {
@@ -564,10 +595,10 @@ export default function ApplicationsPage() {
           <table style={{ width: '100%', tableLayout: 'fixed' }}>
             <colgroup>
               <col style={{ width: '4%' }} />
-              <col style={{ width: '15%' }} />
+              <col style={{ width: '21%' }} />
               <col style={{ width: '10%' }} />
               <col style={{ width: '10%' }} />
-              <col style={{ width: '17%' }} />
+              <col style={{ width: '11%' }} />
               <col style={{ width: '7%' }} />
               <col style={{ width: '7%' }} />
               <col style={{ width: '15%' }} />
@@ -732,7 +763,7 @@ export default function ApplicationsPage() {
                     {items.map((r, i) => (
                       <tr key={r.id} className="clickable-row" onClick={() => handleOpenReview(r)}>
                         <td className="row-num">{((appPage - 1) * appPageSize) + i + 1}</td>
-                        <td><b>{r.applicant}</b><br/><span className="small">{r.code}</span></td>
+                        <td>{renderApplicantCell(r)}</td>
                         <td>{r.dateApplied}</td>
                         <td>{r.deadline}</td>
                         <td>{r.bachelorDegree}</td>
@@ -800,19 +831,53 @@ export default function ApplicationsPage() {
             </div>
             <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
               <div className="qs-matrix-wrap">
-              <div className="qs-matrix-head">
+              <div className="qs-matrix-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
                 <div>
                   <div className="position-detail-eyebrow">Qualification Standards</div>
                   <h3>Qualification Standards Matrix</h3>
                   <p className="small">Matrix view of the applicant against the position's qualification standards.</p>
                 </div>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  <div className="meta-tile" style={{ background: 'rgba(255, 255, 255, 0.12)', backdropFilter: 'blur(4px)', border: '1px solid rgba(255, 255, 255, 0.25)', borderRadius: '12px', padding: '10px 16px', color: '#fff', minWidth: '150px' }}>
+                    <b style={{ color: '#93C5FD', fontSize: '11px', display: 'block', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>VACANCY</b>
+                    <span style={{ fontSize: '14px', fontWeight: '700', color: '#fff', display: 'block', lineHeight: '1.3' }}>{reviewApp.vacancy}</span>
+                  </div>
+                  <div className="meta-tile" style={{ background: 'rgba(255, 255, 255, 0.12)', backdropFilter: 'blur(4px)', border: '1px solid rgba(255, 255, 255, 0.25)', borderRadius: '12px', padding: '10px 16px', color: '#fff', minWidth: '130px' }}>
+                    <b style={{ color: '#93C5FD', fontSize: '11px', display: 'block', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>DEADLINE</b>
+                    <span style={{ fontSize: '14px', fontWeight: '700', color: '#fff', display: 'block', lineHeight: '1.3' }}>{reviewApp.deadline || '—'}</span>
+                  </div>
+                </div>
               </div>
-              <div className="qs-matrix-meta">
-                <div className="meta-tile"><b>Applicant</b>{reviewApp.applicant}</div>
-                <div className="meta-tile"><b>Applicant number</b>{reviewApp.code}</div>
-                <div className="meta-tile"><b>Vacancy</b>{reviewApp.vacancy}</div>
-                <div className="meta-tile"><b>Deadline</b>{reviewApp.deadline || '—'}</div>
-              </div>
+              {(() => {
+                const obj = reviewApp.applicantObj || reviewApp.appObj || reviewApp;
+                const email = obj.email_address || obj.emailAddress || obj.email || reviewApp.email_address || reviewApp.email || '—';
+                const mobile = obj.mobile_no || obj.mobileNo || obj.mobile || reviewApp.mobile_no || reviewApp.mobile || '';
+                const telephone = obj.telephone_no || obj.telephoneNo || obj.telephone || reviewApp.telephone_no || reviewApp.telephone || '';
+                const phone = mobile ? mobile : (telephone || '—');
+
+                return (
+                  <div className="qs-matrix-meta" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
+                    <div className="meta-tile"><b>Applicant</b>{reviewApp.applicant}</div>
+                    <div className="meta-tile"><b>Applicant number</b>{reviewApp.code}</div>
+                    <div className="meta-tile" style={{ userSelect: 'text' }}>
+                      <b>Email Address</b>
+                      {email && email !== '—' ? (
+                        <a
+                          href={`mailto:${email}`}
+                          onClick={(e) => e.stopPropagation()}
+                          style={{ color: 'inherit', textDecoration: 'none', wordBreak: 'break-word', display: 'block', marginTop: '2px', userSelect: 'text', cursor: 'text' }}
+                          title="Right-click to copy email address"
+                        >
+                          {email}
+                        </a>
+                      ) : (
+                        <span style={{ display: 'block', marginTop: '2px' }}>—</span>
+                      )}
+                    </div>
+                    <div className="meta-tile" style={{ userSelect: 'text' }}><b>Contact No.</b><span style={{ display: 'block', marginTop: '2px', userSelect: 'text', cursor: 'text' }}>{phone}</span></div>
+                  </div>
+                );
+              })()}
               <div className="qs-matrix-table-wrap">
                 <table className="qs-matrix-table">
                   <thead>
@@ -1158,11 +1223,46 @@ export default function ApplicationsPage() {
                     }}>
                       {existsInAzure ? (
                         isPdf ? (
-                          <iframe
-                            src={`${import.meta.env.VITE_API_URL || window.location.origin}/api/applications/${reviewApp.id}/documents/${selectedDocKey}/download?token=${localStorage.getItem('agap_token')}&dpi=98&v=${Date.now()}`}
-                            style={{ width: '100%', height: '600px', border: 'none', borderRadius: '0 0 12px 12px' }}
-                            title="Azure Document Viewer"
-                          />
+                          <div style={{ width: '100%', height: '600px', position: 'relative' }}>
+                            {docIframeLoading && (
+                              <div style={{
+                                backgroundColor: '#f8fafc',
+                                height: '600px',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                justifyContent: 'center',
+                                alignItems: 'center',
+                                gap: '12px',
+                                width: '100%',
+                                color: '#64748B',
+                                padding: '40px',
+                                boxSizing: 'border-box'
+                              }}>
+                                <style>{`
+                                  @keyframes spin {
+                                    0% { transform: rotate(0deg); }
+                                    100% { transform: rotate(360deg); }
+                                  }
+                                `}</style>
+                                <div style={{
+                                  border: '4px solid #e2e8f0',
+                                  borderTop: '4px solid var(--blue)',
+                                  borderRadius: '50%',
+                                  width: '32px',
+                                  height: '32px',
+                                  animation: 'spin 1s linear infinite'
+                                }} />
+                                <b style={{ fontSize: '14px' }}>Loading Documents...</b>
+                                <span style={{ fontSize: '12px' }}>Checking file attachments</span>
+                              </div>
+                            )}
+                            <iframe
+                              src={`${import.meta.env.VITE_API_URL || window.location.origin}/api/applications/${reviewApp.id}/documents/${selectedDocKey}/download?token=${localStorage.getItem('agap_token')}&dpi=98`}
+                              onLoad={() => setDocIframeLoading(false)}
+                              style={{ width: '100%', height: '600px', border: 'none', borderRadius: '0 0 12px 12px', display: docIframeLoading ? 'none' : 'block' }}
+                              title="Azure Document Viewer"
+                            />
+                          </div>
                         ) : (
                           <div style={{ width: '100%', display: 'flex', flexDirection: 'column', backgroundColor: 'white', border: '1px solid var(--line)', borderRadius: '12px', overflow: 'hidden' }}>
                             <div style={{ padding: '12px 16px', borderBottom: '1px solid #e2e8f0', background: '#f8fafc', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
