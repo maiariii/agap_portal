@@ -469,9 +469,8 @@ export default function VacanciesPage() {
     if (!calVacancy || !calStart || !calEnd) return setToast({ message: 'Please input all values', type: 'error' });
     const startD = new Date(calStart + "T00:00:00");
     const endD = new Date(calEnd + "T00:00:00");
-    const diffDays = Math.round((endD - startD) / 86400000);
-    if (diffDays > 10) {
-      return setToast({ message: "Deadline cannot be more than 10 days after the start date.", type: 'error' });
+    if (endD < startD) {
+      return setToast({ message: "Deadline cannot be earlier than the start date.", type: 'error' });
     }
     try {
       await apiFetch(`/api/vacancies/${calVacancy.id}`, {
@@ -641,27 +640,13 @@ export default function VacanciesPage() {
   const selectCalDate = (iso) => {
     if (calField === 'start') {
       setCalStart(iso);
-      if (calEnd) {
-        const startD = new Date(iso + "T00:00:00");
-        const endD = new Date(calEnd + "T00:00:00");
-        const diffDays = Math.round((endD - startD) / 86400000);
-        if (diffDays > 10 || iso > calEnd) {
-          setCalEnd('');
-        }
+      if (calEnd && iso > calEnd) {
+        setCalEnd('');
       }
     } else {
       if (calStart && iso < calStart) {
         setToast({ message: "Deadline cannot be earlier than the start date.", type: 'error' });
         return;
-      }
-      if (calStart) {
-        const startD = new Date(calStart + "T00:00:00");
-        const endD = new Date(iso + "T00:00:00");
-        const diffDays = Math.round((endD - startD) / 86400000);
-        if (diffDays > 10) {
-          setToast({ message: "Deadline cannot be more than 10 days after the start date.", type: 'error' });
-          return;
-        }
       }
       setCalEnd(iso);
     }
