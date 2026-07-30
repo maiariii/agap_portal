@@ -2366,6 +2366,11 @@ body:has(.sidebar:hover) .modal {
   background: linear-gradient(135deg, #F0F9FF, #E0F2FE)
 }
 
+.result-banner.pending_document_review {
+  border-color: #F59E0B;
+  background: linear-gradient(135deg, #FFFBEB, #FEF3C7);
+}
+
 .result-banner.qualified .badge {
   background: #16A34A;
   color: white
@@ -2385,6 +2390,18 @@ body:has(.sidebar:hover) .modal {
 .result-banner.pending_qs_review .badge {
   background: #0284C7;
   color: white
+}
+
+.result-banner.pending_document_review .badge {
+  background: #D97706;
+  color: white
+}
+
+.badge.pending-document-review,
+.badge.pending_document_review {
+  background: #FEF3C7;
+  color: #B45309;
+  border: 1px solid #FCD34D;
 }
 
 .status-actions {

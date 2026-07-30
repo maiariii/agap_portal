@@ -9,17 +9,20 @@ export const DOCS = {
 };
 
 export const DOC_REQUIREMENTS = [
-  { key: "loi", label: "Letter of intent addressed to the Head of Office or highest human resource officer" },
-  { key: "pds", label: "Duly accomplished Personal Data Sheet (PDS, CS Form No. 212, Revised 2017) and Work Experience Sheet, if applicable" },
-  { key: "prc", label: "Photocopy of valid and updated PRC License/ID, if applicable" },
-  { key: "eligibility", label: "Photocopy of Certificate of Eligibility/Report of Rating, if applicable" },
-  { key: "tor", label: "Photocopy of scholastic/academic records such as Transcript of Records (TOR) and Diploma, including graduate and post-graduate units/degrees, if available" },
-  { key: "training", label: "Photocopy of Certificate/s of Training, if applicable" },
-  { key: "employment", label: "Photocopy of Certificate of Employment, Contract of Service, or duly signed Service Record, whichever is/are applicable" },
-  { key: "appointment", label: "Photocopy of latest appointment, if applicable" },
-  { key: "performance", label: "Photocopy of the Performance Rating in the last rating period(s) covering one (1) year performance prior to the deadline of submission, if applicable" },
-  { key: "cav", label: "Checklist of Requirements and Omnibus Sworn Statement on the CAV of documents submitted and Data Privacy Consent Form" },
-  { key: "other", label: "Other documents as may be required for comparative assessment (e.g. MOVs, or Performance Rating from relevant work experience)" }
+  // Required requirements (5 items - unlock QS Evaluation)
+  { key: "loi", label: "Letter of intent addressed to the Head of Office or highest human resource officer", required: true },
+  { key: "pds", label: "Duly accomplished Personal Data Sheet (PDS, CS Form No. 212, Revised 2017) and Work Experience Sheet, if applicable", required: true },
+  { key: "eligibility", label: "Photocopy of Certificate of Eligibility/Report of Rating, if applicable", required: true },
+  { key: "tor", label: "Photocopy of scholastic/academic records such as Transcript of Records (TOR) and Diploma, including graduate and post-graduate units/degrees, if available", required: true },
+  { key: "cav", label: "Checklist of Requirements and Omnibus Sworn Statement on the CAV of documents submitted and Data Privacy Consent Form", required: true },
+
+  // Other requirements (6 items - total 11 items)
+  { key: "prc", label: "Photocopy of valid and updated PRC License/ID, if applicable", required: false },
+  { key: "training", label: "Photocopy of Certificate/s of Training, if applicable", required: false },
+  { key: "employment", label: "Photocopy of Certificate of Employment, Contract of Service, or duly signed Service Record, whichever is/are applicable", required: false },
+  { key: "appointment", label: "Photocopy of latest appointment, if applicable", required: false },
+  { key: "performance", label: "Photocopy of the Performance Rating in the last rating period(s) covering one (1) year performance prior to the deadline of submission, if applicable", required: false },
+  { key: "other", label: "Other documents as may be required for comparative assessment (e.g. MOVs, or Performance Rating from relevant work experience)", required: false }
 ];
 
 export const SCORE_AREAS = [

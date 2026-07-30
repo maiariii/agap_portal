@@ -5,17 +5,20 @@ import { apiFetch } from '../../../config/api.js';
 import VacancyClusterAccordion from '../../../components/VacancyClusterAccordion.jsx';
 
 const DOC_REQUIREMENTS = [
-  { key: "loi", label: "Letter of intent addressed to the Head of Office or highest human resource officer" },
-  { key: "pds", label: "Duly accomplished Personal Data Sheet (PDS, CS Form No. 212, Revised 2017) and Work Experience Sheet, if applicable" },
-  { key: "prc", label: "Photocopy of valid and updated PRC License/ID, if applicable" },
-  { key: "eligibility", label: "Photocopy of Certificate of Eligibility/Report of Rating, if applicable" },
-  { key: "tor", label: "Photocopy of scholastic/academic records such as Transcript of Records (TOR) and Diploma, including graduate and post-graduate units/degrees, if available" },
-  { key: "training", label: "Photocopy of Certificate/s of Training, if applicable" },
-  { key: "employment", label: "Photocopy of Certificate of Employment, Contract of Service, or duly signed Service Record, whichever is/are applicable" },
-  { key: "appointment", label: "Photocopy of latest appointment, if applicable" },
-  { key: "performance", label: "Photocopy of the Performance Rating in the last rating period(s) covering one (1) year performance prior to the deadline of submission, if applicable" },
-  { key: "cav", label: "Checklist of Requirements and Omnibus Sworn Statement on the CAV of documents submitted and Data Privacy Consent Form" },
-  { key: "other", label: "Other documents as may be required for comparative assessment (e.g. MOVs, or Performance Rating from relevant work experience)" }
+  // Required requirements (5 items - unlock QS Evaluation)
+  { key: "loi", label: "Letter of intent addressed to the Head of Office or highest human resource officer", required: true },
+  { key: "pds", label: "Duly accomplished Personal Data Sheet (PDS, CS Form No. 212, Revised 2017) and Work Experience Sheet, if applicable", required: true },
+  { key: "eligibility", label: "Photocopy of Certificate of Eligibility/Report of Rating, if applicable", required: true },
+  { key: "tor", label: "Photocopy of scholastic/academic records such as Transcript of Records (TOR) and Diploma, including graduate and post-graduate units/degrees, if available", required: true },
+  { key: "cav", label: "Checklist of Requirements and Omnibus Sworn Statement on the CAV of documents submitted and Data Privacy Consent Form", required: true },
+  
+  // Other requirements (6 items - total 11 items)
+  { key: "prc", label: "Photocopy of valid and updated PRC License/ID, if applicable", required: false },
+  { key: "training", label: "Photocopy of Certificate/s of Training, if applicable", required: false },
+  { key: "employment", label: "Photocopy of Certificate of Employment, Contract of Service, or duly signed Service Record, whichever is/are applicable", required: false },
+  { key: "appointment", label: "Photocopy of latest appointment, if applicable", required: false },
+  { key: "performance", label: "Photocopy of the Performance Rating in the last rating period(s) covering one (1) year performance prior to the deadline of submission, if applicable", required: false },
+  { key: "other", label: "Other documents as may be required for comparative assessment (e.g. MOVs, or Performance Rating from relevant work experience)", required: false }
 ];
 const renderApplicantCell = (r) => {
   if (!r) return null;
@@ -149,6 +152,9 @@ export default function ApplicationsPage() {
       if (appStatus.toLowerCase() === 'pending_qs_review') {
         return 'Pending QS Review';
       }
+      if (appStatus.toLowerCase() === 'pending_document_review' || appStatus.toLowerCase() === 'pending document review') {
+        return 'Pending Document Review';
+      }
       return titleCase(appStatus);
     }
     
@@ -236,6 +242,9 @@ export default function ApplicationsPage() {
           const filt = String(value).toLowerCase();
           rows = rows.filter(r => {
             const disp = getApplicationDisplayStatus(r).toLowerCase();
+            if (filt === 'pending_document_review' || filt === 'pending document review') {
+              return disp === 'pending document review';
+            }
             if (filt === 'pending_qs_review' || filt === 'pending qs review') {
               return disp === 'pending qs review';
             }
@@ -428,7 +437,11 @@ export default function ApplicationsPage() {
     });
   };
 
-  const docsComplete = Object.values(reviewDocs).every(Boolean);
+  const requiredReqs = useMemo(() => DOC_REQUIREMENTS.filter(r => r.required), []);
+  const otherReqs = useMemo(() => DOC_REQUIREMENTS.filter(r => !r.required), []);
+  const docsComplete = useMemo(() => {
+    return requiredReqs.every(req => !!reviewDocs[req.key]);
+  }, [requiredReqs, reviewDocs]);
 
   const isAlreadyQualified = useMemo(() => {
     return false;
@@ -439,15 +452,119 @@ export default function ApplicationsPage() {
     const allPass = decisions.every(d => d === 'pass');
     const someFail = decisions.some(d => d === 'fail');
 
+    const hasAnyDocChecked = Object.values(reviewDocs).some(Boolean);
+
+    if (!hasAnyDocChecked) {
+      return 'Application Submitted';
+    }
+
     if (!docsComplete) {
-      const hasAnyDocChecked = Object.values(reviewDocs).some(Boolean);
-      return hasAnyDocChecked ? 'Excluded' : 'Application Submitted';
+      return 'Pending Document Review';
     }
 
     if (someFail) return 'Disqualified';
     if (allPass) return 'Qualified';
     return 'Pending QS Review';
   }, [docsComplete, reviewDocs, reviewDecisions]);
+
+  // Exclude passcode confirmation modal states
+  const [showExcludePasscodeModal, setShowExcludePasscodeModal] = useState(false);
+  const [excludePasscode, setExcludePasscode] = useState('');
+  const [excludePasscodeError, setExcludePasscodeError] = useState('');
+
+  const handleInitiateExcludeApplicant = () => {
+    if (!reviewId) return;
+    setExcludePasscode('');
+    setExcludePasscodeError('');
+    setShowExcludePasscodeModal(true);
+  };
+
+  const handleConfirmExcludeWithPasscode = async () => {
+    if (!excludePasscode) {
+      return setExcludePasscodeError('Please enter your 6-digit passcode.');
+    }
+    try {
+      await apiFetch('/api/auth/verify-passcode', {
+        method: 'POST',
+        body: JSON.stringify({ passcode: excludePasscode })
+      });
+    } catch (err) {
+      return setExcludePasscodeError(err.message || 'Incorrect passcode. Exclusion is not authorized.');
+    }
+
+    try {
+      await apiFetch(`/api/applications/${reviewId}/review`, {
+        method: 'POST',
+        body: JSON.stringify({
+          result: 'Excluded',
+          docsComplete: false,
+          docChecklist: reviewDocs,
+          remarks: remarks || 'Applicant excluded during documentary evaluation.',
+          overallFit: reviewApp?.fitObj?.overall || 0,
+          degreeScore: reviewApp?.fitObj?.degreeScore || 0,
+          experienceScore: reviewApp?.fitObj?.experienceScore || 0,
+          trainingScore: reviewApp?.fitObj?.trainingScore || 0,
+          eligibilityScore: reviewApp?.fitObj?.eligibilityScore || 0,
+          degreeDecision: reviewDecisions.crit_degree,
+          experienceDecision: reviewDecisions.crit_experience,
+          trainingDecision: reviewDecisions.crit_training,
+          eligibilityDecision: reviewDecisions.crit_eligibility
+        })
+      });
+      setToast({ message: 'Applicant excluded successfully.', type: 'warning' });
+      setShowExcludePasscodeModal(false);
+      setReviewId(null);
+      setReviewApp(null);
+      setShowUnsavedPrompt(false);
+      loadAllData();
+    } catch (e) {
+      console.error(e);
+      setToast({ message: 'Failed to exclude applicant.', type: 'error' });
+    }
+  };
+
+  // Revert Exclusion confirmation modal states
+  const [showRevertExclusionModal, setShowRevertExclusionModal] = useState(false);
+
+  const handleInitiateRevertExclusion = () => {
+    if (!reviewId) return;
+    setShowRevertExclusionModal(true);
+  };
+
+  const handleConfirmRevertExclusion = async () => {
+    if (!reviewId) return;
+    try {
+      const hasAnyDoc = Object.values(reviewDocs).some(Boolean);
+      const targetStatus = docsComplete ? 'Pending QS Review' : (hasAnyDoc ? 'Pending Document Review' : 'Application Submitted');
+      await apiFetch(`/api/applications/${reviewId}/review`, {
+        method: 'POST',
+        body: JSON.stringify({
+          result: targetStatus,
+          docsComplete,
+          docChecklist: reviewDocs,
+          remarks: remarks || 'Exclusion reverted by HR officer.',
+          overallFit: reviewApp?.fitObj?.overall || 0,
+          degreeScore: reviewApp?.fitObj?.degreeScore || 0,
+          experienceScore: reviewApp?.fitObj?.experienceScore || 0,
+          trainingScore: reviewApp?.fitObj?.trainingScore || 0,
+          eligibilityScore: reviewApp?.fitObj?.eligibilityScore || 0,
+          degreeDecision: reviewDecisions.crit_degree,
+          experienceDecision: reviewDecisions.crit_experience,
+          trainingDecision: reviewDecisions.crit_training,
+          eligibilityDecision: reviewDecisions.crit_eligibility
+        })
+      });
+      setToast({ message: 'Exclusion reverted successfully.', type: 'success' });
+      setShowRevertExclusionModal(false);
+      setReviewId(null);
+      setReviewApp(null);
+      setShowUnsavedPrompt(false);
+      loadAllData();
+    } catch (e) {
+      console.error(e);
+      setToast({ message: 'Failed to revert exclusion.', type: 'error' });
+    }
+  };
 
   const handleSaveReview = async () => {
     if (!reviewId) return;
@@ -734,6 +851,7 @@ export default function ApplicationsPage() {
                     >
                       <option value="">All</option>
                       <option value="pending">Application Submitted</option>
+                      <option value="pending_document_review">Pending Document Review</option>
                       <option value="pending_qs_review">Pending QS Review</option>
                       <option value="qualified">Qualified</option>
                       <option value="disqualified">Disqualified</option>
@@ -925,25 +1043,48 @@ export default function ApplicationsPage() {
                 <div>
                   <div className="position-detail-eyebrow">Documentary Screening</div>
                   <h3>Documentary Requirements</h3>
-                  <p className="small">Tick each documentary requirement the applicant has submitted. The QS Evaluation is unlocked automatically once every requirement is complete.</p>
+                  <p className="small">Tick submitted requirements. The mandatory requirements unlock the QS Evaluation automatically once completed.</p>
                 </div>
               </div>
-              <div className="doc-checklist">
-                {DOC_REQUIREMENTS.map((req) => (
-                  <label className="doc-check-item" key={req.key}>
-                    <input type="checkbox" checked={!!reviewDocs[req.key]} onChange={() => handleToggleDocCheck(req.key)} disabled={isAlreadyQualified} />
-                    <span className="doc-req-text">{req.label}</span>
-                  </label>
-                ))}
+              
+              <div style={{ marginBottom: '16px' }}>
+                <h4 style={{ fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#0F172A', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#0EA5E9' }}></span>
+                  Mandatory Requirements ({requiredReqs.filter(r => !!reviewDocs[r.key]).length} of {requiredReqs.length})
+                </h4>
+                <div className="doc-checklist">
+                  {requiredReqs.map((req) => (
+                    <label className="doc-check-item" key={req.key} style={{ borderColor: reviewDocs[req.key] ? 'var(--green)' : '#E2E8F0' }}>
+                      <input type="checkbox" checked={!!reviewDocs[req.key]} onChange={() => handleToggleDocCheck(req.key)} disabled={isAlreadyQualified} />
+                      <span className="doc-req-text"><strong>[Required]</strong> {req.label}</span>
+                    </label>
+                  ))}
+                </div>
               </div>
-              <p className="small" style={{ margin: '8px 0 0', fontWeight: '700', fontSize: '13px' }}>
+
+              <div>
+                <h4 style={{ fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#64748B', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#94A3B8' }}></span>
+                  Other Requirements ({otherReqs.filter(r => !!reviewDocs[r.key]).length} of {otherReqs.length})
+                </h4>
+                <div className="doc-checklist">
+                  {otherReqs.map((req) => (
+                    <label className="doc-check-item" key={req.key}>
+                      <input type="checkbox" checked={!!reviewDocs[req.key]} onChange={() => handleToggleDocCheck(req.key)} disabled={isAlreadyQualified} />
+                      <span className="doc-req-text">{req.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <p className="small" style={{ margin: '14px 0 0', fontWeight: '700', fontSize: '13px' }}>
                 {docsComplete ? (
                   <>
-                    <b style={{ color: 'var(--green)' }}>All {DOC_REQUIREMENTS.length} requirements complete.</b> The QS Evaluation is unlocked below.
+                    <b style={{ color: 'var(--green)' }}>All {requiredReqs.length} Mandatory Requirements complete ({Object.values(reviewDocs).filter(Boolean).length} of {DOC_REQUIREMENTS.length} total requirements submitted).</b> The QS Evaluation is unlocked below.
                   </>
                 ) : (
                   <>
-                    <b>{Object.values(reviewDocs).filter(Boolean).length} of {DOC_REQUIREMENTS.length}</b> requirement(s) ticked. Complete all requirements to unlock the QS Evaluation — incomplete requirements mark the applicant as <b style={{ color: 'var(--red)' }}>Excluded</b>.
+                    <b>{requiredReqs.filter(r => !!reviewDocs[r.key]).length} of {requiredReqs.length} Mandatory Requirements</b> ticked (Total: {Object.values(reviewDocs).filter(Boolean).length} of {DOC_REQUIREMENTS.length}). Complete all 5 mandatory requirements to unlock the QS Evaluation — status remains <b>Pending Document Review</b> until mandatory documents are checked or the applicant is explicitly excluded.
                   </>
                 )}
               </p>
@@ -1004,7 +1145,7 @@ export default function ApplicationsPage() {
             <div className="status-command">
               <h3>Evaluation Result</h3>
               <p className="small" style={{ marginBottom: '12px', lineHeight: 1.4 }}>
-                The status is set automatically: incomplete documentary requirements result in Excluded; otherwise any criterion marked "Did not Meet the QS" results in Disqualified and all criteria marked "Meet the QS" result in Qualified.
+                The status defaults to <b>Pending Document Review</b> until mandatory requirements are complete. Applicants are marked <b>Excluded</b> only when specifically using the Exclude button below.
               </p>
               
               <div className={`result-banner ${calculatedResult.toLowerCase().replace(/\s+/g, '_')}`}>
@@ -1012,9 +1153,19 @@ export default function ApplicationsPage() {
                   {calculatedResult}
                 </span>
                 <span className="small">
+                  {calculatedResult.toLowerCase() === 'application submitted' && (
+                    <>
+                      <b>Application Submitted:</b> No requirements checked yet. Select mandatory requirements to proceed to document review.
+                    </>
+                  )}
+                  {calculatedResult.toLowerCase() === 'pending document review' && (
+                    <>
+                      <b>Pending Document Review:</b> Select all 5 mandatory requirements to unlock the QS Evaluation, or click EXCLUDE APPLICANT below to exclude.
+                    </>
+                  )}
                   {calculatedResult.toLowerCase() === 'excluded' && (
                     <>
-                      <b>Excluded:</b> Documentary requirements are incomplete.
+                      <b>Excluded:</b> Applicant has been excluded from the process.
                     </>
                   )}
                   {calculatedResult.toLowerCase() === 'pending qs review' && (
@@ -1040,17 +1191,125 @@ export default function ApplicationsPage() {
                 <textarea value={remarks} onChange={e => { setRemarks(e.target.value); setReviewDirty(true); }} placeholder="Enter evaluation remarks..." disabled={isAlreadyQualified}></textarea>
               </div>
               
-              <div className="decision-row" style={{ justifyContent: 'flex-end', marginTop: '12px' }}>
+              <div className="decision-row" style={{ justifyContent: 'space-between', alignItems: 'center', marginTop: '12px' }}>
+                {reviewApp?.status?.toLowerCase() === 'excluded' ? (
+                  <button
+                    type="button"
+                    onClick={handleInitiateRevertExclusion}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      backgroundColor: '#F0F9FF',
+                      color: '#0284C7',
+                      border: '1px solid #BAE6FD',
+                      borderRadius: '8px',
+                      padding: '9px 18px',
+                      fontSize: '13px',
+                      fontWeight: '700',
+                      letterSpacing: '0.02em',
+                      cursor: 'pointer',
+                      boxShadow: '0 1px 2px rgba(2, 132, 199, 0.05)',
+                      transition: 'all 0.15s ease-in-out'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = '#E0F2FE';
+                      e.currentTarget.style.borderColor = '#7DD3FC';
+                      e.currentTarget.style.transform = 'translateY(-1px)';
+                      e.currentTarget.style.boxShadow = '0 3px 6px rgba(2, 132, 199, 0.12)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = '#F0F9FF';
+                      e.currentTarget.style.borderColor = '#BAE6FD';
+                      e.currentTarget.style.transform = 'none';
+                      e.currentTarget.style.boxShadow = '0 1px 2px rgba(2, 132, 199, 0.05)';
+                    }}
+                  >
+                    <span style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: '20px',
+                      height: '20px',
+                      borderRadius: '50%',
+                      backgroundColor: '#E0F2FE',
+                      color: '#0284C7',
+                      fontSize: '11px',
+                      lineHeight: 1
+                    }}>
+                      ↺
+                    </span>
+                    <span>Revert Exclusion</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleInitiateExcludeApplicant}
+                    disabled={isAlreadyQualified}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      backgroundColor: '#FFF1F2',
+                      color: '#E11D48',
+                      border: '1px solid #FECDD3',
+                      borderRadius: '8px',
+                      padding: '9px 18px',
+                      fontSize: '13px',
+                      fontWeight: '700',
+                      letterSpacing: '0.02em',
+                      cursor: isAlreadyQualified ? 'not-allowed' : 'pointer',
+                      boxShadow: '0 1px 2px rgba(225, 29, 72, 0.05)',
+                      transition: 'all 0.15s ease-in-out',
+                      opacity: isAlreadyQualified ? 0.6 : 1
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isAlreadyQualified) {
+                        e.currentTarget.style.backgroundColor = '#FFE4E6';
+                        e.currentTarget.style.borderColor = '#FDA4AF';
+                        e.currentTarget.style.transform = 'translateY(-1px)';
+                        e.currentTarget.style.boxShadow = '0 3px 6px rgba(225, 29, 72, 0.12)';
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isAlreadyQualified) {
+                        e.currentTarget.style.backgroundColor = '#FFF1F2';
+                        e.currentTarget.style.borderColor = '#FECDD3';
+                        e.currentTarget.style.transform = 'none';
+                        e.currentTarget.style.boxShadow = '0 1px 2px rgba(225, 29, 72, 0.05)';
+                      }
+                    }}
+                  >
+                    <span style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: '20px',
+                      height: '20px',
+                      borderRadius: '50%',
+                      backgroundColor: '#FCE7F3',
+                      color: '#BE123C',
+                      fontSize: '11px',
+                      lineHeight: 1
+                    }}>
+                      ✕
+                    </span>
+                    <span>Exclude Applicant</span>
+                  </button>
+                )}
                 {(() => {
-                  const canSaveExcluded = calculatedResult.toLowerCase() === 'excluded' && reviewApp.status.toLowerCase() !== 'excluded';
+                  const canSaveSubmitted = calculatedResult.toLowerCase() === 'application submitted' && reviewApp.status.toLowerCase() !== 'application submitted';
+                  const canSavePendingDoc = calculatedResult.toLowerCase() === 'pending document review' && reviewApp.status.toLowerCase() !== 'pending document review';
                   const canSavePendingQs = calculatedResult.toLowerCase() === 'pending qs review' && reviewApp.status.toLowerCase() !== 'pending qs review';
-                  const isSaveDisabled = !reviewDirty && !canSaveExcluded && !canSavePendingQs;
+                  const isSaveDisabled = !reviewDirty && !canSaveSubmitted && !canSavePendingDoc && !canSavePendingQs;
                   
                   let saveBtnText = 'Saved';
-                  if (canSavePendingQs) {
+                  if (canSaveSubmitted) {
+                    saveBtnText = 'Save Application Submitted';
+                  } else if (canSavePendingDoc) {
+                    saveBtnText = 'Save Pending Document Review';
+                  } else if (canSavePendingQs) {
                     saveBtnText = 'Save Pending QS Review';
-                  } else if (canSaveExcluded) {
-                    saveBtnText = 'Save Excluded';
                   } else if (reviewDirty) {
                     saveBtnText = 'Save Changes';
                   }
@@ -1302,6 +1561,116 @@ export default function ApplicationsPage() {
           </div>
         </div>
       )}
+        </div>
+      )}
+
+      {/* MODAL: EXCLUDE APPLICANT PASSCODE CONFIRMATION */}
+      {showExcludePasscodeModal && (
+        <div className="modal open" style={{ zIndex: 100003 }}>
+          <div className="modal-box" style={{ width: 'min(440px, 94vw)' }}>
+            <div className="modal-head">
+              <h2 style={{ color: 'var(--red)', display: 'flex', alignItems: 'center', gap: '8px', margin: 0 }}>
+                🚫 Confirm Applicant Exclusion
+              </h2>
+              <button className="secondary" onClick={() => setShowExcludePasscodeModal(false)}>Cancel</button>
+            </div>
+            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div className="passcode-box" style={{ border: '2px solid #FCA5A5', background: '#FEF2F2', borderRadius: '14px', padding: '14px' }}>
+                <p style={{ margin: '0 0 6px', fontWeight: '900', color: 'var(--red)', fontSize: '13px' }}>
+                  ⚠️ This action will mark the applicant status as EXCLUDED.
+                </p>
+                <p className="small" style={{ margin: 0, fontSize: '12px', color: 'var(--muted)', lineHeight: '1.4' }}>
+                  To confirm this action, please type your 6-digit HRMO security passcode below.
+                </p>
+                
+                <label style={{ color: 'var(--red)', marginTop: '12px', marginBottom: '6px', fontSize: '11px', fontWeight: '800' }}>
+                  Security Passcode
+                </label>
+                <input
+                  type="password"
+                  value={excludePasscode}
+                  onChange={(e) => {
+                    setExcludePasscode(e.target.value);
+                    setExcludePasscodeError('');
+                  }}
+                  placeholder="Enter 6-digit passcode"
+                  autoComplete="off"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleConfirmExcludeWithPasscode();
+                  }}
+                  style={{
+                    borderColor: excludePasscodeError ? 'var(--red)' : '#FCA5A5',
+                    fontSize: '14px',
+                    letterSpacing: '0.15em'
+                  }}
+                />
+                
+                {excludePasscodeError && (
+                  <div className="small" style={{ color: 'var(--red)', marginTop: '6px', fontWeight: '900', fontSize: '12px' }}>
+                    {excludePasscodeError}
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="decision-row" style={{ justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
+              <button className="secondary" onClick={() => setShowExcludePasscodeModal(false)}>Cancel</button>
+              <button
+                type="button"
+                className="danger"
+                onClick={handleConfirmExcludeWithPasscode}
+                style={{
+                  backgroundColor: '#DC2626',
+                  color: 'white',
+                  fontWeight: '800',
+                  padding: '9px 18px',
+                  borderRadius: '8px'
+                }}
+              >
+                Confirm & Exclude
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: REVERT EXCLUSION CONFIRMATION */}
+      {showRevertExclusionModal && (
+        <div className="modal open" style={{ zIndex: 100003 }}>
+          <div className="modal-box" style={{ width: 'min(440px, 94vw)' }}>
+            <div className="modal-head">
+              <h2 style={{ color: '#0284C7', display: 'flex', alignItems: 'center', gap: '8px', margin: 0 }}>
+                ↺ Revert Exclusion
+              </h2>
+              <button className="secondary" onClick={() => setShowRevertExclusionModal(false)}>Cancel</button>
+            </div>
+            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div style={{ border: '2px solid #BAE6FD', background: '#F0F9FF', borderRadius: '14px', padding: '16px' }}>
+                <p style={{ margin: '0 0 6px', fontWeight: '900', color: '#0369A1', fontSize: '13.5px' }}>
+                  Revert exclusion for this applicant?
+                </p>
+                <p className="small" style={{ margin: 0, fontSize: '12.5px', color: 'var(--navy)', lineHeight: '1.5' }}>
+                  This will restore the application status and allow you to continue the documentary and QS evaluation process.
+                </p>
+              </div>
+            </div>
+            <div className="decision-row" style={{ justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
+              <button className="secondary" onClick={() => setShowRevertExclusionModal(false)}>Cancel</button>
+              <button
+                type="button"
+                className="good"
+                onClick={handleConfirmRevertExclusion}
+                style={{
+                  backgroundColor: '#0284C7',
+                  color: 'white',
+                  fontWeight: '800',
+                  padding: '9px 18px',
+                  borderRadius: '8px'
+                }}
+              >
+                Revert Exclusion
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
