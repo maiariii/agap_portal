@@ -27,6 +27,12 @@ function parseOrFormatDateParam(val) {
   return String(val).slice(0, 10);
 }
 
+function parseOrFormatEndDateParam(val) {
+  if (!val) return null;
+  const dateStr = typeof val === 'string' ? val.slice(0, 10) : (val instanceof Date ? `${val.getFullYear()}-${String(val.getMonth() + 1).padStart(2, '0')}-${String(val.getDate()).padStart(2, '0')}` : String(val).slice(0, 10));
+  return `${dateStr}T23:59:59.999Z`;
+}
+
 export async function getPositions(req, res) {
   try {
     const { rows } = await pool.query('SELECT * FROM positions');
@@ -168,7 +174,7 @@ export async function createVacancy(req, res) {
         region,
         'open',
         parseOrFormatDateParam(postingStart),
-        parseOrFormatDateParam(postingEnd),
+        parseOrFormatEndDateParam(postingEnd),
         salaryGrade ? parseInt(salaryGrade) : null,
         jobClusterId
       ]
@@ -200,7 +206,7 @@ export async function toggleVacancyStatus(req, res) {
     }
     if (postingEnd !== undefined) {
       fields.push(`posting_end = $${idx++}`);
-      values.push(parseOrFormatDateParam(postingEnd));
+      values.push(parseOrFormatEndDateParam(postingEnd));
     }
 
     if (fields.length === 0) {

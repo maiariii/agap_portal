@@ -196,17 +196,17 @@ export default function AssessmentPage() {
     return str.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
   };
 
-  const parseDateNoTime = (val) => {
+  const parseDateNoTime = (val, isEnd = false) => {
     if (!val) return null;
     if (val instanceof Date) {
       const d = new Date(val.getTime());
-      d.setHours(0, 0, 0, 0);
+      d.setHours(isEnd ? 23 : 0, isEnd ? 59 : 0, isEnd ? 59 : 0, isEnd ? 999 : 0);
       return isNaN(d.getTime()) ? null : d;
     }
     const str = String(val);
     const dateStr = str.includes('T') ? str.slice(0, 10) : (str.length >= 10 ? str.slice(0, 10) : str);
-    const d = new Date(dateStr + 'T00:00:00');
-    d.setHours(0, 0, 0, 0);
+    const timeStr = isEnd ? 'T23:59:59.999' : 'T00:00:00';
+    const d = new Date(dateStr + timeStr);
     return isNaN(d.getTime()) ? null : d;
   };
 
@@ -218,7 +218,7 @@ export default function AssessmentPage() {
     today.setHours(0, 0, 0, 0);
 
     const start = parseDateNoTime(v.postingStart || v.posting_start);
-    const end = parseDateNoTime(v.postingEnd || v.posting_end);
+    const end = parseDateNoTime(v.postingEnd || v.posting_end, true);
 
     // Strict rule: Must have valid posting start AND end dates.
     if (!start || !end) return false;

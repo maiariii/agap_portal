@@ -269,7 +269,7 @@ export default function VacanciesPage() {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const start = v.postingStart ? new Date(v.postingStart.slice(0, 10) + "T00:00:00") : null;
-    const end = v.postingEnd ? new Date(v.postingEnd.slice(0, 10) + "T00:00:00") : null;
+    const end = v.postingEnd ? new Date(v.postingEnd.slice(0, 10) + "T23:59:59.999") : null;
     const deadlinePassed = end ? end < today : false;
     const isFilled = v.fillingUpStatus === 'FILLED' || v.filling_up_status === 'FILLED';
     const isLegacyExpired = v.status === 'EXPIRED';
@@ -878,7 +878,7 @@ export default function VacanciesPage() {
                       const appCount = applications.filter(a => a.vacancyId === vac.jobClusterId).length;
                       const today = new Date();
                       today.setHours(0, 0, 0, 0);
-                      const end = vac.postingEnd ? new Date(vac.postingEnd.slice(0, 10) + "T00:00:00") : null;
+                      const end = vac.postingEnd ? new Date(vac.postingEnd.slice(0, 10) + "T23:59:59.999") : null;
                       const postingStatus = getVacancyPostingStatus(vac);
                       const deadlinePast = end ? end < today : false;
                       
