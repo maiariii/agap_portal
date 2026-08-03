@@ -914,10 +914,8 @@ export default function VacanciesPage() {
                           <td style={{ textAlign: 'center' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'center' }}>
                               <button 
-                                className={`vac-action ${vac.fillingUpStatus === 'FILLED' || postingStatus === 'Closed' ? 'incomplete' : (postingStatus === 'Open for Application' ? 'danger' : 'good')}`} 
+                                className={`vac-action ${postingStatus === 'Open for Application' ? 'danger' : 'good'}`} 
                                 onClick={() => handleToggleVacancy(vac)}
-                                disabled={vac.fillingUpStatus === 'FILLED' || postingStatus === 'Closed'}
-                                style={vac.fillingUpStatus === 'FILLED' || postingStatus === 'Closed' ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                               >
                                 {postingStatus === 'Open for Application' ? 'Close' : 'Open'}
                               </button>
