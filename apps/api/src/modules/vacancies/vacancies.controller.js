@@ -172,7 +172,7 @@ export async function createVacancy(req, res) {
         school,
         division,
         region,
-        'open',
+        postingStart && postingEnd ? 'open' : 'for_publication',
         parseOrFormatDateParam(postingStart),
         parseOrFormatEndDateParam(postingEnd),
         salaryGrade ? parseInt(salaryGrade) : null,
