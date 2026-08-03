@@ -265,11 +265,35 @@ export default function VacanciesPage() {
   const [deletePasscode, setDeletePasscode] = useState('');
   const [deletePasscodeError, setDeletePasscodeError] = useState('');
 
+  const getVacancyPostingStatus = (v) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const start = v.postingStart ? new Date(v.postingStart.slice(0, 10) + "T00:00:00") : null;
+    const end = v.postingEnd ? new Date(v.postingEnd.slice(0, 10) + "T00:00:00") : null;
+    const deadlinePassed = end ? end < today : false;
+    const isFilled = v.fillingUpStatus === 'FILLED' || v.filling_up_status === 'FILLED';
+    const isLegacyExpired = v.status === 'EXPIRED';
+
+    // Closed: Reserve exclusively for legacy database postings where deadline passed OR position is filled
+    if (isFilled || deadlinePassed || isLegacyExpired) {
+      return 'Closed';
+    }
+
+    // Open for Application: Active posting within scheduled date range
+    if (v.status === 'open' && start && today >= start && end && today <= end) {
+      return 'Open for Application';
+    }
+
+    // For Publication: Item has not yet been opened, or when manually closed by HR
+    return 'For Publication';
+  };
+
   const vacanciesKpiStats = useMemo(() => {
     const total = vacancies.length;
-    const open = vacancies.filter(v => v.status === 'open').length;
-    const closed = total - open;
-    return { total, open, closed };
+    const forPublication = vacancies.filter(v => getVacancyPostingStatus(v) === 'For Publication').length;
+    const open = vacancies.filter(v => getVacancyPostingStatus(v) === 'Open for Application').length;
+    const closed = vacancies.filter(v => getVacancyPostingStatus(v) === 'Closed').length;
+    return { total, forPublication, open, closed };
   }, [vacancies]);
 
   const getVacancyCellValue = (v, key) => {
@@ -279,21 +303,15 @@ export default function VacanciesPage() {
     if (key === 'applications') return applications.filter(a => a.vacancyId === v.jobClusterId).length;
     if (key === 'deadline') return v.postingEnd || '';
     if (key === 'daysRemaining') {
-      if (!v.postingStart || !v.postingEnd) return -999999;
-      const start = new Date(v.postingStart.slice(0, 10) + "T00:00:00");
+      const status = getVacancyPostingStatus(v);
+      if (status !== 'Open for Application' || !v.postingEnd) return -999999;
       const end = new Date(v.postingEnd.slice(0, 10) + "T00:00:00");
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-      if (v.status === 'closed' || today < start || today > end) return -999999;
       return Math.round((end - today) / 86400000);
     }
     if (key === 'postingStatus') {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const start = v.postingStart ? new Date(v.postingStart.slice(0, 10) + "T00:00:00") : null;
-      const end = v.postingEnd ? new Date(v.postingEnd.slice(0, 10) + "T00:00:00") : null;
-      const isClosed = v.status === 'closed' || (start && today < start) || (end && today > end);
-      return isClosed ? 'Closed' : 'Open for Application';
+      return getVacancyPostingStatus(v);
     }
     if (key === 'fillingUpStatus') {
       return v.fillingUpStatus || 'UNFILLED';
@@ -313,15 +331,7 @@ export default function VacanciesPage() {
     }
     if (vacPosFilter) list = list.filter(v => v.positionId === vacPosFilter);
     if (vacStatusFilter) {
-      list = list.filter(v => {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const start = v.postingStart ? new Date(v.postingStart.slice(0, 10) + "T00:00:00") : null;
-        const end = v.postingEnd ? new Date(v.postingEnd.slice(0, 10) + "T00:00:00") : null;
-        const isClosed = v.status === 'closed' || (start && today < start) || (end && today > end);
-        const displayStatus = isClosed ? 'closed' : 'open';
-        return displayStatus === vacStatusFilter;
-      });
+      list = list.filter(v => getVacancyPostingStatus(v) === vacStatusFilter);
     }
 
     Object.entries(vColumnFilters).forEach(([key, val]) => {
@@ -373,13 +383,9 @@ export default function VacanciesPage() {
   };
 
   const handleToggleVacancy = (vac) => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const start = vac.postingStart ? new Date(vac.postingStart.slice(0, 10) + "T00:00:00") : null;
-    const end = vac.postingEnd ? new Date(vac.postingEnd.slice(0, 10) + "T00:00:00") : null;
-    const isClosed = vac.status === 'closed' || (start && today < start) || (end && today > end);
+    const postingStatus = getVacancyPostingStatus(vac);
 
-    if (isClosed) {
+    if (postingStatus !== 'Open for Application') {
       setCalVacancy(vac);
       const initStart = vac.postingStart ? vac.postingStart.slice(0, 10) : new Date().toISOString().slice(0, 10);
       setCalStart(initStart);
@@ -683,6 +689,11 @@ export default function VacanciesPage() {
           <div className="kpi-caption">All HRMO postings</div>
         </div>
         <div className="kpi">
+          <div className="kpi-label">For Publication</div>
+          <div className="kpi-number">{vacanciesKpiStats.forPublication}</div>
+          <div className="kpi-caption">Unopened or unposted items</div>
+        </div>
+        <div className="kpi">
           <div className="kpi-label">Open for Application</div>
           <div className="kpi-number">{vacanciesKpiStats.open}</div>
           <div className="kpi-caption">Accepting applicants</div>
@@ -690,7 +701,7 @@ export default function VacanciesPage() {
         <div className="kpi">
           <div className="kpi-label">Closed</div>
           <div className="kpi-number">{vacanciesKpiStats.closed}</div>
-          <div className="kpi-caption">No longer posted</div>
+          <div className="kpi-caption">Filled or expired items</div>
         </div>
       </div>
 
@@ -712,8 +723,9 @@ export default function VacanciesPage() {
               <label>Posting Status</label>
               <select value={vacStatusFilter} onChange={e => setVacStatusFilter(e.target.value)}>
                 <option value="">All statuses</option>
-                <option value="open">Open for Application</option>
-                <option value="closed">Closed</option>
+                <option value="For Publication">For Publication</option>
+                <option value="Open for Application">Open for Application</option>
+                <option value="Closed">Closed</option>
               </select>
             </div>
           </div>
@@ -822,6 +834,7 @@ export default function VacanciesPage() {
                     }}
                   >
                     <option value="">All</option>
+                    <option value="For Publication">For Publication</option>
                     <option value="Open for Application">Open for Application</option>
                     <option value="Closed">Closed</option>
                   </select>
@@ -865,20 +878,18 @@ export default function VacanciesPage() {
                       const appCount = applications.filter(a => a.vacancyId === vac.jobClusterId).length;
                       const today = new Date();
                       today.setHours(0, 0, 0, 0);
-                      const start = vac.postingStart ? new Date(vac.postingStart.slice(0, 10) + "T00:00:00") : null;
                       const end = vac.postingEnd ? new Date(vac.postingEnd.slice(0, 10) + "T00:00:00") : null;
-                      const isClosed = vac.status === 'closed' || (start && today < start) || (end && today > end);
+                      const postingStatus = getVacancyPostingStatus(vac);
                       const deadlinePast = end ? end < today : false;
                       
                       let drText = 'N/A';
                       let drColor = 'var(--muted)';
-                      if (!isClosed && end) {
+                      if (postingStatus === 'Open for Application' && end) {
                         const rem = Math.round((end - today) / 86400000);
                         drText = String(rem);
                         drColor = rem <= 1 ? 'var(--red)' : rem <= 3 ? 'var(--amber)' : 'var(--green)';
                       }
 
-                      const appCountColor = appCount === 0 ? 'var(--red)' : 'var(--navy)';
                       const deadlineColor = deadlinePast ? 'var(--red)' : 'var(--text)';
 
                       return (
@@ -890,7 +901,11 @@ export default function VacanciesPage() {
 
                           <td><span className="qs-number" style={{ color: deadlineColor }}>{vac.postingEnd ? vac.postingEnd.slice(0, 10) : '—'}</span></td>
                           <td className="num-col"><span className="qs-number" style={{ color: drColor }}>{drText}</span></td>
-                          <td><span className={`badge ${isClosed ? 'gray' : 'green'}`}>{isClosed ? 'Closed' : 'Open for Application'}</span></td>
+                          <td>
+                            {postingStatus === 'Open for Application' && <span className="badge green">Open for Application</span>}
+                            {postingStatus === 'For Publication' && <span className="badge blue" style={{ background: '#E0F2FE', color: '#0369A1' }}>For Publication</span>}
+                            {postingStatus === 'Closed' && <span className="badge gray">Closed</span>}
+                          </td>
                           <td>
                             <span className={`badge ${vac.fillingUpStatus === 'FILLED' ? 'filled-status' : 'unfilled-status'}`}>
                               {vac.fillingUpStatus || 'UNFILLED'}
@@ -899,12 +914,12 @@ export default function VacanciesPage() {
                           <td style={{ textAlign: 'center' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'center' }}>
                               <button 
-                                className={`vac-action ${vac.fillingUpStatus === 'FILLED' ? 'incomplete' : (isClosed ? 'good' : 'danger')}`} 
+                                className={`vac-action ${vac.fillingUpStatus === 'FILLED' || postingStatus === 'Closed' ? 'incomplete' : (postingStatus === 'Open for Application' ? 'danger' : 'good')}`} 
                                 onClick={() => handleToggleVacancy(vac)}
-                                disabled={vac.fillingUpStatus === 'FILLED'}
-                                style={vac.fillingUpStatus === 'FILLED' ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
+                                disabled={vac.fillingUpStatus === 'FILLED' || postingStatus === 'Closed'}
+                                style={vac.fillingUpStatus === 'FILLED' || postingStatus === 'Closed' ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
                               >
-                                {isClosed ? 'Open' : 'Close'}
+                                {postingStatus === 'Open for Application' ? 'Close' : 'Open'}
                               </button>
                               <button
                                 onClick={() => handleInitiateDeleteVacancy(vac)}

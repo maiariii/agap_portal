@@ -366,21 +366,34 @@ export default function DashboardPage() {
           region: v.region || '',
           division: v.division || '',
           school: v.school || '',
-          postingStatus: v.status,
+          postingStatus: (() => {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const start = v.postingStart ? new Date(v.postingStart.slice(0, 10) + "T00:00:00") : null;
+            const end = v.postingEnd ? new Date(v.postingEnd.slice(0, 10) + "T00:00:00") : null;
+            const deadlinePassed = end ? end < today : false;
+            const isFilled = v.fillingUpStatus === 'FILLED' || v.filling_up_status === 'FILLED';
+            const isLegacyExpired = v.status === 'EXPIRED';
+
+            if (isFilled || deadlinePassed || isLegacyExpired) return 'Closed';
+            if (v.status === 'open' && start && today >= start && end && today <= end) return 'Open for Application';
+            return 'For Publication';
+          })(),
           updatedAt: v.updatedAt || v.createdAt
         };
       });
       return {
         rows,
         segments: [
-          { key: 'open', label: 'Open for Application', colorClass: 'seg-appointed', color: '#15803D' },
-          { key: 'closed', label: 'Closed', colorClass: 'seg-excluded', color: '#64748B' }
+          { key: 'For Publication', label: 'For Publication', colorClass: 'seg-disqualified', color: '#0369A1' },
+          { key: 'Open for Application', label: 'Open for Application', colorClass: 'seg-appointed', color: '#15803D' },
+          { key: 'Closed', label: 'Closed', colorClass: 'seg-excluded', color: '#64748B' }
         ],
         getKey: r => r.postingStatus,
         kpiTotalLabel: 'Total Postings',
         kpiTotalCaption: 'Active vacancies',
         overallTitle: 'Overall Posting Status Distribution',
-        overallSubtitle: 'Open for Application vs Closed postings',
+        overallSubtitle: 'For Publication vs Open for Application vs Closed postings',
         tableTitle: 'Posting Status — Individual Records',
         centerLabel: 'postings',
         tableLabel: 'Posting Status',
@@ -390,7 +403,16 @@ export default function DashboardPage() {
           { label: 'Position', key: 'positionTitle', type: 'categorical' },
           { label: 'Item Number', key: 'itemNo', type: 'text' },
           { label: 'Place of Assignment', key: 'school', type: 'text' },
-          { label: 'Posting Status', key: 'postingStatus', type: 'categorical', render: row => <span className={`badge ${row.postingStatus === 'open' ? 'green' : 'gray'}`}>{row.postingStatus === 'open' ? 'Open for Application' : 'Closed'}</span> }
+          { 
+            label: 'Posting Status', 
+            key: 'postingStatus', 
+            type: 'categorical', 
+            render: row => (
+              <span className={`badge ${row.postingStatus === 'Open for Application' ? 'green' : (row.postingStatus === 'For Publication' ? 'blue' : 'gray')}`} style={row.postingStatus === 'For Publication' ? { background: '#E0F2FE', color: '#0369A1' } : {}}>
+                {row.postingStatus}
+              </span>
+            ) 
+          }
         ]
       };
     }
