@@ -272,10 +272,9 @@ export default function VacanciesPage() {
     const end = v.postingEnd ? new Date(v.postingEnd.slice(0, 10) + "T23:59:59.999") : null;
     const deadlinePassed = end ? end < today : false;
     const isFilled = v.fillingUpStatus === 'FILLED' || v.filling_up_status === 'FILLED';
-    const isLegacyExpired = v.status === 'EXPIRED';
 
-    // Closed: Reserve exclusively for legacy database postings where deadline passed OR position is filled
-    if (isFilled || deadlinePassed || isLegacyExpired) {
+    // Closed: Reserve exclusively for postings where deadline passed OR position is filled OR explicitly closed
+    if (isFilled || deadlinePassed || v.status === 'closed') {
       return 'Closed';
     }
 

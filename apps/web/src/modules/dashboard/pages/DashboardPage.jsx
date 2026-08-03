@@ -373,9 +373,8 @@ export default function DashboardPage() {
             const end = v.postingEnd ? new Date(v.postingEnd.slice(0, 10) + "T23:59:59.999") : null;
             const deadlinePassed = end ? end < today : false;
             const isFilled = v.fillingUpStatus === 'FILLED' || v.filling_up_status === 'FILLED';
-            const isLegacyExpired = v.status === 'EXPIRED';
 
-            if (isFilled || deadlinePassed || isLegacyExpired) return 'Closed';
+            if (isFilled || deadlinePassed || v.status === 'closed') return 'Closed';
             if (v.status === 'open' && start && today >= start && end && today <= end) return 'Open for Application';
             return 'For Publication';
           })(),
