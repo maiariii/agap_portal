@@ -82,7 +82,7 @@ function verifyHandoffToken(token, now = Math.floor(Date.now() / 1000)) {
 export async function exchangeHqSsoToken(token) {
   const username = verifyHandoffToken(token);
   const { rows } = await pool.query(
-    `SELECT id, username, role, full_name, status, locked_until
+    `SELECT id, username, role, full_name, first_name, last_name, region, division, status, locked_until
      FROM users
      WHERE username = $1
      LIMIT 1`,
@@ -100,7 +100,7 @@ export async function exchangeHqSsoToken(token) {
   await pool.query('UPDATE users SET last_login_at = $1 WHERE id = $2', [new Date(), user.id]);
 
   const accessToken = jwt.sign(
-    { id: user.id, username: user.username, role: user.role, fullName: user.full_name },
+    { id: user.id, username: user.username, role: user.role, fullName: user.full_name, firstName: user.first_name, lastName: user.last_name, region: user.region, division: user.division },
     getPortalJwtSecret(),
     { expiresIn: PORTAL_SESSION_TTL },
   );
@@ -112,6 +112,10 @@ export async function exchangeHqSsoToken(token) {
       username: user.username,
       role: user.role,
       fullName: user.full_name,
+      firstName: user.first_name,
+      lastName: user.last_name,
+      region: user.region,
+      division: user.division,
     },
   };
 }

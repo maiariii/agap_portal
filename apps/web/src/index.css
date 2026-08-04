@@ -814,7 +814,7 @@ body {
   isolation: isolate;
   min-height: 118px;
   margin: 24px 28px 18px;
-  padding: 28px 44px;
+  padding: 22px 32px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -4622,4 +4622,99 @@ body:has(.sidebar:hover) .modal {
 .action-card-footer .footer-check {
   color: var(--green, #16A34A);
   font-weight: 800;
+}
+
+/* ==========================================
+   MINIMALIST USER PROFILE CARD (HEADER)
+   ========================================== */
+.user-profile-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(8, 49, 95, 0.12);
+  border-radius: 999px;
+  box-shadow: 0 4px 14px rgba(8, 49, 95, 0.06);
+  z-index: 5;
+  flex-shrink: 0;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.user-profile-card:hover {
+  background: #ffffff;
+  border-color: rgba(8, 49, 95, 0.25);
+  box-shadow: 0 6px 18px rgba(8, 49, 95, 0.1);
+}
+
+.user-info-box {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
+}
+
+.user-full-name {
+  font-family: var(--font-heading, inherit);
+  font-weight: 750;
+  font-size: 13px;
+  color: var(--navy);
+  line-height: 1.15;
+  letter-spacing: -0.1px;
+  max-width: 280px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.user-location-text {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #475569;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 340px;
+}
+
+/* Sidebar hover / responsive scaling */
+.sidebar:hover ~ .shell .user-profile-card,
+body:has(.sidebar:hover) .user-profile-card,
+.app:has(.sidebar:hover) .user-profile-card {
+  padding: 5px 10px;
+  gap: 6px;
+}
+
+.sidebar:hover ~ .shell .user-full-name,
+body:has(.sidebar:hover) .user-full-name,
+.app:has(.sidebar:hover) .user-full-name {
+  max-width: 135px !important;
+}
+
+.sidebar:hover ~ .shell .user-location-text,
+body:has(.sidebar:hover) .user-location-text,
+.app:has(.sidebar:hover) .user-location-text {
+  max-width: 145px !important;
+}
+
+/* Breakpoint responsiveness */
+@media (max-width: 1400px) {
+  .user-location-text {
+    max-width: 220px;
+  }
+}
+
+@media (max-width: 1250px) {
+  .user-location-text {
+    max-width: 160px;
+  }
+}
+
+@media (max-width: 1100px) {
+  .user-location-text {
+    display: none;
+  }
 }

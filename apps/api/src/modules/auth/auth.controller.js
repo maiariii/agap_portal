@@ -67,7 +67,7 @@ export async function login(req, res) {
     );
 
     const token = jwt.sign(
-      { id: user.id, username: user.username, role: user.role, fullName: user.full_name },
+      { id: user.id, username: user.username, role: user.role, fullName: user.full_name, firstName: user.first_name, lastName: user.last_name, region: user.region, division: user.division },
       JWT_SECRET,
       { expiresIn: '30d' }
     );
@@ -78,7 +78,11 @@ export async function login(req, res) {
         id: user.id,
         username: user.username,
         role: user.role,
-        fullName: user.full_name
+        fullName: user.full_name,
+        firstName: user.first_name,
+        lastName: user.last_name,
+        region: user.region,
+        division: user.division
       }
     });
   } catch (error) {

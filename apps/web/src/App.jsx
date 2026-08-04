@@ -848,6 +848,22 @@ export default function App() {
             <h1>AGAP Portal</h1>
             <p>Agile Gateway for Appointments and Placements</p>
           </div>
+
+          {user && (
+            <div className="user-profile-card" title="Account Holder">
+              <span style={{ fontSize: '15px' }}>👤</span>
+              <div className="user-info-box">
+                <span className="user-full-name" title={user.firstName || user.lastName ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : (user.fullName || user.username)}>
+                  {user.firstName || user.lastName 
+                    ? `${user.firstName || ''} ${user.lastName || ''}`.trim() 
+                    : (user.fullName || user.username || 'HR Officer')}
+                </span>
+                <span className="user-location-text" title={`${user.region || 'Region'}${user.division ? ' • ' + user.division : ''}`}>
+                  📍 {user.region || 'Region'}{user.division ? ` • ${user.division}` : ''}
+                </span>
+              </div>
+            </div>
+          )}
         </section>
 
         <main>
