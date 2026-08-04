@@ -408,27 +408,19 @@ export async function importNosca(req, res) {
     for (const item of items) {
       let positionId = item.positionId;
       if (!positionId && item.title) {
-        const { rows: posRows } = await pool.query('SELECT * FROM positions WHERE title = $1 LIMIT 1', [item.title]);
-        let pos = posRows[0];
-        if (!pos) {
-          const newPosId = crypto.randomUUID();
-          const { rows: newPosRows } = await pool.query(
-            `INSERT INTO positions (id, title, track, required_bachelor_degree, required_degree_keywords, years_experience, training_hours, eligibility_required)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-            [
-              newPosId,
-              item.title,
-              'administrative',
-              "Relevant bachelor's degree",
-              ['degree', 'bachelor'],
-              0,
-              0,
-              'Career Service Professional'
-            ]
-          );
-          pos = newPosRows[0];
+        const { rows: posRows } = await pool.query('SELECT id FROM positions WHERE LOWER(title) = LOWER($1) LIMIT 1', [item.title]);
+        if (posRows[0]) {
+          positionId = posRows[0].id;
         }
-        positionId = pos.id;
+      }
+
+      if (positionId) {
+        const { rows: checkPos } = await pool.query('SELECT id FROM positions WHERE id = $1 LIMIT 1', [positionId]);
+        if (!checkPos[0]) {
+          positionId = '36e9d7c6-a939-4ee9-bc92-c368977a9606';
+        }
+      } else {
+        positionId = '36e9d7c6-a939-4ee9-bc92-c368977a9606';
       }
 
       let finalSchoolName = item.schoolName || '';
