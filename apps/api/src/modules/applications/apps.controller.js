@@ -1009,7 +1009,22 @@ export async function exportIer(req, res) {
 
     const { vacancyId } = req.query;
     let list = await getHydratedApplications(vacancyId || null, user.region || null, user.division || null);
-    list = list.filter(app => String(app.status || '').toLowerCase() === 'qualified');
+
+    // Include both Qualified and Disqualified applicants (excluding Excluded)
+    list = list.filter(app => {
+      const st = String(app.status || '').toLowerCase();
+      return st !== 'excluded';
+    });
+
+    // Sort list so all Qualified applicants come first, then Disqualified at the bottom
+    list.sort((a, b) => {
+      const aDis = String(a.status || '').toLowerCase() === 'disqualified' ? 1 : 0;
+      const bDis = String(b.status || '').toLowerCase() === 'disqualified' ? 1 : 0;
+      if (aDis !== bDis) return aDis - bDis;
+      const aName = (a.applicant || a.applicant_name || '').toLowerCase();
+      const bName = (b.applicant || b.applicant_name || '').toLowerCase();
+      return aName.localeCompare(bName);
+    });
 
     const templatePath = path.resolve(__dirname, '../../templates/Annex_D_Initial_Evaluation_Results.xlsx');
     const workbook = new ExcelJS.Workbook();
