@@ -538,6 +538,15 @@ const getFolderAliasesFromKey = (k) => {
     folderSet.add('sworn_declaration');
     folderSet.add('cav');
   }
+  if (cleanK === 'resume' || cleanK.includes('resume')) {
+    folderSet.add('resume');
+  }
+  if (cleanK === 'coe' || cleanK === 'certificate_of_employment' || cleanK === 'certificate-of-employment' || cleanK.includes('employment')) {
+    folderSet.add('certificate-of-employment');
+    folderSet.add('certificate_of_employment');
+    folderSet.add('certificate-of-employment-coe');
+    folderSet.add('coe');
+  }
   if (cleanK === 'outstanding_accomplishments' || cleanK === 'outstandingaccomplishment' || cleanK === 'outstanding-accomplishments') {
     folderSet.add('outstanding-accomplishments');
     folderSet.add('outstanding_accomplishments');
@@ -653,6 +662,7 @@ export async function getApplicationDocuments(req, res) {
     { key: 'prc', label: 'Updated PRC License/ID', filename: `${applicantCode}_Updated_PRC_License_ID.pdf`, existsInAzure: false },
     { key: 'diploma', label: 'Diploma', filename: `${applicantCode}_Diploma.pdf`, existsInAzure: false },
     { key: 'resume', label: 'Resume', filename: `${applicantCode}_Resume.pdf`, existsInAzure: false },
+    { key: 'coe', label: 'Certificate of Employment', filename: `${applicantCode}_Certificate_of_Employment.pdf`, existsInAzure: false },
     { key: 'outstanding_accomplishments', label: 'Outstanding Accomplishments', filename: `${applicantCode}_Outstanding_Accomplishments.pdf`, existsInAzure: false },
     { key: 'performance_rating', label: 'Performance Rating', filename: `${applicantCode}_Performance_Rating.pdf`, existsInAzure: false },
     { key: 'training_certificates', label: 'Training Certificates', filename: `${applicantCode}_Training_Certificates.pdf`, existsInAzure: false },

@@ -686,6 +686,7 @@ export default function AppointmentPage() {
                     { key: 'sworn_declaration', label: 'Certification on the Authenticity and Veracity (CAV)', required: true },
                     { key: 'diploma', label: 'Diploma', required: false },
                     { key: 'resume', label: 'Resume', required: false },
+                    { key: 'coe', label: 'Certificate of Employment', required: false },
                     { key: 'outstanding_accomplishments', label: 'Outstanding Accomplishments', required: false },
                     { key: 'performance_rating', label: 'Performance Rating', required: false },
                     { key: 'training_certificates', label: 'Training Certificates', required: false },
@@ -750,6 +751,7 @@ export default function AppointmentPage() {
                       selectedDocKey === 'diploma' ? 'Diploma' :
                       selectedDocKey === 'sworn_declaration' ? 'Certification on the Authenticity and Veracity (CAV)' :
                       selectedDocKey === 'resume' ? 'Resume' :
+                      selectedDocKey === 'coe' ? 'Certificate of Employment' :
                       selectedDocKey === 'outstanding_accomplishments' ? 'Outstanding Accomplishments' :
                       selectedDocKey === 'performance_rating' ? 'Performance Rating' :
                       selectedDocKey === 'training_certificates' ? 'Training Certificates' :
