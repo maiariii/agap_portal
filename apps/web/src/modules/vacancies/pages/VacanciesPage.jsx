@@ -700,7 +700,7 @@ export default function VacanciesPage() {
         <div className="kpi">
           <div className="kpi-label">Closed</div>
           <div className="kpi-number">{vacanciesKpiStats.closed}</div>
-          <div className="kpi-caption">Filled or expired items</div>
+          <div className="kpi-caption">Filled or closed items</div>
         </div>
       </div>
 

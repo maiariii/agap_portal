@@ -1019,10 +1019,10 @@ export async function exportIer(req, res) {
     const { vacancyId } = req.query;
     let list = await getHydratedApplications(vacancyId || null, user.region || null, user.division || null);
 
-    // Include both Qualified and Disqualified applicants (excluding Excluded)
+    const qualifiedStatuses = ['qualified', 'for_comparative_assessment', 'appointed', 'not_appointed', 'ier_posted'];
     list = list.filter(app => {
       const st = String(app.status || '').toLowerCase();
-      return st !== 'excluded';
+      return qualifiedStatuses.includes(st) || st === 'disqualified';
     });
 
     // Sort list so all Qualified applicants come first, then Disqualified at the bottom
@@ -1041,9 +1041,39 @@ export async function exportIer(req, res) {
 
     const sheet = workbook.getWorksheet(1) || workbook.worksheets[0];
 
-    const sampleApp = list[0] || {};
-    const posTitle = sampleApp.vacancy || sampleApp.positionTitle || sampleApp.vacancy_title || 'Position';
-    const salaryGrade = sampleApp.salaryGrade || sampleApp.salary_grade || '—';
+    let posTitle = 'Position';
+    let salaryGrade = '—';
+    let qsDegree = 'Bachelor\'s Degree relevant to the job';
+    let qsTraining = 'None required';
+    let qsExperience = 'None required';
+    let qsEligibility = 'Career Service (Professional) / Second Level Eligibility';
+
+    if (list.length > 0) {
+      const sampleApp = list[0];
+      posTitle = sampleApp.vacancy || sampleApp.positionTitle || sampleApp.vacancy_title || 'Position';
+      salaryGrade = sampleApp.salaryGrade || sampleApp.salary_grade || '—';
+      qsDegree = sampleApp.qsDegree || qsDegree;
+      qsTraining = sampleApp.qsTraining || qsTraining;
+      qsExperience = sampleApp.qsExperience || qsExperience;
+      qsEligibility = sampleApp.qsEligibility || qsEligibility;
+    } else if (vacancyId) {
+      const { rows: vacRows } = await pool.query(`
+        SELECT v.title, v.salary_grade, p.required_bachelor_degree, p.min_years_experience, p.min_training_hours, p.eligibility_required
+        FROM vacancies v
+        LEFT JOIN positions p ON v.position_id = p.id
+        WHERE v.id = $1 OR v.job_cluster_id = $1
+        LIMIT 1
+      `, [vacancyId]);
+      if (vacRows.length > 0) {
+        const v = vacRows[0];
+        posTitle = v.title || posTitle;
+        salaryGrade = v.salary_grade || salaryGrade;
+        qsDegree = v.required_bachelor_degree || qsDegree;
+        qsTraining = v.min_training_hours ? `${v.min_training_hours} minimum hour(s)` : qsTraining;
+        qsExperience = v.min_years_experience ? `${v.min_years_experience} minimum year(s)` : qsExperience;
+        qsEligibility = v.eligibility_required || qsEligibility;
+      }
+    }
 
     const ierFont = { name: 'Bookman Old Style', size: 18 };
     sheet.getCell('B4').value = {
@@ -1065,10 +1095,10 @@ export async function exportIer(req, res) {
       cell.font = { name: 'Bookman Old Style', size: 18, bold: true };
     };
 
-    setBoldCell('C7', sampleApp.qsDegree || 'Bachelor\'s Degree relevant to the job');
-    setBoldCell('C8', sampleApp.qsTraining || 'None required');
-    setBoldCell('C9', sampleApp.qsExperience || 'None required');
-    setBoldCell('C10', sampleApp.qsEligibility || 'Career Service (Professional) / Second Level Eligibility');
+    setBoldCell('C7', qsDegree);
+    setBoldCell('C8', qsTraining);
+    setBoldCell('C9', qsExperience);
+    setBoldCell('C10', qsEligibility);
 
     let startRow = 15;
     list.forEach((app, idx) => {

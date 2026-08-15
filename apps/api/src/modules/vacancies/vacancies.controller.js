@@ -72,16 +72,16 @@ export async function getVacancies(req, res) {
     }
     const { region, division } = user;
 
-    const { rows: expiredVacancies } = await pool.query(
+    const { rows: pastDeadlineVacancies } = await pool.query(
       "SELECT id FROM vacancies WHERE status = 'open' AND posting_end < $1 AND region = $2 AND division = $3",
       [today, region, division]
     );
 
-    if (expiredVacancies.length > 0) {
-      const expiredIds = expiredVacancies.map(v => v.id);
+    if (pastDeadlineVacancies.length > 0) {
+      const pastDeadlineIds = pastDeadlineVacancies.map(v => v.id);
       await pool.query(
         "UPDATE vacancies SET status = 'closed' WHERE id = ANY($1)",
-        [expiredIds]
+        [pastDeadlineIds]
       );
     }
 
