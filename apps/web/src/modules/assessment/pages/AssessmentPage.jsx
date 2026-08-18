@@ -347,11 +347,7 @@ export default function AssessmentPage() {
   };
 
   const qualifiedApps = useMemo(() => {
-    let rows = qualifiedPoolRanked.filter(r => {
-      const appt = r.appointmentStatus || r.appObj?.appointmentStatus;
-      if (appt === 'FOR APPOINTMENT') return false;
-      return !r.itemNo || !occupiedItemNos.has(r.itemNo);
-    });
+    let rows = qualifiedPoolRanked;
 
     if (qualSearch) {
       const q = qualSearch.toLowerCase();
@@ -949,35 +945,51 @@ export default function AssessmentPage() {
 
                       const assessment = getAssessmentStatus(r);
                       
+                      const appJobClusterId = r.jobClusterId || r.job_cluster_id;
+                      const clusterItems = vacancies.filter(v => 
+                        (appJobClusterId && (v.jobClusterId === appJobClusterId || v.job_cluster_id === appJobClusterId)) ||
+                        (r.positionId && (v.positionId === r.positionId || v.position_id === r.positionId)) ||
+                        (r.vacancy && (v.title === r.vacancy || v.vacancy === r.vacancy))
+                      );
+                      const hasAvailableItems = clusterItems.some(v => isItemSelectableForAppointment(v));
+
                       const actionCell = appt === 'FOR APPOINTMENT' ? (
                         <span className="badge green">For Appointment</span>
                       ) : (appt === 'rejected' || appt === 'not_appointed') ? (
                         <span className="badge red">Not Appointed</span>
                       ) : (assessment.label === 'Assessment Completed' || assessment.label === 'ASSESSMENT COMPLETE') ? (
-                        <button
-                          className="good vac-action"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setAppointConfirmApp(r);
-                            setAppointDate(new Date().toISOString().slice(0, 10));
-                            const appJobClusterId = r.jobClusterId || r.job_cluster_id;
-                            const clusterItems = vacancies.filter(v => 
-                              (appJobClusterId && v.jobClusterId === appJobClusterId) ||
-                              (r.positionId && v.positionId === r.positionId) ||
-                              (r.vacancy && v.title === r.vacancy)
-                            );
-                            const initialItem = clusterItems.find(v => (v.itemNo === r.itemNo || v.itemNo === r.item_no) && isItemSelectableForAppointment(v))
-                              || clusterItems.find(v => isItemSelectableForAppointment(v));
-                            setAppointItemNo(initialItem?.itemNo || '');
-                            const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-                            const rand = Math.floor(1000 + Math.random() * 9000);
-                            setAppointRefCode(`APPT-${today}-${rand}`);
-                            setAppointPasscode('');
-                            setShowSdsReminderModal(true);
-                          }}
-                        >
-                          Appoint
-                        </button>
+                        hasAvailableItems ? (
+                          <button
+                            className="good vac-action"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setAppointConfirmApp(r);
+                              setAppointDate(new Date().toISOString().slice(0, 10));
+                              const initialItem = clusterItems.find(v => (v.itemNo === r.itemNo || v.itemNo === r.item_no) && isItemSelectableForAppointment(v))
+                                || clusterItems.find(v => isItemSelectableForAppointment(v));
+                              setAppointItemNo(initialItem?.itemNo || '');
+                              const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+                              const rand = Math.floor(1000 + Math.random() * 9000);
+                              setAppointRefCode(`APPT-${today}-${rand}`);
+                              setAppointPasscode('');
+                              setShowSdsReminderModal(true);
+                            }}
+                          >
+                            Appoint
+                          </button>
+                        ) : (
+                          <button
+                            className="secondary vac-action incomplete"
+                            style={{ opacity: 0.65, cursor: 'not-allowed' }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setToast({ message: 'No unfilled items remaining for this vacancy.', type: 'error' });
+                            }}
+                            title="No unfilled items remaining for this vacancy"
+                          >
+                            Appoint
+                          </button>
+                        )
                       ) : (
                         <button
                           className="secondary vac-action incomplete"

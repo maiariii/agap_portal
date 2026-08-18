@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useAppData } from '../../../middleware/DataProvider.jsx';
 import { useToast } from '../../../middleware/ToastProvider.jsx';
 import { apiFetch } from '../../../config/api.js';
+import VacancyClusterAccordion from '../../../components/VacancyClusterAccordion.jsx';
 const renderApplicantCell = (r) => {
   if (!r) return null;
   const obj = r.applicantObj || r.appObj || r;

@@ -340,36 +340,7 @@ async function handleAppointmentAction(req, res, targetStatus) {
       [historyId, id, `Appointment state updated to ${targetStatus} for item ${selectedItemNo}. Reference: ${appointmentReferenceCode}`]
     );
 
-    // Check if there are any remaining unfilled items in the cluster
-    const { rows: unfilledItems } = await pool.query(
-      `SELECT id FROM vacancies WHERE job_cluster_id = $1 AND filling_up_status = 'UNFILLED'`,
-      [currentApp.job_cluster_id]
-    );
-
-    // If no more unfilled items exist in this cluster, mark all other qualified candidates as not_appointed
-    if (unfilledItems.length === 0) {
-      const { rows: otherApps } = await pool.query(
-        `SELECT id FROM applications 
-         WHERE job_cluster_id = $1 AND id <> $2 AND LOWER(status) IN ('qualified', 'for_comparative_assessment', 'not_appointed')`,
-        [currentApp.job_cluster_id, id]
-      );
-
-      for (const otherApp of otherApps) {
-        await pool.query(
-          `UPDATE applications 
-           SET appointment_status = 'not_appointed', 
-               reason = $1, updated_at = NOW()
-           WHERE id = $2`,
-          [`All items in the job cluster have been filled`, otherApp.id]
-        );
-
-        const otherHistoryId = crypto.randomUUID();
-        await pool.query(
-          `INSERT INTO application_history (id, application_id, text) VALUES ($1, $2, $3)`,
-          [otherHistoryId, otherApp.id, `Not Appointed: All items in the job cluster have been filled.`]
-        );
-      }
-    }
+    // Other applicants in the job cluster remain untouched with their existing appointment_status
 
     res.json({ success: true, occupied: false, appointmentReferenceCode });
   } catch (error) {
