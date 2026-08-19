@@ -3,6 +3,7 @@ import { useAppData } from '../../../middleware/DataProvider.jsx';
 import { useToast } from '../../../middleware/ToastProvider.jsx';
 import { apiFetch } from '../../../config/api.js';
 import VacancyClusterAccordion from '../../../components/VacancyClusterAccordion.jsx';
+import FullScreenDocViewer from '../../../components/FullScreenDocViewer.jsx';
 
 const DOC_REQUIREMENTS = [
   // Required requirements (5 items - unlock QS Evaluation)
@@ -98,6 +99,7 @@ export default function ApplicationsPage() {
   const [selectedDocKey, setSelectedDocKey] = useState('pds');
   const [docsLoading, setDocsLoading] = useState(false);
   const [docIframeLoading, setDocIframeLoading] = useState(true);
+  const [isDocFullscreen, setIsDocFullscreen] = useState(false);
 
   useEffect(() => {
     setDocIframeLoading(true);
@@ -1429,7 +1431,33 @@ export default function ApplicationsPage() {
                       selectedDocKey === 'application_learning' ? 'Application of Learning and Development' : ''
                     }
                   </b>
-                  <span style={{ fontSize: '12px', color: 'var(--muted)' }}>Page 1 of 1</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <button
+                      type="button"
+                      onClick={() => setIsDocFullscreen(true)}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        padding: '5px 12px',
+                        fontSize: '12px',
+                        fontWeight: '600',
+                        color: '#0F172A',
+                        backgroundColor: '#FFFFFF',
+                        border: '1px solid #CBD5E1',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+                      </svg>
+                      Full Screen
+                    </button>
+                    <span style={{ fontSize: '12px', color: 'var(--muted)' }}>Page 1 of 1</span>
+                  </div>
                 </div>
                 {(() => {
                   if (docsLoading) {
@@ -1563,6 +1591,17 @@ export default function ApplicationsPage() {
           </div>
         </div>
       )}
+
+      {/* FULL SCREEN DOCUMENT VIEWER MODAL */}
+      <FullScreenDocViewer
+        isOpen={isDocFullscreen}
+        onClose={() => setIsDocFullscreen(false)}
+        applicantName={reviewApp?.applicant}
+        applicationId={reviewApp?.id}
+        selectedDocKey={selectedDocKey}
+        setSelectedDocKey={setSelectedDocKey}
+        availableDocs={availableDocs}
+      />
         </div>
       )}
 

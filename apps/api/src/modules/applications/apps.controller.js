@@ -542,23 +542,32 @@ const getFolderAliasesFromKey = (k) => {
   return Array.from(folderSet);
 };
 
-const getApplicantFolderPrefixes = (appRow) => {
+const getApplicantFolderPrefixes = (appRow, appSpecificOnly = false) => {
   const prefixes = new Set();
   if (appRow) {
-    if (appRow.applicant_id) {
-      prefixes.add(`applicant-${appRow.applicant_id}/`.toLowerCase());
-    }
-    if (appRow.applicant_number) {
-      prefixes.add(`applicant-${appRow.applicant_number.toLowerCase()}/`);
-    }
-    if (appRow.code) {
-      prefixes.add(`applicant-${appRow.code.toLowerCase()}/`);
-    }
-    if (appRow.id) {
-      prefixes.add(`applicant-${appRow.id}/`.toLowerCase());
-    }
-    if (appRow.application_id) {
-      prefixes.add(`applicant-${appRow.application_id}/`.toLowerCase());
+    if (appSpecificOnly) {
+      if (appRow.id) {
+        prefixes.add(`applicant-${appRow.id}/`.toLowerCase());
+      }
+      if (appRow.application_id) {
+        prefixes.add(`applicant-${appRow.application_id}/`.toLowerCase());
+      }
+    } else {
+      if (appRow.applicant_id) {
+        prefixes.add(`applicant-${appRow.applicant_id}/`.toLowerCase());
+      }
+      if (appRow.applicant_number) {
+        prefixes.add(`applicant-${appRow.applicant_number.toLowerCase()}/`);
+      }
+      if (appRow.code) {
+        prefixes.add(`applicant-${appRow.code.toLowerCase()}/`);
+      }
+      if (appRow.id) {
+        prefixes.add(`applicant-${appRow.id}/`.toLowerCase());
+      }
+      if (appRow.application_id) {
+        prefixes.add(`applicant-${appRow.application_id}/`.toLowerCase());
+      }
     }
   }
   return Array.from(prefixes);
@@ -650,7 +659,8 @@ export async function getApplicationDocuments(req, res) {
       const azureBlobs = await getBlobsForApplicant(containerClient, app);
 
       const findMatchingBlob = (appRow, docKey) => {
-        const applicantPrefixes = getApplicantFolderPrefixes(appRow);
+        const isAppSpecific = ['letter_of_intent', 'sworn_declaration', 'sworn_document', 'cav'].includes(docKey);
+        const applicantPrefixes = getApplicantFolderPrefixes(appRow, isAppSpecific);
         const folderAliases = getFolderAliasesFromKey(docKey);
 
         for (const appPrefix of applicantPrefixes) {
@@ -672,16 +682,23 @@ export async function getApplicationDocuments(req, res) {
             if (matched) return matched;
           }
         }
+        // If app-specific doc key (LOI/Sworn Doc), check if any blob explicitly contains application ID
+        if (isAppSpecific && (appRow.id || appRow.application_id)) {
+          const appIdStr = String(appRow.application_id || appRow.id).toLowerCase();
+          const matched = azureBlobs.find(b => {
+            const nameLower = b.nameLower;
+            return folderAliases.some(alias => nameLower.includes(alias.replace(/_/g, '-')) || nameLower.includes(alias)) &&
+                   (nameLower.includes(`_${appIdStr}`) || nameLower.includes(`-${appIdStr}`));
+          });
+          if (matched) return matched;
+        }
         return null;
       };
 
       documents.forEach(doc => {
-        const matchedBlob = findMatchingBlob(app, doc.key);
-        if (matchedBlob) {
-          doc.existsInAzure = true;
-          doc.filename = matchedBlob.name;
-          doc.url = `/api/applications/${id}/documents/${doc.key}/download`;
-        } else if (doc.key === 'letter_of_intent' && app?.letter_of_intent) {
+        const isAppSpecific = ['letter_of_intent', 'sworn_declaration', 'sworn_document', 'cav'].includes(doc.key);
+
+        if (doc.key === 'letter_of_intent' && app?.letter_of_intent) {
           doc.existsInAzure = true;
           doc.filename = app.letter_of_intent;
           doc.url = `/api/applications/${id}/documents/${doc.key}/download`;
@@ -689,6 +706,13 @@ export async function getApplicationDocuments(req, res) {
           doc.existsInAzure = true;
           doc.filename = app.sworn_declaration;
           doc.url = `/api/applications/${id}/documents/${doc.key}/download`;
+        } else {
+          const matchedBlob = findMatchingBlob(app, doc.key);
+          if (matchedBlob) {
+            doc.existsInAzure = true;
+            doc.filename = matchedBlob.name;
+            doc.url = `/api/applications/${id}/documents/${doc.key}/download`;
+          }
         }
       });
 
@@ -757,7 +781,22 @@ export async function downloadApplicationDocument(req, res) {
     };
 
     const findBlob = (appRow) => {
-      const applicantPrefixes = getApplicantFolderPrefixes(appRow);
+      const isAppSpecific = ['letter_of_intent', 'sworn_declaration', 'sworn_document', 'cav'].includes(key);
+
+      if (key === 'letter_of_intent' && appRow?.letter_of_intent) {
+        const extracted = extractBlobPath(appRow.letter_of_intent);
+        const found = allBlobs.find(b => b.name === extracted || b.name.endsWith(extracted) || extracted.endsWith(b.name));
+        if (found) return found.name;
+        return extracted;
+      }
+      if ((key === 'sworn_declaration' || key === 'cav') && appRow?.sworn_declaration) {
+        const extracted = extractBlobPath(appRow.sworn_declaration);
+        const found = allBlobs.find(b => b.name === extracted || b.name.endsWith(extracted) || extracted.endsWith(b.name));
+        if (found) return found.name;
+        return extracted;
+      }
+
+      const applicantPrefixes = getApplicantFolderPrefixes(appRow, isAppSpecific);
       const folderAliases = getFolderAliasesFromKey(key);
 
       for (const appPrefix of applicantPrefixes) {
@@ -780,18 +819,16 @@ export async function downloadApplicationDocument(req, res) {
         }
       }
 
-      if (key === 'letter_of_intent' && appRow?.letter_of_intent) {
-        const extracted = extractBlobPath(appRow.letter_of_intent);
-        const found = allBlobs.find(b => b.name === extracted || b.name.endsWith(extracted) || extracted.endsWith(b.name));
-        if (found) return found.name;
-        return extracted;
+      if (isAppSpecific && (appRow.id || appRow.application_id)) {
+        const appIdStr = String(appRow.application_id || appRow.id).toLowerCase();
+        const matched = allBlobs.find(b => {
+          const nameLower = b.nameLower;
+          return folderAliases.some(alias => nameLower.includes(alias.replace(/_/g, '-')) || nameLower.includes(alias)) &&
+                 (nameLower.includes(`_${appIdStr}`) || nameLower.includes(`-${appIdStr}`));
+        });
+        if (matched) return matched.name;
       }
-      if ((key === 'sworn_declaration' || key === 'cav') && appRow?.sworn_declaration) {
-        const extracted = extractBlobPath(appRow.sworn_declaration);
-        const found = allBlobs.find(b => b.name === extracted || b.name.endsWith(extracted) || extracted.endsWith(b.name));
-        if (found) return found.name;
-        return extracted;
-      }
+
       return '';
     };
 
