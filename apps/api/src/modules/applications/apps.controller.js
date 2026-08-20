@@ -155,13 +155,7 @@ export async function updatePipeline(req, res) {
       return res.status(404).json({ error: 'Application not found' });
     }
 
-    const apptLower = (currentApp.appointment_status || '').toLowerCase();
-    if (apptLower === 'appointed' || apptLower === 'rejected' || apptLower === 'not appointed' || apptLower === 'not_appointed') {
-      return res.status(400).json({ error: 'Cannot modify assessment once appointment is recorded.' });
-    }
-
-    // Removed the backward assessment status check to allow more flexible score modifications
-
+    // Allow score updates regardless of appointment status
     const updatedStatus = status || currentApp.status;
 
     const fields = ['updated_at = NOW()'];
@@ -270,11 +264,22 @@ async function handleAppointmentAction(req, res, targetStatus) {
       return res.status(400).json({ error: 'Selected item number does not belong to the job cluster of this application.' });
     }
     
-    // If we are flagging, check if the item is already filled (or if it is filled by the current applicant)
-    if (targetStatus === 'FOR APPOINTMENT') {
-      if (vacancy.filling_up_status === 'FILLED' && currentApp.appointment_item_no !== selectedItemNo) {
-        return res.status(400).json({ error: 'Selected item number is already filled.' });
+    // Capacity check: block appointment if the item or vacancy cluster slots are fully occupied
+    if (targetStatus === 'FOR APPOINTMENT' || targetStatus === 'appointed') {
+      const { rows: clusterVacancies } = await pool.query(
+        `SELECT filling_up_status FROM vacancies WHERE job_cluster_id = $1`,
+        [currentApp.job_cluster_id]
+      );
+      const totalSlots = clusterVacancies.length;
+      const filledSlots = clusterVacancies.filter(v => v.filling_up_status === 'FILLED').length;
+      const isItemFilled = vacancy.filling_up_status === 'FILLED' && currentApp.appointment_item_no !== selectedItemNo;
+
+      if (isItemFilled || (filledSlots >= totalSlots && currentApp.appointment_item_no !== selectedItemNo)) {
+        return res.status(400).json({ error: 'No unfilled items remaining for this vacancy' });
       }
+    }
+
+    if (targetStatus === 'FOR APPOINTMENT') {
 
       const parseDateNoTime = (val) => {
         if (!val) return null;

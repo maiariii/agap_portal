@@ -985,7 +985,7 @@ export default function AssessmentPage() {
                             style={{ opacity: 0.65, cursor: 'not-allowed' }}
                             onClick={(e) => {
                               e.stopPropagation();
-                              setToast({ message: 'No unfilled items remaining for this vacancy.', type: 'error' });
+                              setToast({ message: 'No unfilled items remaining for this vacancy', type: 'error' });
                             }}
                             title="No unfilled items remaining for this vacancy"
                           >
