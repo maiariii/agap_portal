@@ -940,7 +940,7 @@ export default function AssessmentPage() {
                       const allAreasScored = areaCount === SCORE_AREAS.length;
 
                       const fmtScore = (v) => (v !== '' && v !== null && v !== undefined && Number.isFinite(Number(v))) ? (
-                        <span className={`badge ${Number(v) >= 85 ? 'green' : Number(v) >= 70 ? 'blue' : Number(v) >= 50 ? 'orange' : 'red'}`}>
+                        <span className={`badge ${Number(v) >= 80 ? 'green' : Number(v) >= 25 ? 'orange' : 'red'}`}>
                           {Number(v).toFixed(2)}%
                         </span>
                       ) : '—';
@@ -1012,7 +1012,7 @@ export default function AssessmentPage() {
                           <td>{r.vacancy}</td>
                           <td className="num-col">
                             {allAreasScored && r.fit !== null && r.fit !== undefined ? (
-                              <span className={`badge ${r.fit >= 85 ? 'green' : r.fit >= 70 ? 'blue' : r.fit >= 50 ? 'orange' : 'red'}`}>
+                              <span className={`badge ${r.fit >= 80 ? 'green' : r.fit >= 25 ? 'orange' : 'red'}`}>
                                 {Number(r.fit).toFixed(2)}
                               </span>
                             ) : '—'}

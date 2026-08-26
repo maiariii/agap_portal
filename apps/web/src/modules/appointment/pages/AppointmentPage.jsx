@@ -484,7 +484,7 @@ export default function AppointmentPage() {
                           <td>{r.itemNo}</td>
                           <td className="num-col">
                             {score && score > 0 ? (
-                              <span className={`badge ${score >= 85 ? 'green' : score >= 70 ? 'blue' : score >= 50 ? 'orange' : 'red'}`}>
+                              <span className={`badge ${score >= 80 ? 'green' : score >= 25 ? 'orange' : 'red'}`}>
                                 {score.toFixed(2)}%
                               </span>
                             ) : '—'}

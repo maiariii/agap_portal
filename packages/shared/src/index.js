@@ -82,26 +82,22 @@ export function computeFit(applicant, position) {
     trainingScore,
     eligibilityScore,
     overall,
-    recommendation: overall >= 85 ? "Strong fit" : overall >= 70 ? "Good fit" : overall >= 50 ? "Partial fit" : "Low fit"
+    recommendation: overall >= 80 ? "Strong fit" : overall >= 25 ? "Moderate fit" : "Low fit"
   };
 }
 
 export function goodness(score) {
-  if (score >= 90) return { label: "Excellent fit", color: "green" };
-  if (score >= 75) return { label: "Strong fit", color: "green" };
-  if (score >= 60) return { label: "Moderate fit", color: "blue" };
-  if (score >= 40) return { label: "Limited fit", color: "orange" };
-  return { label: "Poor fit", color: "red" };
+  if (score >= 80) return { label: "Strong fit", color: "green" };
+  if (score >= 25) return { label: "Moderate fit", color: "orange" };
+  return { label: "Low fit", color: "red" };
 }
 
 export function scoreTone(score) {
   if (score === "" || score === null || score === undefined || !Number.isFinite(Number(score))) return { label: "Not scored", color: "gray" };
   const n = Number(score);
-  if (n >= 90) return { label: "Excellent fit", color: "green" };
-  if (n >= 75) return { label: "Strong fit", color: "green" };
-  if (n >= 60) return { label: "Moderate fit", color: "blue" };
-  if (n >= 40) return { label: "Limited fit", color: "orange" };
-  return { label: "Poor fit", color: "red" };
+  if (n >= 80) return { label: "Strong fit", color: "green" };
+  if (n >= 25) return { label: "Moderate fit", color: "orange" };
+  return { label: "Low fit", color: "red" };
 }
 
 export function computeOverallAreaScore(scores) {
