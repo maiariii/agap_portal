@@ -23,30 +23,27 @@ export const DOCUMENT_TYPE_MAP = {
 };
 
 /**
- * Determines the document-fetching behavior based on the status of all records belonging to a division.
+ * Determines division status and open posting interval periods for a division.
  * 
  * Rules:
- * - If ALL records for the division have a Closed status (or non-Open status), division status is 'Closed'.
- * - If ALL records have an Open status, division status is 'Open'.
- * - If a division has a combination of Closed and Open statuses, division status is 'Open'.
+ * - A division is Closed ONLY when every record for that division has a Closed status.
+ * - Construct openIntervals array of { start: Date, end: Date } for all open posting windows.
  * 
  * @param {string} divisionName 
- * @returns {Promise<{ divisionStatus: 'Closed'|'Open', isClosed: boolean, cutoffDate: Date|null, recordsCount: number, openCount: number, closedCount: number }>}
+ * @returns {Promise<{ divisionStatus: 'Closed'|'Open', isClosed: boolean, openIntervals: Array<{start: Date, end: Date}>, recordsCount: number }>}
  */
-export async function determineDivisionStatus(divisionName) {
+export async function determineDivisionPeriods(divisionName) {
   if (!divisionName) {
     return {
       divisionStatus: 'Open',
       isClosed: false,
-      cutoffDate: null,
-      recordsCount: 0,
-      openCount: 0,
-      closedCount: 0
+      openIntervals: [{ start: new Date(0), end: new Date('2099-12-31') }],
+      recordsCount: 0
     };
   }
 
   const { rows } = await pool.query(
-    `SELECT id, status, posting_start, posting_end, updated_at 
+    `SELECT id, status, posting_start, posting_end, created_at, updated_at 
      FROM vacancies 
      WHERE UPPER(division) = UPPER($1)`,
     [divisionName.trim()]
@@ -56,17 +53,15 @@ export async function determineDivisionStatus(divisionName) {
     return {
       divisionStatus: 'Open',
       isClosed: false,
-      cutoffDate: null,
-      recordsCount: 0,
-      openCount: 0,
-      closedCount: 0
+      openIntervals: [{ start: new Date(0), end: new Date('2099-12-31') }],
+      recordsCount: 0
     };
   }
 
   const recordsCount = rows.length;
   let openCount = 0;
   let closedCount = 0;
-  let maxPostingEnd = null;
+  const openIntervals = [];
 
   for (const row of rows) {
     const statusLower = (row.status || '').toLowerCase();
@@ -76,40 +71,65 @@ export async function determineDivisionStatus(divisionName) {
       closedCount++;
     }
 
+    // Determine the Open posting window for this vacancy record
+    const start = row.posting_start
+      ? new Date(row.posting_start)
+      : new Date(row.created_at || '2000-01-01');
+
+    let end;
     if (row.posting_end) {
-      const endMs = new Date(row.posting_end).getTime();
-      if (!maxPostingEnd || endMs > maxPostingEnd.getTime()) {
-        maxPostingEnd = new Date(row.posting_end);
-      }
+      end = new Date(row.posting_end);
+    } else if (statusLower === 'open') {
+      end = new Date('2099-12-31');
+    } else {
+      end = new Date(row.updated_at || Date.now());
+    }
+
+    // Add valid Open interval to intervals list
+    if (start.getTime() <= end.getTime()) {
+      openIntervals.push({ start, end });
     }
   }
 
-  // A division is considered Closed ONLY when every record for that division has a Closed status.
-  // If at least one record has an Open status (or a combination of Closed and Open), treat division as Open.
   const isClosed = (openCount === 0 && closedCount > 0);
   const divisionStatus = isClosed ? 'Closed' : 'Open';
 
   return {
     divisionStatus,
     isClosed,
-    cutoffDate: isClosed ? maxPostingEnd : null,
-    recordsCount,
-    openCount,
-    closedCount
+    openIntervals,
+    recordsCount
   };
 }
 
 /**
+ * Checks if a document upload timestamp fell within an Open period of the division.
+ * 
+ * @param {Date|string} uploadedAt 
+ * @param {Array<{start: Date, end: Date}>} openIntervals 
+ * @returns {boolean}
+ */
+export function isUploadedInOpenPeriod(uploadedAt, openIntervals) {
+  if (!uploadedAt) return false;
+  if (!openIntervals || openIntervals.length === 0) return true;
+
+  const uploadMs = new Date(uploadedAt).getTime();
+  return openIntervals.some(interval => uploadMs >= interval.start.getTime() && uploadMs <= interval.end.getTime());
+}
+
+/**
  * Fetches documents from documents_audit_logs for a specific applicant_id,
- * applying division status rules:
- * - For Closed division (all records Closed): fetch document URL from old_blob_url (fallback to new_blob_url if old_blob_url is null) and restrict upload time.
- * - For Open division (or mixed Closed/Open): fetch document URL from new_blob_url (latest available documents).
+ * applying upload-time division period rules:
+ * - A document is eligible ONLY if it was uploaded during an Open period (uploaded_at falls within an Open interval).
+ * - Documents uploaded/updated during a Closed period remain INELIGIBLE, even if the division is subsequently reopened.
+ * - When division is Closed: fetch from old_blob_url (fallback to new_blob_url).
+ * - When division is Open: fetch from new_blob_url (fallback to old_blob_url).
  * 
  * @param {Object} params 
  * @param {string|number} params.applicantId 
  * @param {string} [params.applicationId] 
  * @param {string} [params.division] 
- * @returns {Promise<{ divisionStatus: string, isClosed: boolean, cutoffDate: Date|null, documents: Array }>}
+ * @returns {Promise<{ divisionStatus: string, isClosed: boolean, documents: Array }>}
  */
 export async function fetchApplicantDocumentsFromAuditLogs({ applicantId, applicationId, division }) {
   let targetApplicantId = applicantId;
@@ -134,43 +154,36 @@ export async function fetchApplicantDocumentsFromAuditLogs({ applicantId, applic
     return {
       divisionStatus: 'Open',
       isClosed: false,
-      cutoffDate: null,
       documents: []
     };
   }
 
-  const divisionInfo = await determineDivisionStatus(targetDivision);
+  const divisionInfo = await determineDivisionPeriods(targetDivision);
 
-  let query = `
-    SELECT 
-      id,
-      applicant_id,
-      document_type,
-      old_blob_url,
-      new_blob_url,
-      affected_applications_count,
-      application_id,
-      item_no,
-      created_at AS uploaded_at
-    FROM document_audit_logs
-    WHERE applicant_id::text = $1::text
-  `;
-  const queryParams = [String(targetApplicantId)];
+  const { rows } = await pool.query(
+    `SELECT 
+       id,
+       applicant_id,
+       document_type,
+       old_blob_url,
+       new_blob_url,
+       affected_applications_count,
+       application_id,
+       item_no,
+       created_at AS uploaded_at
+     FROM document_audit_logs
+     WHERE applicant_id::text = $1::text
+     ORDER BY created_at DESC`,
+    [String(targetApplicantId)]
+  );
 
-  // Apply upload time restriction for a fully Closed division
-  if (divisionInfo.isClosed && divisionInfo.cutoffDate) {
-    queryParams.push(divisionInfo.cutoffDate.toISOString());
-    query += ` AND created_at <= $2::timestamptz`;
-  }
+  // Filter for eligibility based on upload timestamp vs Open intervals
+  const eligibleRows = rows.filter(row => isUploadedInOpenPeriod(row.uploaded_at, divisionInfo.openIntervals));
 
-  query += ` ORDER BY created_at DESC`;
-
-  const { rows } = await pool.query(query, queryParams);
-
-  // Attach effective_blob_url based on division status:
-  // If Closed: fetch from old_blob_url (fallback to new_blob_url)
-  // If Open: fetch from new_blob_url (fallback to old_blob_url)
-  const processedRows = rows.map(r => ({
+  // Attach effective_blob_url based on current division status:
+  // If Closed: use old_blob_url (fallback to new_blob_url)
+  // If Open: use new_blob_url (fallback to old_blob_url)
+  const processedRows = eligibleRows.map(r => ({
     ...r,
     effective_blob_url: divisionInfo.isClosed
       ? (r.old_blob_url || r.new_blob_url)
@@ -180,7 +193,10 @@ export async function fetchApplicantDocumentsFromAuditLogs({ applicantId, applic
   return {
     divisionStatus: divisionInfo.divisionStatus,
     isClosed: divisionInfo.isClosed,
-    cutoffDate: divisionInfo.cutoffDate,
+    openIntervals: divisionInfo.openIntervals,
     documents: processedRows
   };
 }
+
+// Retain alias export for backwards compatibility
+export const determineDivisionStatus = determineDivisionPeriods;
