@@ -1007,44 +1007,140 @@ export default function VacanciesPage() {
 
       {/* MODAL: STEP 1 - REOPEN DOCUMENT POLICY SELECTION */}
       {showDocPolicyModal && calVacancy && (
-        <div className="modal open">
-          <div className="modal-box" style={{ width: 'min(580px, 94vw)' }}>
-            <div className="modal-head" style={{ borderBottom: '1px solid #E2E8F0', padding: '20px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h2 style={{ margin: 0, fontSize: '18px', color: 'var(--navy)' }}>Reopen Vacancy — Document Policy</h2>
-              <button className="secondary" onClick={() => setShowDocPolicyModal(false)}>Close</button>
-            </div>
-            <div style={{ padding: '24px' }}>
-              <div style={{ background: '#F8FCFF', border: '1.5px solid var(--blue-100)', borderRadius: '14px', padding: '14px', marginBottom: '18px' }}>
-                <b style={{ color: 'var(--navy)', fontSize: '14px', display: 'block' }}>{calVacancy.title || 'Vacancy Item'} ({calVacancy.itemNo})</b>
-                <span style={{ fontSize: '12px', color: 'var(--muted)' }}>Division: {calVacancy.division || 'SDO'}</span>
+        <div className="modal open" style={{ backdropFilter: 'blur(6px)', background: 'rgba(15, 23, 42, 0.55)' }}>
+          <div className="modal-box" style={{ width: 'min(620px, 94vw)', borderRadius: '24px', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)', border: '1px solid rgba(226, 232, 240, 0.8)', overflow: 'hidden', padding: 0 }}>
+            {/* Modal Header */}
+            <div className="modal-head" style={{ padding: '20px 28px', background: 'linear-gradient(180deg, #FFFFFF 0%, #F8FAFC 100%)', borderBottom: '1px solid #E2E8F0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <span style={{ fontSize: '20px' }}>📂</span>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '17px', fontWeight: '800', color: '#0F172A', fontFamily: 'var(--font-heading)' }}>Reopen Vacancy — Document Policy</h3>
+                  <span style={{ fontSize: '11px', color: '#64748B', fontWeight: '600' }}>Step 1 of 2: Configure applicant document rules</span>
+                </div>
               </div>
+              <button 
+                type="button" 
+                onClick={() => setShowDocPolicyModal(false)}
+                style={{ background: '#F1F5F9', border: '1px solid #CBD5E1', borderRadius: '50%', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#475569', fontWeight: '800', fontSize: '14px', transition: 'all 0.15s' }}
+              >
+                ✕
+              </button>
+            </div>
 
-              <div style={{ textAlign: 'left', marginBottom: '20px' }}>
-                <label style={{ fontSize: '12px', fontWeight: '900', color: 'var(--navy)', textTransform: 'uppercase', marginBottom: '8px', display: 'block' }}>
-                  Select Applicant Document Fetching Policy:
-                </label>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                  <label style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', cursor: 'pointer', padding: '14px', borderRadius: '12px', background: calDocPolicy === 'FETCH_NEW' ? '#EBF5FF' : 'white', border: calDocPolicy === 'FETCH_NEW' ? '2px solid var(--blue)' : '1.5px solid var(--line)', transition: 'all 0.15s ease' }}>
-                    <input type="radio" name="step1DocPolicy" value="FETCH_NEW" checked={calDocPolicy === 'FETCH_NEW'} onChange={() => setCalDocPolicy('FETCH_NEW')} style={{ marginTop: '3px' }} />
-                    <div>
-                      <b style={{ display: 'block', fontSize: '13px', color: 'var(--navy)' }}>🟢 Fetch New Documents</b>
-                      <span style={{ fontSize: '11px', color: 'var(--muted)', fontWeight: '600' }}>Fetches newly updated files from applicant upload logs (<code>new_blob_url</code>).</span>
-                    </div>
-                  </label>
-
-                  <label style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', cursor: 'pointer', padding: '14px', borderRadius: '12px', background: calDocPolicy === 'RETAIN_OLD' ? '#FEF3C7' : 'white', border: calDocPolicy === 'RETAIN_OLD' ? '2px solid #D97706' : '1.5px solid var(--line)', transition: 'all 0.15s ease' }}>
-                    <input type="radio" name="step1DocPolicy" value="RETAIN_OLD" checked={calDocPolicy === 'RETAIN_OLD'} onChange={() => setCalDocPolicy('RETAIN_OLD')} style={{ marginTop: '3px' }} />
-                    <div>
-                      <b style={{ display: 'block', fontSize: '13px', color: 'var(--navy)' }}>🔒 Retain Original Baseline Documents</b>
-                      <span style={{ fontSize: '11px', color: 'var(--muted)', fontWeight: '600' }}>Retains original baseline files from previous closed period (<code>old_blob_url</code>).</span>
-                    </div>
-                  </label>
+            {/* Modal Content */}
+            <div style={{ padding: '24px 28px', background: '#FFFFFF' }}>
+              {/* Position Context Card */}
+              <div style={{ background: 'linear-gradient(135deg, #F8FAFC 0%, #F1F5F9 100%)', border: '1px solid #E2E8F0', borderRadius: '16px', padding: '16px 20px', marginBottom: '22px', textAlign: 'left' }}>
+                <div style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: '800', color: '#64748B', marginBottom: '4px' }}>Target Vacancy Item</div>
+                <h4 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: '#0F172A', lineHeight: 1.3 }}>{calVacancy.title || 'Vacancy Item'}</h4>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '8px' }}>
+                  <span style={{ background: '#E2E8F0', color: '#334155', fontSize: '11px', fontWeight: '700', padding: '3px 10px', borderRadius: '8px', fontFamily: 'monospace' }}>
+                    {calVacancy.itemNo}
+                  </span>
+                  <span style={{ fontSize: '12px', color: '#64748B', fontWeight: '600' }}>
+                    Division: <strong style={{ color: '#1E293B' }}>{calVacancy.division || 'SDO'}</strong>
+                  </span>
                 </div>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '24px' }}>
-                <button className="secondary" onClick={() => setShowDocPolicyModal(false)}>Cancel</button>
-                <button className="good" onClick={handleProceedToCalendar} style={{ fontWeight: '800' }}>Next: Set Posting Schedule →</button>
+              {/* Selection Section */}
+              <div style={{ textAlign: 'left' }}>
+                <label style={{ fontSize: '11px', fontWeight: '800', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '12px', display: 'block' }}>
+                  Select Applicant Document Fetching Policy
+                </label>
+                
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                  {/* Option 1: FETCH_NEW */}
+                  <div
+                    onClick={() => setCalDocPolicy('FETCH_NEW')}
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: '22px 38px 1fr',
+                      alignItems: 'center',
+                      gap: '14px',
+                      cursor: 'pointer',
+                      padding: '16px 18px',
+                      borderRadius: '16px',
+                      background: calDocPolicy === 'FETCH_NEW' ? 'linear-gradient(135deg, #ECFDF5 0%, #F0FDF4 100%)' : '#FFFFFF',
+                      border: calDocPolicy === 'FETCH_NEW' ? '2px solid #10B981' : '1.5px solid #E2E8F0',
+                      boxShadow: calDocPolicy === 'FETCH_NEW' ? '0 4px 14px -2px rgba(16, 185, 129, 0.15)' : '0 1px 3px rgba(0,0,0,0.03)',
+                      transition: 'all 0.2s ease'
+                    }}
+                  >
+                    <input 
+                      type="radio" 
+                      name="step1DocPolicy" 
+                      value="FETCH_NEW" 
+                      checked={calDocPolicy === 'FETCH_NEW'} 
+                      onChange={() => setCalDocPolicy('FETCH_NEW')} 
+                      style={{ width: '18px', height: '18px', accentColor: '#10B981', cursor: 'pointer', margin: 0 }} 
+                    />
+                    <div style={{ width: '38px', height: '38px', borderRadius: '12px', background: calDocPolicy === 'FETCH_NEW' ? '#D1FAE5' : '#F1F5F9', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px' }}>
+                      🟢
+                    </div>
+                    <div>
+                      <b style={{ display: 'block', fontSize: '14px', color: '#0F172A', fontWeight: '800', lineHeight: 1.2 }}>Fetch New Documents</b>
+                      <span style={{ fontSize: '12px', color: '#64748B', fontWeight: '500', lineHeight: 1.4, display: 'block', marginTop: '3px' }}>
+                        Fetches newly updated files submitted by applicants during the reopened period (<code style={{ fontSize: '11px', background: 'rgba(0,0,0,0.04)', padding: '1px 5px', borderRadius: '4px' }}>new_blob_url</code>).
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Option 2: RETAIN_OLD */}
+                  <div
+                    onClick={() => setCalDocPolicy('RETAIN_OLD')}
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: '22px 38px 1fr',
+                      alignItems: 'center',
+                      gap: '14px',
+                      cursor: 'pointer',
+                      padding: '16px 18px',
+                      borderRadius: '16px',
+                      background: calDocPolicy === 'RETAIN_OLD' ? 'linear-gradient(135deg, #FFFBEB 0%, #FEF3C7 100%)' : '#FFFFFF',
+                      border: calDocPolicy === 'RETAIN_OLD' ? '2px solid #D97706' : '1.5px solid #E2E8F0',
+                      boxShadow: calDocPolicy === 'RETAIN_OLD' ? '0 4px 14px -2px rgba(217, 119, 6, 0.15)' : '0 1px 3px rgba(0,0,0,0.03)',
+                      transition: 'all 0.2s ease'
+                    }}
+                  >
+                    <input 
+                      type="radio" 
+                      name="step1DocPolicy" 
+                      value="RETAIN_OLD" 
+                      checked={calDocPolicy === 'RETAIN_OLD'} 
+                      onChange={() => setCalDocPolicy('RETAIN_OLD')} 
+                      style={{ width: '18px', height: '18px', accentColor: '#D97706', cursor: 'pointer', margin: 0 }} 
+                    />
+                    <div style={{ width: '38px', height: '38px', borderRadius: '12px', background: calDocPolicy === 'RETAIN_OLD' ? '#FDE68A' : '#F1F5F9', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px' }}>
+                      🔒
+                    </div>
+                    <div>
+                      <b style={{ display: 'block', fontSize: '14px', color: '#0F172A', fontWeight: '800', lineHeight: 1.2 }}>Retain Original Baseline Documents</b>
+                      <span style={{ fontSize: '12px', color: '#64748B', fontWeight: '500', lineHeight: 1.4, display: 'block', marginTop: '3px' }}>
+                        Locks & retains original baseline files submitted from the previous closed period (<code style={{ fontSize: '11px', background: 'rgba(0,0,0,0.04)', padding: '1px 5px', borderRadius: '4px' }}>old_blob_url</code>).
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Modal Footer Actions */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '12px', marginTop: '28px', paddingTop: '18px', borderTop: '1px solid #F1F5F9' }}>
+                <button 
+                  type="button" 
+                  onClick={() => setShowDocPolicyModal(false)}
+                  style={{ padding: '10px 18px', borderRadius: '12px', border: '1.5px solid #CBD5E1', background: '#FFFFFF', color: '#475569', fontWeight: '700', fontSize: '13px', cursor: 'pointer', transition: 'all 0.15s' }}
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="button" 
+                  onClick={handleProceedToCalendar} 
+                  style={{ padding: '11px 22px', borderRadius: '12px', border: 'none', background: 'linear-gradient(135deg, #10B981 0%, #059669 100%)', color: '#FFFFFF', fontWeight: '800', fontSize: '13px', cursor: 'pointer', boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)', display: 'flex', alignItems: 'center', gap: '8px', transition: 'all 0.15s' }}
+                >
+                  <span>Next: Set Posting Schedule</span>
+                  <span style={{ fontSize: '15px' }}>→</span>
+                </button>
               </div>
             </div>
           </div>
