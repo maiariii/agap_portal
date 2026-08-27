@@ -190,7 +190,7 @@ export async function createVacancy(req, res) {
 
 export async function toggleVacancyStatus(req, res) {
   const { id } = req.params;
-  const { status, postingStart, postingEnd } = req.body;
+  const { status, postingStart, postingEnd, docFetchPreference } = req.body;
   try {
     const fields = [];
     const values = [];
@@ -207,6 +207,10 @@ export async function toggleVacancyStatus(req, res) {
     if (postingEnd !== undefined) {
       fields.push(`posting_end = $${idx++}`);
       values.push(parseOrFormatEndDateParam(postingEnd));
+    }
+    if (docFetchPreference !== undefined) {
+      fields.push(`filling_up_status = $${idx++}`);
+      values.push(docFetchPreference === 'RETAIN_OLD' ? 'RETAIN_OLD' : 'FETCH_NEW');
     }
 
     if (fields.length === 0) {

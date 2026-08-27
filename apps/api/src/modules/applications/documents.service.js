@@ -37,13 +37,14 @@ export async function determineDivisionPeriods(divisionName) {
     return {
       divisionStatus: 'Open',
       isClosed: false,
+      docFetchPreference: 'FETCH_NEW',
       openIntervals: [{ start: new Date(0), end: new Date('2099-12-31') }],
       recordsCount: 0
     };
   }
 
   const { rows } = await pool.query(
-    `SELECT id, status, posting_start, posting_end, created_at, updated_at 
+    `SELECT id, status, posting_start, posting_end, created_at, updated_at, filling_up_status 
      FROM vacancies 
      WHERE UPPER(division) = UPPER($1)`,
     [divisionName.trim()]
@@ -53,6 +54,7 @@ export async function determineDivisionPeriods(divisionName) {
     return {
       divisionStatus: 'Open',
       isClosed: false,
+      docFetchPreference: 'FETCH_NEW',
       openIntervals: [{ start: new Date(0), end: new Date('2099-12-31') }],
       recordsCount: 0
     };
@@ -61,6 +63,7 @@ export async function determineDivisionPeriods(divisionName) {
   const recordsCount = rows.length;
   let openCount = 0;
   let closedCount = 0;
+  let hasRetainOld = false;
   const openIntervals = [];
 
   for (const row of rows) {
@@ -69,6 +72,10 @@ export async function determineDivisionPeriods(divisionName) {
       openCount++;
     } else {
       closedCount++;
+    }
+
+    if ((row.filling_up_status || '').includes('RETAIN_OLD')) {
+      hasRetainOld = true;
     }
 
     // Determine the Open posting window for this vacancy record
@@ -93,10 +100,12 @@ export async function determineDivisionPeriods(divisionName) {
 
   const isClosed = (openCount === 0 && closedCount > 0);
   const divisionStatus = isClosed ? 'Closed' : 'Open';
+  const docFetchPreference = hasRetainOld ? 'RETAIN_OLD' : 'FETCH_NEW';
 
   return {
     divisionStatus,
     isClosed,
+    docFetchPreference,
     openIntervals,
     recordsCount
   };
@@ -122,8 +131,8 @@ export function isUploadedInOpenPeriod(uploadedAt, openIntervals) {
  * applying upload-time division period rules:
  * - A document is eligible ONLY if it was uploaded during an Open period (uploaded_at falls within an Open interval).
  * - Documents uploaded/updated during a Closed period remain INELIGIBLE, even if the division is subsequently reopened.
- * - When division is Closed: fetch from old_blob_url (fallback to new_blob_url).
- * - When division is Open: fetch from new_blob_url (fallback to old_blob_url).
+ * - When division is Closed or docFetchPreference === 'RETAIN_OLD': fetch from old_blob_url (fallback to new_blob_url).
+ * - When division is Open and docFetchPreference === 'FETCH_NEW': fetch from new_blob_url (fallback to old_blob_url).
  * 
  * @param {Object} params 
  * @param {string|number} params.applicantId 
@@ -180,12 +189,12 @@ export async function fetchApplicantDocumentsFromAuditLogs({ applicantId, applic
   // Filter for eligibility based on upload timestamp vs Open intervals
   const eligibleRows = rows.filter(row => isUploadedInOpenPeriod(row.uploaded_at, divisionInfo.openIntervals));
 
-  // Attach effective_blob_url based on current division status:
-  // If Closed: use old_blob_url (fallback to new_blob_url)
-  // If Open: use new_blob_url (fallback to old_blob_url)
+  // Determine whether to use old_blob_url vs new_blob_url:
+  const useOldBlob = divisionInfo.isClosed || divisionInfo.docFetchPreference === 'RETAIN_OLD';
+
   const processedRows = eligibleRows.map(r => ({
     ...r,
-    effective_blob_url: divisionInfo.isClosed
+    effective_blob_url: useOldBlob
       ? (r.old_blob_url || r.new_blob_url)
       : (r.new_blob_url || r.old_blob_url)
   }));
@@ -193,6 +202,7 @@ export async function fetchApplicantDocumentsFromAuditLogs({ applicantId, applic
   return {
     divisionStatus: divisionInfo.divisionStatus,
     isClosed: divisionInfo.isClosed,
+    docFetchPreference: divisionInfo.docFetchPreference,
     openIntervals: divisionInfo.openIntervals,
     documents: processedRows
   };

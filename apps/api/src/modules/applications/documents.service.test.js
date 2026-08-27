@@ -7,6 +7,7 @@ async function runTests() {
   const testDivisionClosed = 'TEST_DIV_QC_' + Date.now();
   const testDivisionOpen = 'TEST_DIV_BATANGAS_' + Date.now();
   const testDivisionReopened = 'TEST_DIV_REOPENED_' + Date.now();
+  const testDivisionRetainOld = 'TEST_DIV_RETAIN_' + Date.now();
   const testApplicantId = '8888888';
 
   try {
@@ -58,6 +59,16 @@ async function runTests() {
     );
 
     // =========================================================================
+    // 4. Retain Old Preference Division Setup
+    // Reopened Open vacancy with filling_up_status = 'RETAIN_OLD'
+    // =========================================================================
+    await pool.query(
+      `INSERT INTO vacancies (id, position_id, item_no, title, division, status, posting_start, posting_end, filling_up_status, created_at) VALUES 
+       ($1, $4, 'ITEM-RET1-' || $1, 'Retain Old Vacancy', $2, 'Open', $3, $5, 'RETAIN_OLD', NOW())`,
+      ['test-ret-1', testDivisionRetainOld, openStart, validPosId, openEnd]
+    );
+
+    // =========================================================================
     // Mock Audit Log Documents
     // =========================================================================
     await pool.query(
@@ -70,8 +81,6 @@ async function runTests() {
     );
 
     // --- TEST 1: Closed Division (Quezon City Division rule) ---
-    // Document 1 (2026-07-10) uploaded while Open -> Eligible, uses old_blob_url
-    // Document 2 (2026-07-25) uploaded while Closed -> Ineligible (Excluded)
     const qcPeriods = await determineDivisionPeriods(testDivisionClosed);
     if (!qcPeriods.isClosed || qcPeriods.divisionStatus !== 'Closed') {
       throw new Error('Test 1 Failed: Quezon City Division should be Closed');
@@ -112,8 +121,6 @@ async function runTests() {
     console.log('Test 2 (Open Division Fetches Eligible Open-Period Documents): PASS\n');
 
     // --- TEST 3: Reopened Division Rule ---
-    // Document 2 (uploaded 2026-07-25 while Closed) MUST STAY EXCLUDED even though division is reopened!
-    // Document 4 (uploaded 2026-08-12 during Reopened Open window) MUST BE INCLUDED.
     const reDocsResult = await fetchApplicantDocumentsFromAuditLogs({
       applicantId: testApplicantId,
       division: testDivisionReopened
@@ -131,12 +138,25 @@ async function runTests() {
     }
     console.log('Test 3 (Reopening Division Does NOT Make Closed-Period Documents Eligible): PASS\n');
 
+    // --- TEST 4: Retain Old Document Policy Preference ---
+    const retDocsResult = await fetchApplicantDocumentsFromAuditLogs({
+      applicantId: testApplicantId,
+      division: testDivisionRetainOld
+    });
+    console.log(`Test 4 Retain Old Policy Fetch: Fetched ${retDocsResult.documents.length} doc(s).`);
+
+    const retEligDoc = retDocsResult.documents.find(d => d.document_type === 'Certificate of Eligibility');
+    if (!retEligDoc || retEligDoc.effective_blob_url !== 'http://blob/elig_bat_old.pdf') {
+      throw new Error(`Test 4 Failed: Retain Old preference must force old_blob_url! Got: ${retEligDoc?.effective_blob_url}`);
+    }
+    console.log('Test 4 (Retain Old Preference Forces old_blob_url Fetching): PASS\n');
+
     console.log('=== ALL UPLOAD-TIME DIVISION PERIOD ELIGIBILITY TESTS PASSED! ===');
   } catch (err) {
     console.error('TEST ERROR:', err.message);
     process.exitCode = 1;
   } finally {
-    await pool.query(`DELETE FROM vacancies WHERE division IN ($1, $2, $3)`, [testDivisionClosed, testDivisionOpen, testDivisionReopened]);
+    await pool.query(`DELETE FROM vacancies WHERE division IN ($1, $2, $3, $4)`, [testDivisionClosed, testDivisionOpen, testDivisionReopened, testDivisionRetainOld]);
     await pool.query(`DELETE FROM document_audit_logs WHERE applicant_id = $1`, [testApplicantId]);
     await pool.end();
   }
