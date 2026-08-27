@@ -64,18 +64,23 @@ export async function determineDivisionPeriods(divisionName) {
   let openCount = 0;
   let closedCount = 0;
   let hasRetainOld = false;
+  let hasFetchNew = false;
   const openIntervals = [];
 
   for (const row of rows) {
     const statusLower = (row.status || '').toLowerCase();
+    const fillingStr = (row.filling_up_status || '').toUpperCase();
     if (statusLower === 'open') {
       openCount++;
     } else {
       closedCount++;
     }
 
-    if ((row.filling_up_status || '').includes('RETAIN_OLD')) {
+    if (fillingStr.includes('RETAIN_OLD')) {
       hasRetainOld = true;
+    }
+    if (fillingStr.includes('FETCH_NEW')) {
+      hasFetchNew = true;
     }
 
     // Determine the Open posting window for this vacancy record
@@ -100,7 +105,15 @@ export async function determineDivisionPeriods(divisionName) {
 
   const isClosed = (openCount === 0 && closedCount > 0);
   const divisionStatus = isClosed ? 'Closed' : 'Open';
-  const docFetchPreference = hasRetainOld ? 'RETAIN_OLD' : 'FETCH_NEW';
+
+  let docFetchPreference;
+  if (hasRetainOld) {
+    docFetchPreference = 'RETAIN_OLD';
+  } else if (hasFetchNew) {
+    docFetchPreference = 'FETCH_NEW';
+  } else {
+    docFetchPreference = isClosed ? 'RETAIN_OLD' : 'FETCH_NEW';
+  }
 
   return {
     divisionStatus,
@@ -186,10 +199,13 @@ export async function fetchApplicantDocumentsFromAuditLogs({ applicantId, applic
     [String(targetApplicantId)]
   );
 
-  // Filter for eligibility based on upload timestamp vs Open intervals
+  // Filter for eligibility based on upload timestamp vs Open intervals.
+  // Documents uploaded/updated while the division was Closed are ALWAYS excluded.
   const eligibleRows = rows.filter(row => isUploadedInOpenPeriod(row.uploaded_at, divisionInfo.openIntervals));
 
   // Determine whether to use old_blob_url vs new_blob_url:
+  // - If docFetchPreference === 'RETAIN_OLD' or division is Closed: Use old_blob_url.
+  // - If docFetchPreference === 'FETCH_NEW' and division is Open: Use new_blob_url.
   const useOldBlob = divisionInfo.isClosed || divisionInfo.docFetchPreference === 'RETAIN_OLD';
 
   const processedRows = eligibleRows.map(r => ({
