@@ -1081,7 +1081,7 @@ export default function VacanciesPage() {
                     <div>
                       <b style={{ display: 'block', fontSize: '14px', color: '#0F172A', fontWeight: '800', lineHeight: 1.2 }}>Fetch New Documents</b>
                       <span style={{ fontSize: '12px', color: '#64748B', fontWeight: '500', lineHeight: 1.4, display: 'block', marginTop: '3px' }}>
-                        Fetches newly updated files submitted by applicants during the reopened period (<code style={{ fontSize: '11px', background: 'rgba(0,0,0,0.04)', padding: '1px 5px', borderRadius: '4px' }}>new_blob_url</code>).
+                        Fetch the latest files uploaded or updated by applicants during the reopened posting period.
                       </span>
                     </div>
                   </div>
@@ -1117,7 +1117,7 @@ export default function VacanciesPage() {
                     <div>
                       <b style={{ display: 'block', fontSize: '14px', color: '#0F172A', fontWeight: '800', lineHeight: 1.2 }}>Retain Original Baseline Documents</b>
                       <span style={{ fontSize: '12px', color: '#64748B', fontWeight: '500', lineHeight: 1.4, display: 'block', marginTop: '3px' }}>
-                        Locks & retains original baseline files submitted from the previous closed period (<code style={{ fontSize: '11px', background: 'rgba(0,0,0,0.04)', padding: '1px 5px', borderRadius: '4px' }}>old_blob_url</code>).
+                        Lock and retain the original baseline documents submitted by applicants from the previous posting period.
                       </span>
                     </div>
                   </div>
