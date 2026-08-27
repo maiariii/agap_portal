@@ -929,7 +929,7 @@ export default function VacanciesPage() {
                           </td>
                           <td>
                             <span className={`badge ${vac.fillingUpStatus === 'FILLED' ? 'filled-status' : 'unfilled-status'}`}>
-                              {vac.fillingUpStatus || 'UNFILLED'}
+                              {vac.fillingUpStatus === 'FILLED' ? 'FILLED' : 'UNFILLED'}
                             </span>
                           </td>
                           <td style={{ textAlign: 'center' }}>

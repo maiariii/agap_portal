@@ -29,6 +29,10 @@ function formatDateOnly(d) {
 
 export function mapVacancy(row) {
   if (!row) return null;
+  const rawFilling = (row.filling_up_status || '').toUpperCase();
+  const isFilled = rawFilling.startsWith('FILLED');
+  const docFetchPreference = rawFilling.includes('RETAIN_OLD') ? 'RETAIN_OLD' : 'FETCH_NEW';
+
   return {
     id: row.id,
     positionId: row.position_id,
@@ -40,7 +44,8 @@ export function mapVacancy(row) {
     status: row.status,
     schoolLevel: row.school_level,
     schoolId: row.school_id,
-    fillingUpStatus: row.filling_up_status || 'UNFILLED',
+    fillingUpStatus: isFilled ? 'FILLED' : 'UNFILLED',
+    docFetchPreference,
     postingStart: formatDateOnly(row.posting_start),
     postingEnd: formatDateOnly(row.posting_end),
     salaryGrade: row.salary_grade,
