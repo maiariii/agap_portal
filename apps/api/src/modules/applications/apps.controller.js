@@ -677,7 +677,7 @@ export async function getApplicationDocuments(req, res) {
       );
       if (matchedAudit) {
         doc.existsInAzure = true;
-        const targetUrl = matchedAudit.effective_blob_url || (auditLogResult.isClosed ? (matchedAudit.old_blob_url || matchedAudit.new_blob_url) : (matchedAudit.new_blob_url || matchedAudit.old_blob_url));
+        const targetUrl = matchedAudit.effective_blob_url;
         if (targetUrl) {
           doc.filename = targetUrl.split('/').pop();
         }
@@ -813,34 +813,43 @@ export async function downloadApplicationDocument(req, res) {
 
     const extractBlobPath = (urlOrPath) => {
       if (!urlOrPath) return '';
-      if (urlOrPath.startsWith('http://') || urlOrPath.startsWith('https://')) {
+      const cleanUrl = String(urlOrPath).trim();
+      if (cleanUrl.startsWith('http://') || cleanUrl.startsWith('https://')) {
         try {
-          const u = new URL(urlOrPath);
-          let p = u.pathname;
+          const u = new URL(cleanUrl);
+          let p = decodeURIComponent(u.pathname);
           if (p.startsWith('/')) p = p.slice(1);
-          if (p.startsWith(AZURE_FOLDER_NAME + '/')) {
-            p = p.slice(AZURE_FOLDER_NAME.length + 1);
+          const firstSlashIdx = p.indexOf('/');
+          if (firstSlashIdx !== -1) {
+            p = p.slice(firstSlashIdx + 1);
           }
           return p;
         } catch (e) {
-          return urlOrPath;
+          return cleanUrl;
         }
       }
-      return urlOrPath;
+      return cleanUrl;
     };
 
     const findBlob = (appRow) => {
-      // 1. Check document_audit_logs via division status logic first
+      // 1. Check document_audit_logs via division status & docFetchPreference logic
       if (auditLogResult.documents && auditLogResult.documents.length > 0) {
         const mappedTypes = DOCUMENT_TYPE_MAP[key] || [];
         const matchedAudit = auditLogResult.documents.find(a => 
           mappedTypes.some(mt => mt.toLowerCase() === (a.document_type || '').toLowerCase())
         );
-        const targetUrl = matchedAudit ? (matchedAudit.effective_blob_url || (auditLogResult.isClosed ? (matchedAudit.old_blob_url || matchedAudit.new_blob_url) : (matchedAudit.new_blob_url || matchedAudit.old_blob_url))) : null;
+        const targetUrl = matchedAudit ? matchedAudit.effective_blob_url : null;
         if (targetUrl) {
           const extracted = extractBlobPath(targetUrl);
           if (extracted) {
-            const foundInAzure = allBlobs.find(b => b.name === extracted || b.name.endsWith(extracted) || extracted.endsWith(b.name));
+            const filenameOnly = extracted.split('/').pop();
+            const foundInAzure = allBlobs.find(b => 
+              b.name === extracted || 
+              b.name.toLowerCase() === extracted.toLowerCase() ||
+              b.name.endsWith(extracted) || 
+              extracted.endsWith(b.name) ||
+              b.name.endsWith(filenameOnly)
+            );
             if (foundInAzure) return foundInAzure.name;
             return extracted;
           }
