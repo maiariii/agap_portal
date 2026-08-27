@@ -1,5 +1,6 @@
 import { pool } from '../../config/db.js';
 import { getHydratedApplications } from './apps.service.js';
+import { fetchApplicantDocumentsFromAuditLogs, DOCUMENT_TYPE_MAP } from './documents.service.js';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { BlobServiceClient } from '@azure/storage-blob';
@@ -480,6 +481,8 @@ const getFolderAliasesFromKey = (k) => {
 
   if (cleanK === 'pds' || cleanK === 'personal-data-sheet') {
     folderSet.add('personal-data-sheet');
+    folderSet.add('notarized-personal-data-sheet');
+    folderSet.add('notarized_personal_data_sheet');
     folderSet.add('pds');
   }
   if (cleanK === 'work_experience' || cleanK === 'work-experience' || cleanK === 'work-experience-sheet') {
@@ -629,14 +632,22 @@ export async function getApplicationDocuments(req, res) {
   console.log(`[Azure Storage] Scoped lookup for application ID "${id}"...`);
   
   const appQuery = await pool.query(
-    `SELECT a.id as application_id, a.applicant_id, a.letter_of_intent, a.sworn_document, a.sworn_document as sworn_declaration, ap.id as applicant_table_id, ap.applicant_number, ap.code, ap.surname, ap.first_name 
+    `SELECT a.id as application_id, a.applicant_id, a.letter_of_intent, a.sworn_document, a.sworn_document as sworn_declaration, ap.id as applicant_table_id, ap.applicant_number, ap.code, ap.surname, ap.first_name, v.division 
      FROM applications a 
      JOIN applicants ap ON a.applicant_id = ap.id 
+     LEFT JOIN vacancies v ON a.job_cluster_id = v.job_cluster_id
      WHERE a.id = $1`,
     [id]
   );
   const app = appQuery.rows[0];
   const applicantCode = app ? (app.code || app.applicant_number || app.applicant_id || id) : id;
+
+  // Query audit logs using division status logic (Closed vs Open)
+  const auditLogResult = await fetchApplicantDocumentsFromAuditLogs({
+    applicantId: app?.applicant_id,
+    applicationId: id,
+    division: app?.division
+  });
 
   const documents = [
     { key: 'letter_of_intent', label: 'Letter of Intent', filename: `${applicantCode}_Letter_of_Intent.pdf`, existsInAzure: false },
@@ -657,79 +668,105 @@ export async function getApplicationDocuments(req, res) {
     { key: 'cav', label: 'Certification on the Authenticity and Veracity (CAV)', filename: `${applicantCode}_CAV.pdf`, existsInAzure: false }
   ];
 
+  // Match fetched audit log documents
+  if (auditLogResult.documents && auditLogResult.documents.length > 0) {
+    documents.forEach(doc => {
+      const mappedTypes = DOCUMENT_TYPE_MAP[doc.key] || [];
+      const matchedAudit = auditLogResult.documents.find(a => 
+        mappedTypes.some(mt => mt.toLowerCase() === (a.document_type || '').toLowerCase())
+      );
+      if (matchedAudit) {
+        doc.existsInAzure = true;
+        const targetUrl = matchedAudit.effective_blob_url || (auditLogResult.isClosed ? (matchedAudit.old_blob_url || matchedAudit.new_blob_url) : (matchedAudit.new_blob_url || matchedAudit.old_blob_url));
+        if (targetUrl) {
+          doc.filename = targetUrl.split('/').pop();
+        }
+        doc.uploadedAt = matchedAudit.uploaded_at;
+        doc.url = `/api/applications/${id}/documents/${doc.key}/download`;
+      }
+    });
+  }
+
   const containerClient = getAzureContainerClient();
 
   if (containerClient) {
-    try {
-      const azureBlobs = await getBlobsForApplicant(containerClient, app);
+    const hasUnresolvedDocs = documents.some(d => !d.existsInAzure);
+    if (hasUnresolvedDocs) {
+      try {
+        const azureBlobs = await getBlobsForApplicant(containerClient, app);
 
-      const findMatchingBlob = (appRow, docKey) => {
-        const isAppSpecific = ['letter_of_intent', 'sworn_declaration', 'sworn_document', 'cav'].includes(docKey);
-        const applicantPrefixes = getApplicantFolderPrefixes(appRow, isAppSpecific);
-        const folderAliases = getFolderAliasesFromKey(docKey);
+        const findMatchingBlob = (appRow, docKey) => {
+          const isAppSpecific = ['letter_of_intent', 'sworn_declaration', 'sworn_document', 'cav'].includes(docKey);
+          const applicantPrefixes = getApplicantFolderPrefixes(appRow, isAppSpecific);
+          const folderAliases = getFolderAliasesFromKey(docKey);
 
-        for (const appPrefix of applicantPrefixes) {
-          for (const folderAlias of folderAliases) {
-            const prefix = `${appPrefix}${folderAlias}/`.toLowerCase();
-            const matched = azureBlobs.find(b => b.nameLower.startsWith(prefix));
-            if (matched) return matched;
+          for (const appPrefix of applicantPrefixes) {
+            for (const folderAlias of folderAliases) {
+              const prefix = `${appPrefix}${folderAlias}/`.toLowerCase();
+              const matched = azureBlobs.find(b => b.nameLower.startsWith(prefix));
+              if (matched) return matched;
+            }
           }
-        }
-        for (const appPrefix of applicantPrefixes) {
-          for (const folderAlias of folderAliases) {
+          for (const appPrefix of applicantPrefixes) {
+            for (const folderAlias of folderAliases) {
+              const matched = azureBlobs.find(b => {
+                if (!b.nameLower.startsWith(appPrefix)) return false;
+                const relativeName = b.nameLower.slice(appPrefix.length);
+                const pattern = folderAlias.replace(/[-_]/g, '[-_]');
+                const regex = new RegExp(`(?:^|[/_-])${pattern}(?:$|[/._-])`, 'i');
+                return regex.test(relativeName);
+              });
+              if (matched) return matched;
+            }
+          }
+          // If app-specific doc key (LOI/Sworn Doc), check if any blob explicitly contains application ID
+          if (isAppSpecific && (appRow.id || appRow.application_id)) {
+            const appIdStr = String(appRow.application_id || appRow.id).toLowerCase();
             const matched = azureBlobs.find(b => {
-              if (!b.nameLower.startsWith(appPrefix)) return false;
-              const relativeName = b.nameLower.slice(appPrefix.length);
-              const pattern = folderAlias.replace(/[-_]/g, '[-_]');
-              const regex = new RegExp(`(?:^|[/_-])${pattern}(?:$|[/._-])`, 'i');
-              return regex.test(relativeName);
+              const nameLower = b.nameLower;
+              return folderAliases.some(alias => nameLower.includes(alias.replace(/_/g, '-')) || nameLower.includes(alias)) &&
+                     (nameLower.includes(`_${appIdStr}`) || nameLower.includes(`-${appIdStr}`));
             });
             if (matched) return matched;
           }
-        }
-        // If app-specific doc key (LOI/Sworn Doc), check if any blob explicitly contains application ID
-        if (isAppSpecific && (appRow.id || appRow.application_id)) {
-          const appIdStr = String(appRow.application_id || appRow.id).toLowerCase();
-          const matched = azureBlobs.find(b => {
-            const nameLower = b.nameLower;
-            return folderAliases.some(alias => nameLower.includes(alias.replace(/_/g, '-')) || nameLower.includes(alias)) &&
-                   (nameLower.includes(`_${appIdStr}`) || nameLower.includes(`-${appIdStr}`));
-          });
-          if (matched) return matched;
-        }
-        return null;
-      };
+          return null;
+        };
 
-      documents.forEach(doc => {
-        const isAppSpecific = ['letter_of_intent', 'sworn_declaration', 'sworn_document', 'cav'].includes(doc.key);
+        documents.forEach(doc => {
+          if (doc.existsInAzure) return; // already resolved via audit logs
 
-        if (doc.key === 'letter_of_intent' && app?.letter_of_intent) {
-          doc.existsInAzure = true;
-          doc.filename = app.letter_of_intent;
-          doc.url = `/api/applications/${id}/documents/${doc.key}/download`;
-        } else if ((doc.key === 'sworn_declaration' || doc.key === 'cav') && app?.sworn_declaration) {
-          doc.existsInAzure = true;
-          doc.filename = app.sworn_declaration;
-          doc.url = `/api/applications/${id}/documents/${doc.key}/download`;
-        } else {
-          const matchedBlob = findMatchingBlob(app, doc.key);
-          if (matchedBlob) {
+          if (doc.key === 'letter_of_intent' && app?.letter_of_intent) {
             doc.existsInAzure = true;
-            doc.filename = matchedBlob.name;
+            doc.filename = app.letter_of_intent;
             doc.url = `/api/applications/${id}/documents/${doc.key}/download`;
+          } else if ((doc.key === 'sworn_declaration' || doc.key === 'cav') && app?.sworn_declaration) {
+            doc.existsInAzure = true;
+            doc.filename = app.sworn_declaration;
+            doc.url = `/api/applications/${id}/documents/${doc.key}/download`;
+          } else {
+            const matchedBlob = findMatchingBlob(app, doc.key);
+            if (matchedBlob) {
+              doc.existsInAzure = true;
+              doc.filename = matchedBlob.name;
+              doc.url = `/api/applications/${id}/documents/${doc.key}/download`;
+            }
           }
-        }
-      });
+        });
 
-      setCachedDocList(cacheKey, documents);
-      console.log(`[Azure Storage] Resolved blobs for applicant "${applicantCode}":`, documents.filter(d => d.existsInAzure).map(d => d.key));
-    } catch (err) {
-      console.error('[Azure Listing Error in getApplicationDocuments]', err.message);
+        console.log(`[Azure Storage] Resolved missing blobs for applicant "${applicantCode}":`, documents.filter(d => d.existsInAzure).map(d => d.key));
+      } catch (err) {
+        console.error('[Azure Listing Error in getApplicationDocuments]', err.message);
+      }
     }
   }
 
+  setCachedDocList(cacheKey, documents);
+
   res.json({
     success: true,
+    divisionStatus: auditLogResult.divisionStatus,
+    isClosed: auditLogResult.isClosed,
+    cutoffDate: auditLogResult.cutoffDate,
     azureFolder: AZURE_FOLDER_NAME,
     documents
   });
@@ -756,14 +793,21 @@ export async function downloadApplicationDocument(req, res) {
 
   try {
     const appQuery = await pool.query(
-      `SELECT a.id as application_id, a.applicant_id, a.letter_of_intent, a.sworn_document, a.sworn_document as sworn_declaration, ap.id as applicant_table_id, ap.applicant_number, ap.code, ap.surname, ap.first_name 
+      `SELECT a.id as application_id, a.applicant_id, a.letter_of_intent, a.sworn_document, a.sworn_document as sworn_declaration, ap.id as applicant_table_id, ap.applicant_number, ap.code, ap.surname, ap.first_name, v.division 
        FROM applications a 
        JOIN applicants ap ON a.applicant_id = ap.id 
+       LEFT JOIN vacancies v ON a.job_cluster_id = v.job_cluster_id
        WHERE a.id = $1`,
       [id]
     );
     const app = appQuery.rows[0];
     const applicantCode = app ? (app.code || app.applicant_number || app.applicant_id || id) : id;
+
+    const auditLogResult = await fetchApplicantDocumentsFromAuditLogs({
+      applicantId: app?.applicant_id,
+      applicationId: id,
+      division: app?.division
+    });
 
     const allBlobs = await getBlobsForApplicant(containerClient, app);
 
@@ -786,6 +830,23 @@ export async function downloadApplicationDocument(req, res) {
     };
 
     const findBlob = (appRow) => {
+      // 1. Check document_audit_logs via division status logic first
+      if (auditLogResult.documents && auditLogResult.documents.length > 0) {
+        const mappedTypes = DOCUMENT_TYPE_MAP[key] || [];
+        const matchedAudit = auditLogResult.documents.find(a => 
+          mappedTypes.some(mt => mt.toLowerCase() === (a.document_type || '').toLowerCase())
+        );
+        const targetUrl = matchedAudit ? (matchedAudit.effective_blob_url || (auditLogResult.isClosed ? (matchedAudit.old_blob_url || matchedAudit.new_blob_url) : (matchedAudit.new_blob_url || matchedAudit.old_blob_url))) : null;
+        if (targetUrl) {
+          const extracted = extractBlobPath(targetUrl);
+          if (extracted) {
+            const foundInAzure = allBlobs.find(b => b.name === extracted || b.name.endsWith(extracted) || extracted.endsWith(b.name));
+            if (foundInAzure) return foundInAzure.name;
+            return extracted;
+          }
+        }
+      }
+
       const isAppSpecific = ['letter_of_intent', 'sworn_declaration', 'sworn_document', 'cav'].includes(key);
 
       if (key === 'letter_of_intent' && appRow?.letter_of_intent) {
