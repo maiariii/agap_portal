@@ -615,12 +615,20 @@ async function getBlobsForApplicant(containerClient, appRow) {
   return Array.from(blobMap.values()).sort((a, b) => (b.lastModified || 0) - (a.lastModified || 0));
 }
 
+export function clearDocListCache() {
+  docListCache.clear();
+}
+
 export async function getApplicationDocuments(req, res) {
   const { id } = req.params;
+  if (!id || id === 'undefined' || id === 'null' || id === 'invalid') {
+    return res.status(400).json({ error: 'Invalid application ID provided' });
+  }
   const AZURE_FOLDER_NAME = process.env.AZURE_FOLDER_NAME || "main-agap";
   
   const cacheKey = `docs_${id}`;
-  const cachedDocuments = getCachedDocList(cacheKey);
+  const forceRefresh = req.query.refresh === 'true' || req.query.nocache === 'true';
+  const cachedDocuments = forceRefresh ? null : getCachedDocList(cacheKey);
   if (cachedDocuments) {
     return res.json({
       success: true,
@@ -774,6 +782,9 @@ export async function getApplicationDocuments(req, res) {
 
 export async function downloadApplicationDocument(req, res) {
   const { id, key } = req.params;
+  if (!id || id === 'undefined' || id === 'null' || id === 'invalid' || !key || key === 'undefined' || key === 'invalid') {
+    return res.status(400).json({ error: 'Invalid application ID or document key provided' });
+  }
   const AZURE_FOLDER_NAME = process.env.AZURE_FOLDER_NAME || "main-agap";
   const requestedDpi = req.query.dpi || '98';
 

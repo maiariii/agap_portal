@@ -90,7 +90,7 @@ export default function AssessmentPage() {
       setAvailableDocs([]);
       setDocsLoading(true);
       console.log(`[Azure Storage] Requesting documents for applicant ID "${selectedQualApp.applicantId || 'AGAP-0001'}" in folder "staging-agap"...`);
-      apiFetch(`/api/applications/${selectedQualApp.id}/documents`)
+      apiFetch(`/api/applications/${selectedQualApp.id}/documents?refresh=true`)
         .then(data => {
           console.log(`%c[Azure Storage Fetch SUCCESS]`, 'color: green; font-weight: bold; font-size: 14px;');
           console.log('Azure Folder Name:', data.azureFolder);
@@ -1773,12 +1773,18 @@ export default function AssessmentPage() {
                                 <span style={{ fontSize: '12px' }}>Checking file attachments</span>
                               </div>
                             )}
-                            <iframe
-                              src={`${import.meta.env.VITE_API_URL || window.location.origin}/api/applications/${selectedQualApp.id}/documents/${selectedDocKey}/download?token=${localStorage.getItem('agap_token')}&dpi=98`}
-                              onLoad={() => setDocIframeLoading(false)}
-                              style={{ width: '100%', height: '550px', border: 'none', borderRadius: '0 0 12px 12px', display: docIframeLoading ? 'none' : 'block' }}
-                              title="Azure Document Viewer"
-                            />
+                            {(selectedQualApp?.id && selectedQualApp.id !== 'undefined' && selectedQualApp.id !== 'invalid' && selectedDocKey && selectedDocKey !== 'invalid') ? (
+                              <iframe
+                                src={`${import.meta.env.VITE_API_URL || window.location.origin}/api/applications/${selectedQualApp.id}/documents/${selectedDocKey}/download?token=${localStorage.getItem('agap_token')}&dpi=98`}
+                                onLoad={() => setDocIframeLoading(false)}
+                                style={{ width: '100%', height: '550px', border: 'none', borderRadius: '0 0 12px 12px', display: docIframeLoading ? 'none' : 'block' }}
+                                title="Azure Document Viewer"
+                              />
+                            ) : (
+                              <div style={{ padding: '40px', textAlign: 'center', color: '#64748B' }}>
+                                No valid document selected
+                              </div>
+                            )}
                           </div>
                         ) : (
                           <div style={{ width: '100%', display: 'flex', flexDirection: 'column', backgroundColor: 'white', border: '1px solid var(--line)', borderRadius: '12px', overflow: 'hidden' }}>

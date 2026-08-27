@@ -1,8 +1,15 @@
 import { determineDivisionPeriods, fetchApplicantDocumentsFromAuditLogs } from './documents.service.js';
 import { pool } from '../../config/db.js';
+import { runMigration } from '../../db/alter_vacancies_doc_fetch.js';
 
 async function runTests() {
   console.log('=== Running Upload-Time Division Period Eligibility Unit Tests ===\n');
+
+  try {
+    await runMigration();
+  } catch (mErr) {
+    console.warn('Migration warning:', mErr.message);
+  }
 
   const testDivisionClosed = 'TEST_DIV_QC_' + Date.now();
   const testDivisionOpen = 'TEST_DIV_BATANGAS_' + Date.now();
@@ -11,6 +18,7 @@ async function runTests() {
   const testApplicantId = '8888888';
 
   try {
+
     const posRes = await pool.query('SELECT id FROM positions LIMIT 1');
     const validPosId = posRes.rows.length > 0 ? posRes.rows[0].id : 'pos_test';
 
@@ -28,16 +36,16 @@ async function runTests() {
     );
 
     // =========================================================================
-    // 2. Open Division Setup (Batangas City example: 15 Closed, 20 Open)
+    // 2. Open Division Setup (Batangas City example: 15 Closed, 20 Open with Explicit Fetch)
     // Open window: 2026-08-01 to 2026-08-31
     // =========================================================================
     const openStart = new Date('2026-08-01T00:00:00.000Z');
     const openEnd = new Date('2026-08-31T23:59:59.000Z');
 
     await pool.query(
-      `INSERT INTO vacancies (id, position_id, item_no, title, division, status, posting_start, posting_end, created_at) VALUES 
-       ($1, $4, 'ITEM-BAT1-' || $1, 'Batangas Closed Vacancy', $2, 'Closed', $3, $5, NOW()),
-       ($6, $4, 'ITEM-BAT2-' || $6, 'Batangas Open Vacancy', $2, 'Open', $3, $5, NOW())`,
+      `INSERT INTO vacancies (id, position_id, item_no, title, division, status, posting_start, posting_end, doc_fetch_preference, has_fetched_docs, created_at) VALUES 
+       ($1, $4, 'ITEM-BAT1-' || $1, 'Batangas Closed Vacancy', $2, 'Closed', $3, $5, 'RETAIN_OLD', FALSE, NOW()),
+       ($6, $4, 'ITEM-BAT2-' || $6, 'Batangas Open Vacancy', $2, 'Open', $3, $5, 'FETCH_NEW', TRUE, NOW())`,
       ['test-bat-1', testDivisionOpen, openStart, validPosId, openEnd, 'test-bat-2']
     );
 
@@ -52,18 +60,18 @@ async function runTests() {
     const reopenedEnd2 = new Date('2026-08-25T23:59:59.000Z');
 
     await pool.query(
-      `INSERT INTO vacancies (id, position_id, item_no, title, division, status, posting_start, posting_end, created_at) VALUES 
-       ($1, $4, 'ITEM-RE1-' || $1, 'Reopened Vacancy 1', $2, 'Closed', $3, $5, NOW()),
-       ($6, $4, 'ITEM-RE2-' || $6, 'Reopened Vacancy 2', $2, 'Open', $7, $8, NOW())`,
+      `INSERT INTO vacancies (id, position_id, item_no, title, division, status, posting_start, posting_end, doc_fetch_preference, has_fetched_docs, created_at) VALUES 
+       ($1, $4, 'ITEM-RE1-' || $1, 'Reopened Vacancy 1', $2, 'Closed', $3, $5, 'RETAIN_OLD', FALSE, NOW()),
+       ($6, $4, 'ITEM-RE2-' || $6, 'Reopened Vacancy 2', $2, 'Open', $7, $8, 'FETCH_NEW', TRUE, NOW())`,
       ['test-re-1', testDivisionReopened, reopenedStart1, validPosId, reopenedEnd1, 'test-re-2', reopenedStart2, reopenedEnd2]
     );
 
     // =========================================================================
     // 4. Retain Old Preference Division Setup
-    // Reopened Open vacancy with filling_up_status = 'RETAIN_OLD'
+    // Reopened Open vacancy with doc_fetch_preference = 'RETAIN_OLD'
     // =========================================================================
     await pool.query(
-      `INSERT INTO vacancies (id, position_id, item_no, title, division, status, posting_start, posting_end, filling_up_status, created_at) VALUES 
+      `INSERT INTO vacancies (id, position_id, item_no, title, division, status, posting_start, posting_end, doc_fetch_preference, created_at) VALUES 
        ($1, $4, 'ITEM-RET1-' || $1, 'Retain Old Vacancy', $2, 'Open', $3, $5, 'RETAIN_OLD', NOW())`,
       ['test-ret-1', testDivisionRetainOld, openStart, validPosId, openEnd]
     );

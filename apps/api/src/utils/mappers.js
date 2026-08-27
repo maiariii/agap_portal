@@ -31,7 +31,12 @@ export function mapVacancy(row) {
   if (!row) return null;
   const rawFilling = (row.filling_up_status || '').toUpperCase();
   const isFilled = rawFilling.startsWith('FILLED');
-  const docFetchPreference = rawFilling.includes('RETAIN_OLD') ? 'RETAIN_OLD' : 'FETCH_NEW';
+  const docFetchPreference = row.doc_fetch_preference 
+    ? row.doc_fetch_preference 
+    : (rawFilling.includes('RETAIN_OLD') ? 'RETAIN_OLD' : (rawFilling.includes('FETCH_NEW') ? 'FETCH_NEW' : 'RETAIN_OLD'));
+  const hasFetchedDocs = row.has_fetched_docs !== undefined && row.has_fetched_docs !== null
+    ? Boolean(row.has_fetched_docs)
+    : (docFetchPreference === 'FETCH_NEW');
 
   return {
     id: row.id,
@@ -46,6 +51,8 @@ export function mapVacancy(row) {
     schoolId: row.school_id,
     fillingUpStatus: isFilled ? 'FILLED' : 'UNFILLED',
     docFetchPreference,
+    hasFetchedDocs,
+    docFetchedAt: row.doc_fetched_at ? new Date(row.doc_fetched_at) : null,
     postingStart: formatDateOnly(row.posting_start),
     postingEnd: formatDateOnly(row.posting_end),
     salaryGrade: row.salary_grade,
@@ -54,3 +61,4 @@ export function mapVacancy(row) {
     updatedAt: new Date(row.updated_at)
   };
 }
+

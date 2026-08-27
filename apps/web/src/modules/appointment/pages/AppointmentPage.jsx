@@ -63,7 +63,7 @@ export default function AppointmentPage() {
     if (selectedDocApp?.id) {
       setAvailableDocs([]);
       setDocsLoading(true);
-      apiFetch(`/api/applications/${selectedDocApp.id}/documents`)
+      apiFetch(`/api/applications/${selectedDocApp.id}/documents?refresh=true`)
         .then(data => {
           setAvailableDocs(data.documents || []);
         })
@@ -876,12 +876,18 @@ export default function AppointmentPage() {
                                 <span style={{ fontSize: '12px' }}>Checking file attachments</span>
                               </div>
                             )}
-                            <iframe
-                              src={`${import.meta.env.VITE_API_URL || window.location.origin}/api/applications/${selectedDocApp.id}/documents/${selectedDocKey}/download?token=${localStorage.getItem('agap_token')}&dpi=98`}
-                              onLoad={() => setDocIframeLoading(false)}
-                              style={{ width: '100%', height: '550px', border: 'none', borderRadius: '0 0 12px 12px', display: docIframeLoading ? 'none' : 'block' }}
-                              title="Azure Document Viewer"
-                            />
+                            {(selectedDocApp?.id && selectedDocApp.id !== 'undefined' && selectedDocApp.id !== 'invalid' && selectedDocKey && selectedDocKey !== 'invalid') ? (
+                              <iframe
+                                src={`${import.meta.env.VITE_API_URL || window.location.origin}/api/applications/${selectedDocApp.id}/documents/${selectedDocKey}/download?token=${localStorage.getItem('agap_token')}&dpi=98`}
+                                onLoad={() => setDocIframeLoading(false)}
+                                style={{ width: '100%', height: '550px', border: 'none', borderRadius: '0 0 12px 12px', display: docIframeLoading ? 'none' : 'block' }}
+                                title="Azure Document Viewer"
+                              />
+                            ) : (
+                              <div style={{ padding: '40px', textAlign: 'center', color: '#64748B' }}>
+                                No valid document selected
+                              </div>
+                            )}
                           </div>
                         ) : (
                           <div style={{ width: '100%', display: 'flex', flexDirection: 'column', backgroundColor: 'white', border: '1px solid var(--line)', borderRadius: '12px', overflow: 'hidden' }}>

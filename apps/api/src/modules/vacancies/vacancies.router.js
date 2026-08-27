@@ -3,6 +3,7 @@ import {
   getVacancies,
   createVacancy,
   toggleVacancyStatus,
+  fetchVacancyDocuments,
   scanNosca,
   importNosca,
   autocompleteSchools,
@@ -16,8 +17,10 @@ router.get('/', authenticateToken, getVacancies);
 router.get('/schools/autocomplete', authenticateToken, autocompleteSchools);
 router.post('/', authenticateToken, createVacancy);
 router.put('/:id', authenticateToken, toggleVacancyStatus);
+router.post('/:id/fetch-documents', authenticateToken, fetchVacancyDocuments);
 router.post('/scan-nosca', authenticateToken, scanNosca);
 router.post('/import-nosca', authenticateToken, importNosca);
 router.delete('/:id', authenticateToken, deleteVacancy);
 
 export default router;
+

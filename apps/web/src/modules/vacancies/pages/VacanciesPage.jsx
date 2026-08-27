@@ -389,7 +389,6 @@ export default function VacanciesPage() {
 
     if (postingStatus !== 'Open for Application') {
       setCalVacancy(vac);
-      setCalDocPolicy('FETCH_NEW');
       const initStart = vac.postingStart ? vac.postingStart.slice(0, 10) : new Date().toISOString().slice(0, 10);
       setCalStart(initStart);
       setCalEnd(vac.postingEnd ? vac.postingEnd.slice(0, 10) : '');
@@ -398,11 +397,15 @@ export default function VacanciesPage() {
       setCalYear(initDate.getFullYear());
       setCalMonth(initDate.getMonth());
 
-      if (statusLower === 'closed') {
-        // Step 1: Open Document Policy Modal FIRST for closed vacancies
+      const hasFetched = vac.hasFetchedDocs || vac.docFetchPreference === 'FETCH_NEW';
+
+      if (statusLower === 'closed' && hasFetched) {
+        // Reopen Decision Modal (Retain vs Fetch New)
+        setCalDocPolicy('RETAIN_OLD');
         setShowDocPolicyModal(true);
       } else {
-        // Step 2: Open Calendar Schedule Modal directly for for_publication
+        // Direct schedule modal (defaults to FETCH_NEW for open vacancies)
+        setCalDocPolicy('FETCH_NEW');
         setShowCalendar(true);
       }
     } else {
@@ -504,6 +507,7 @@ export default function VacanciesPage() {
           docFetchPreference: isClosedStatus ? calDocPolicy : 'FETCH_NEW'
         })
       });
+
       setShowCalendar(false);
       setToast({ message: 'Vacancy posting opened successfully!', type: 'success' });
       loadAllData();
@@ -511,6 +515,7 @@ export default function VacanciesPage() {
       setToast({ message: e.message, type: 'error' });
     }
   };
+
 
   const handleScanNOSCA = () => {
     document.getElementById('nosca-file-input')?.click();

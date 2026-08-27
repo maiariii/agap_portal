@@ -52,7 +52,11 @@ export default function FullScreenDocViewer({
   const isPdf = filename.toLowerCase().endsWith('.pdf');
   const token = localStorage.getItem('agap_token');
   const apiHost = import.meta.env.VITE_API_URL || window.location.origin;
-  const documentUrl = `${apiHost}/api/applications/${applicationId}/documents/${selectedDocKey}/download?token=${token}&dpi=98`;
+  const isValidApp = applicationId && applicationId !== 'undefined' && applicationId !== 'null' && applicationId !== 'invalid';
+  const isValidKey = selectedDocKey && selectedDocKey !== 'undefined' && selectedDocKey !== 'invalid';
+  const documentUrl = (isValidApp && isValidKey) 
+    ? `${apiHost}/api/applications/${applicationId}/documents/${selectedDocKey}/download?token=${token}&dpi=98`
+    : '';
 
   const docList = DOC_REQUIREMENTS.length > 0 
     ? DOC_REQUIREMENTS 
@@ -240,12 +244,18 @@ export default function FullScreenDocViewer({
                   <b style={{ fontSize: '15px', color: '#F8FAFC' }}>Loading Document in Full Screen...</b>
                 </div>
               )}
-              <iframe
-                src={documentUrl}
-                onLoad={() => setIframeLoading(false)}
-                style={{ width: '100%', height: '100%', border: 'none', display: iframeLoading ? 'none' : 'block' }}
-                title="Full Screen Document Viewer"
-              />
+              {documentUrl ? (
+                <iframe
+                  src={documentUrl}
+                  onLoad={() => setIframeLoading(false)}
+                  style={{ width: '100%', height: '100%', border: 'none', display: iframeLoading ? 'none' : 'block' }}
+                  title="Full Screen Document Viewer"
+                />
+              ) : (
+                <div style={{ color: '#94A3B8', textAlign: 'center', padding: '40px' }}>
+                  No valid document selection available
+                </div>
+              )}
             </div>
           ) : (
             <div style={{ width: '100%', height: '100%', padding: '32px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#F8FAFC' }}>

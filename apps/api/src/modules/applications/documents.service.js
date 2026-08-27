@@ -44,7 +44,7 @@ export async function determineDivisionPeriods(divisionName) {
   }
 
   const { rows } = await pool.query(
-    `SELECT id, status, posting_start, posting_end, created_at, updated_at, filling_up_status 
+    `SELECT id, status, posting_start, posting_end, created_at, updated_at, filling_up_status, doc_fetch_preference, has_fetched_docs 
      FROM vacancies 
      WHERE UPPER(division) = UPPER($1)`,
     [divisionName.trim()]
@@ -70,16 +70,17 @@ export async function determineDivisionPeriods(divisionName) {
   for (const row of rows) {
     const statusLower = (row.status || '').toLowerCase();
     const fillingStr = (row.filling_up_status || '').toUpperCase();
+    const prefStr = (row.doc_fetch_preference || '').toUpperCase();
     if (statusLower === 'open') {
       openCount++;
     } else {
       closedCount++;
     }
 
-    if (fillingStr.includes('RETAIN_OLD')) {
+    if (prefStr === 'RETAIN_OLD' || fillingStr.includes('RETAIN_OLD')) {
       hasRetainOld = true;
     }
-    if (fillingStr.includes('FETCH_NEW')) {
+    if (prefStr === 'FETCH_NEW' || fillingStr.includes('FETCH_NEW')) {
       hasFetchNew = true;
     }
 
@@ -107,12 +108,12 @@ export async function determineDivisionPeriods(divisionName) {
   const divisionStatus = isClosed ? 'Closed' : 'Open';
 
   let docFetchPreference;
-  if (hasRetainOld) {
+  if (isClosed) {
     docFetchPreference = 'RETAIN_OLD';
-  } else if (hasFetchNew) {
-    docFetchPreference = 'FETCH_NEW';
+  } else if (hasRetainOld && !hasFetchNew) {
+    docFetchPreference = 'RETAIN_OLD';
   } else {
-    docFetchPreference = isClosed ? 'RETAIN_OLD' : 'FETCH_NEW';
+    docFetchPreference = 'FETCH_NEW';
   }
 
   return {
@@ -200,13 +201,18 @@ export async function fetchApplicantDocumentsFromAuditLogs({ applicantId, applic
   );
 
   // Filter for eligibility based on upload timestamp vs Open intervals.
-  // Documents uploaded/updated while the division was Closed are ALWAYS excluded.
-  const eligibleRows = rows.filter(row => isUploadedInOpenPeriod(row.uploaded_at, divisionInfo.openIntervals));
+  // Documents uploaded/updated while the division was Closed are excluded by default if openIntervals exist,
+  // but if strict interval filtering yields 0 rows and docFetchPreference === 'FETCH_NEW' (or division is Open),
+  // fallback to all applicant rows so valid uploaded documents remain accessible.
+  const strictEligibleRows = rows.filter(row => isUploadedInOpenPeriod(row.uploaded_at, divisionInfo.openIntervals));
+  const eligibleRows = (strictEligibleRows.length === 0 && rows.length > 0 && (divisionInfo.docFetchPreference === 'FETCH_NEW' || !divisionInfo.isClosed))
+    ? rows
+    : strictEligibleRows;
 
   // Determine whether to use old_blob_url vs new_blob_url:
-  // - If docFetchPreference === 'RETAIN_OLD' or division is Closed: Use old_blob_url.
-  // - If docFetchPreference === 'FETCH_NEW' and division is Open: Use new_blob_url.
-  const useOldBlob = divisionInfo.isClosed || divisionInfo.docFetchPreference === 'RETAIN_OLD';
+  // - If docFetchPreference === 'RETAIN_OLD' (default for unopened closed vacancies): Use old_blob_url.
+  // - If docFetchPreference === 'FETCH_NEW' (set when user selected Fetch New Documents): Use new_blob_url, which remains active even after closing again.
+  const useOldBlob = divisionInfo.docFetchPreference === 'RETAIN_OLD';
 
   const processedRows = eligibleRows.map(r => ({
     ...r,

@@ -401,7 +401,7 @@ export default function ApplicationsPage() {
     setShowReviewDocsVault(false);
     if (appRow.id) {
       setDocsLoading(true);
-      apiFetch(`/api/applications/${appRow.id}/documents`)
+      apiFetch(`/api/applications/${appRow.id}/documents?refresh=true`)
         .then(data => {
           setAvailableDocs(data.documents || []);
         })
@@ -1545,12 +1545,18 @@ export default function ApplicationsPage() {
                                 <span style={{ fontSize: '12px' }}>Checking file attachments</span>
                               </div>
                             )}
-                            <iframe
-                              src={`${import.meta.env.VITE_API_URL || window.location.origin}/api/applications/${reviewApp.id}/documents/${selectedDocKey}/download?token=${localStorage.getItem('agap_token')}&dpi=98`}
-                              onLoad={() => setDocIframeLoading(false)}
-                              style={{ width: '100%', height: '600px', border: 'none', borderRadius: '0 0 12px 12px', display: docIframeLoading ? 'none' : 'block' }}
-                              title="Azure Document Viewer"
-                            />
+                            {(reviewApp?.id && reviewApp.id !== 'undefined' && reviewApp.id !== 'invalid' && selectedDocKey && selectedDocKey !== 'invalid') ? (
+                              <iframe
+                                src={`${import.meta.env.VITE_API_URL || window.location.origin}/api/applications/${reviewApp.id}/documents/${selectedDocKey}/download?token=${localStorage.getItem('agap_token')}&dpi=98`}
+                                onLoad={() => setDocIframeLoading(false)}
+                                style={{ width: '100%', height: '600px', border: 'none', borderRadius: '0 0 12px 12px', display: docIframeLoading ? 'none' : 'block' }}
+                                title="Azure Document Viewer"
+                              />
+                            ) : (
+                              <div style={{ padding: '40px', textAlign: 'center', color: '#64748B' }}>
+                                No valid document selected
+                              </div>
+                            )}
                           </div>
                         ) : (
                           <div style={{ width: '100%', display: 'flex', flexDirection: 'column', backgroundColor: 'white', border: '1px solid var(--line)', borderRadius: '12px', overflow: 'hidden' }}>

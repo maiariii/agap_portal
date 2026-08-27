@@ -1,5 +1,6 @@
 import { pool } from '../../config/db.js';
 import { mapPosition, mapVacancy } from '../../utils/mappers.js';
+import { clearDocListCache } from '../applications/apps.controller.js';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
@@ -101,6 +102,9 @@ export async function getVacancies(req, res) {
         v.school_level,
         v.school_id,
         v.filling_up_status,
+        v.doc_fetch_preference,
+        v.has_fetched_docs,
+        v.doc_fetched_at,
         v.posting_start,
         v.posting_end,
         v.salary_grade,
@@ -199,6 +203,13 @@ export async function toggleVacancyStatus(req, res) {
     if (status !== undefined) {
       fields.push(`status = $${idx++}`);
       values.push(status);
+
+      if (status === 'open' && docFetchPreference === undefined) {
+        fields.push(`doc_fetch_preference = $${idx++}`);
+        values.push('FETCH_NEW');
+        fields.push(`has_fetched_docs = $${idx++}`);
+        values.push(true);
+      }
     }
     if (postingStart !== undefined) {
       fields.push(`posting_start = $${idx++}`);
@@ -209,8 +220,13 @@ export async function toggleVacancyStatus(req, res) {
       values.push(parseOrFormatEndDateParam(postingEnd));
     }
     if (docFetchPreference !== undefined) {
-      fields.push(`filling_up_status = $${idx++}`);
-      values.push(docFetchPreference === 'RETAIN_OLD' ? 'RETAIN_OLD' : 'FETCH_NEW');
+      const prefValue = docFetchPreference === 'RETAIN_OLD' ? 'RETAIN_OLD' : 'FETCH_NEW';
+      fields.push(`doc_fetch_preference = $${idx++}`);
+      values.push(prefValue);
+      if (prefValue === 'FETCH_NEW') {
+        fields.push(`has_fetched_docs = $${idx++}`);
+        values.push(true);
+      }
     }
 
     if (fields.length === 0) {
@@ -221,11 +237,61 @@ export async function toggleVacancyStatus(req, res) {
     values.push(id);
     const query = `UPDATE vacancies SET ${fields.join(', ')}, updated_at = NOW() WHERE id = $${idx} RETURNING *`;
     const { rows } = await pool.query(query, values);
+    clearDocListCache();
     res.json(mapVacancy(rows[0]));
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 }
+
+export async function fetchVacancyDocuments(req, res) {
+  const { id } = req.params;
+  try {
+    const vacRes = await pool.query('SELECT * FROM vacancies WHERE id = $1', [id]);
+    if (vacRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Vacancy not found' });
+    }
+    const vac = vacRes.rows[0];
+
+    // Requirement 1 & 2 Guard: Cannot fetch documents for a closed vacancy
+    if (vac.status === 'closed') {
+      return res.status(400).json({ 
+        error: 'Automatic or explicit document fetching cannot run while vacancy status is closed. Please open the vacancy first.' 
+      });
+    }
+
+    const jobClusterId = vac.job_cluster_id;
+
+    // Requirement 2: Explicit user action fetches documents for all applications in job cluster
+    if (jobClusterId) {
+      await pool.query(
+        `UPDATE vacancies 
+         SET doc_fetch_preference = 'FETCH_NEW', has_fetched_docs = TRUE, doc_fetched_at = NOW(), updated_at = NOW() 
+         WHERE job_cluster_id = $1`,
+        [jobClusterId]
+      );
+    } else {
+      await pool.query(
+        `UPDATE vacancies 
+         SET doc_fetch_preference = 'FETCH_NEW', has_fetched_docs = TRUE, doc_fetched_at = NOW(), updated_at = NOW() 
+         WHERE id = $1`,
+        [id]
+      );
+    }
+
+    clearDocListCache();
+
+    const updatedRes = await pool.query('SELECT * FROM vacancies WHERE id = $1', [id]);
+    res.json({
+      success: true,
+      message: 'Latest documents fetched successfully for the job cluster.',
+      vacancy: mapVacancy(updatedRes.rows[0])
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+}
+
 
 export async function scanNosca(req, res) {
   const { fileData, fileName } = req.body;
