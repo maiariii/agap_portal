@@ -226,6 +226,11 @@ export async function toggleVacancyStatus(req, res) {
       if (prefValue === 'FETCH_NEW') {
         fields.push(`has_fetched_docs = $${idx++}`);
         values.push(true);
+        fields.push(`doc_fetched_at = $${idx++}`);
+        values.push(new Date());
+      } else {
+        fields.push(`has_fetched_docs = $${idx++}`);
+        values.push(false);
       }
     }
 

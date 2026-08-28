@@ -397,17 +397,9 @@ export default function VacanciesPage() {
       setCalYear(initDate.getFullYear());
       setCalMonth(initDate.getMonth());
 
-      const hasFetched = vac.hasFetchedDocs || vac.docFetchPreference === 'FETCH_NEW';
-
-      if (statusLower === 'closed' && hasFetched) {
-        // Reopen Decision Modal (Retain vs Fetch New)
-        setCalDocPolicy('RETAIN_OLD');
-        setShowDocPolicyModal(true);
-      } else {
-        // Direct schedule modal (defaults to FETCH_NEW for open vacancies)
-        setCalDocPolicy('FETCH_NEW');
-        setShowCalendar(true);
-      }
+      // Reopening / Posting Decision Modal (Option A: Fetch Latest Document vs Option B: Retain Current Files)
+      setCalDocPolicy(vac.docFetchPreference || 'FETCH_NEW');
+      setShowDocPolicyModal(true);
     } else {
       setCloseWarningVac(vac);
       setShowCloseWarning(true);
@@ -504,7 +496,7 @@ export default function VacanciesPage() {
           status: 'open',
           postingStart: calStart,
           postingEnd: calEnd,
-          docFetchPreference: isClosedStatus ? calDocPolicy : 'FETCH_NEW'
+          docFetchPreference: calDocPolicy || 'FETCH_NEW'
         })
       });
 
@@ -1084,9 +1076,9 @@ export default function VacanciesPage() {
                       🟢
                     </div>
                     <div>
-                      <b style={{ display: 'block', fontSize: '14px', color: '#0F172A', fontWeight: '800', lineHeight: 1.2 }}>Fetch New Documents</b>
+                      <b style={{ display: 'block', fontSize: '14px', color: '#0F172A', fontWeight: '800', lineHeight: 1.2 }}>Option A — Fetch New Documents</b>
                       <span style={{ fontSize: '12px', color: '#64748B', fontWeight: '500', lineHeight: 1.4, display: 'block', marginTop: '3px' }}>
-                        Fetch the latest files uploaded or updated by applicants during the reopened posting period.
+                        Fetch the applicant's latest documents from new uploads. These newly fetched documents will become the current documents and remain retained even if the item is closed again.
                       </span>
                     </div>
                   </div>
@@ -1120,9 +1112,9 @@ export default function VacanciesPage() {
                       🔒
                     </div>
                     <div>
-                      <b style={{ display: 'block', fontSize: '14px', color: '#0F172A', fontWeight: '800', lineHeight: 1.2 }}>Retain Original Baseline Documents</b>
+                      <b style={{ display: 'block', fontSize: '14px', color: '#0F172A', fontWeight: '800', lineHeight: 1.2 }}>Option B — Retain Current Files</b>
                       <span style={{ fontSize: '12px', color: '#64748B', fontWeight: '500', lineHeight: 1.4, display: 'block', marginTop: '3px' }}>
-                        Lock and retain the original baseline documents submitted by applicants from the previous posting period.
+                        Do not fetch from new uploads. Keep the currently stored documents unchanged without importing newer versions.
                       </span>
                     </div>
                   </div>

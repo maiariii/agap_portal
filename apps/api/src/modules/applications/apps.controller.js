@@ -640,10 +640,10 @@ export async function getApplicationDocuments(req, res) {
   console.log(`[Azure Storage] Scoped lookup for application ID "${id}"...`);
   
   const appQuery = await pool.query(
-    `SELECT a.id as application_id, a.applicant_id, a.letter_of_intent, a.sworn_document, a.sworn_document as sworn_declaration, ap.id as applicant_table_id, ap.applicant_number, ap.code, ap.surname, ap.first_name, v.division 
+    `SELECT a.id as application_id, a.applicant_id, a.job_cluster_id, a.documents as app_documents, a.letter_of_intent, a.sworn_document, a.sworn_document as sworn_declaration, ap.id as applicant_table_id, ap.applicant_number, ap.code, ap.surname, ap.first_name, ap.other_information, v.id as vacancy_id, v.division, v.status as vacancy_status, v.doc_fetch_preference, v.has_fetched_docs 
      FROM applications a 
      JOIN applicants ap ON a.applicant_id = ap.id 
-     LEFT JOIN vacancies v ON a.job_cluster_id = v.job_cluster_id
+     LEFT JOIN vacancies v ON (a.job_cluster_id IS NOT NULL AND a.job_cluster_id = v.job_cluster_id)
      WHERE a.id = $1`,
     [id]
   );
@@ -654,6 +654,8 @@ export async function getApplicationDocuments(req, res) {
   const auditLogResult = await fetchApplicantDocumentsFromAuditLogs({
     applicantId: app?.applicant_id,
     applicationId: id,
+    vacancyId: app?.vacancy_id,
+    jobClusterId: app?.job_cluster_id,
     division: app?.division
   });
 
@@ -676,7 +678,7 @@ export async function getApplicationDocuments(req, res) {
     { key: 'cav', label: 'Certification on the Authenticity and Veracity (CAV)', filename: `${applicantCode}_CAV.pdf`, existsInAzure: false }
   ];
 
-  // Match fetched audit log documents
+  // 1. Match from document_audit_logs first
   if (auditLogResult.documents && auditLogResult.documents.length > 0) {
     documents.forEach(doc => {
       const mappedTypes = DOCUMENT_TYPE_MAP[doc.key] || [];
@@ -685,15 +687,58 @@ export async function getApplicationDocuments(req, res) {
       );
       if (matchedAudit) {
         doc.existsInAzure = true;
-        const targetUrl = matchedAudit.effective_blob_url;
+        const targetUrl = matchedAudit.effective_blob_url || matchedAudit.current_blob_url;
         if (targetUrl) {
           doc.filename = targetUrl.split('/').pop();
         }
         doc.uploadedAt = matchedAudit.uploaded_at;
+        doc.currentBlobUrl = matchedAudit.current_blob_url;
+        doc.latestBlobUrl = matchedAudit.latest_blob_url;
+        doc.effectiveBlobUrl = matchedAudit.effective_blob_url;
+        doc.isLatest = matchedAudit.is_latest;
+        doc.oldBlobUrl = matchedAudit.old_blob_url;
+        doc.newBlobUrl = matchedAudit.new_blob_url;
         doc.url = `/api/applications/${id}/documents/${doc.key}/download`;
       }
     });
   }
+
+  // 2. Resolve baseline documents from applicant's other_information.documents or application.documents
+  const otherDocs = app?.other_information?.documents || {};
+  let parsedAppDocs = {};
+  if (app?.app_documents) {
+    try {
+      parsedAppDocs = typeof app.app_documents === 'string' ? JSON.parse(app.app_documents) : app.app_documents;
+    } catch (e) {}
+  }
+
+  documents.forEach(doc => {
+    if (doc.existsInAzure) return;
+
+    const mappedTypes = DOCUMENT_TYPE_MAP[doc.key] || [doc.label];
+    let baselineUrl = null;
+
+    for (const mt of mappedTypes) {
+      if (otherDocs[mt]) {
+        baselineUrl = otherDocs[mt];
+        break;
+      }
+      if (parsedAppDocs[mt] || parsedAppDocs[doc.key]) {
+        baselineUrl = parsedAppDocs[mt] || parsedAppDocs[doc.key];
+        break;
+      }
+    }
+
+    if (baselineUrl && typeof baselineUrl === 'string') {
+      doc.existsInAzure = true;
+      doc.filename = baselineUrl.split('/').pop();
+      doc.currentBlobUrl = baselineUrl;
+      doc.latestBlobUrl = baselineUrl;
+      doc.effectiveBlobUrl = baselineUrl;
+      doc.isLatest = true;
+      doc.url = `/api/applications/${id}/documents/${doc.key}/download`;
+    }
+  });
 
   const containerClient = getAzureContainerClient();
 
@@ -741,7 +786,7 @@ export async function getApplicationDocuments(req, res) {
         };
 
         documents.forEach(doc => {
-          if (doc.existsInAzure) return; // already resolved via audit logs
+          if (doc.existsInAzure) return; // already resolved
 
           if (doc.key === 'letter_of_intent' && app?.letter_of_intent) {
             doc.existsInAzure = true;
@@ -804,10 +849,10 @@ export async function downloadApplicationDocument(req, res) {
 
   try {
     const appQuery = await pool.query(
-      `SELECT a.id as application_id, a.applicant_id, a.letter_of_intent, a.sworn_document, a.sworn_document as sworn_declaration, ap.id as applicant_table_id, ap.applicant_number, ap.code, ap.surname, ap.first_name, v.division 
+      `SELECT a.id as application_id, a.applicant_id, a.job_cluster_id, a.documents as app_documents, a.letter_of_intent, a.sworn_document, a.sworn_document as sworn_declaration, ap.id as applicant_table_id, ap.applicant_number, ap.code, ap.surname, ap.first_name, ap.other_information, v.id as vacancy_id, v.division, v.status as vacancy_status, v.doc_fetch_preference, v.has_fetched_docs 
        FROM applications a 
        JOIN applicants ap ON a.applicant_id = ap.id 
-       LEFT JOIN vacancies v ON a.job_cluster_id = v.job_cluster_id
+       LEFT JOIN vacancies v ON (a.job_cluster_id IS NOT NULL AND a.job_cluster_id = v.job_cluster_id)
        WHERE a.id = $1`,
       [id]
     );
@@ -817,6 +862,8 @@ export async function downloadApplicationDocument(req, res) {
     const auditLogResult = await fetchApplicantDocumentsFromAuditLogs({
       applicantId: app?.applicant_id,
       applicationId: id,
+      vacancyId: app?.vacancy_id,
+      jobClusterId: app?.job_cluster_id,
       division: app?.division
     });
 
@@ -849,9 +896,38 @@ export async function downloadApplicationDocument(req, res) {
         const matchedAudit = auditLogResult.documents.find(a => 
           mappedTypes.some(mt => mt.toLowerCase() === (a.document_type || '').toLowerCase())
         );
-        const targetUrl = matchedAudit ? matchedAudit.effective_blob_url : null;
+        const targetUrl = matchedAudit ? (matchedAudit.effective_blob_url || matchedAudit.current_blob_url) : null;
         if (targetUrl) {
           const extracted = extractBlobPath(targetUrl);
+          if (extracted) {
+            const filenameOnly = extracted.split('/').pop();
+            const foundInAzure = allBlobs.find(b => 
+              b.name === extracted || 
+              b.name.toLowerCase() === extracted.toLowerCase() ||
+              b.name.endsWith(extracted) || 
+              extracted.endsWith(b.name) ||
+              b.name.endsWith(filenameOnly)
+            );
+            if (foundInAzure) return foundInAzure.name;
+            return extracted;
+          }
+        }
+      }
+
+      // 2. Check baseline documents from applicant other_information or app documents
+      const otherDocs = appRow?.other_information?.documents || {};
+      let parsedAppDocs = {};
+      if (appRow?.app_documents) {
+        try {
+          parsedAppDocs = typeof appRow.app_documents === 'string' ? JSON.parse(appRow.app_documents) : appRow.app_documents;
+        } catch (e) {}
+      }
+
+      const mappedTypes = DOCUMENT_TYPE_MAP[key] || [key];
+      for (const mt of mappedTypes) {
+        const baselineUrl = otherDocs[mt] || parsedAppDocs[mt] || parsedAppDocs[key];
+        if (baselineUrl && typeof baselineUrl === 'string') {
+          const extracted = extractBlobPath(baselineUrl);
           if (extracted) {
             const filenameOnly = extracted.split('/').pop();
             const foundInAzure = allBlobs.find(b => 

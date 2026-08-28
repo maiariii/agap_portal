@@ -18,11 +18,11 @@ export async function runMigration() {
       ALTER TABLE vacancies ADD COLUMN IF NOT EXISTS doc_fetched_at TIMESTAMPTZ;
     `);
 
-    // Migrate existing vacancies that have filling_up_status = 'FETCH_NEW'
+    // Migrate existing vacancies that have filling_up_status = 'FETCH_NEW' or are open
     await client.query(`
       UPDATE vacancies 
       SET has_fetched_docs = TRUE, doc_fetch_preference = 'FETCH_NEW'
-      WHERE filling_up_status LIKE '%FETCH_NEW%' OR doc_fetch_preference = 'FETCH_NEW';
+      WHERE LOWER(status) = 'open' OR filling_up_status LIKE '%FETCH_NEW%' OR doc_fetch_preference = 'FETCH_NEW';
     `);
 
     await client.query('COMMIT');
