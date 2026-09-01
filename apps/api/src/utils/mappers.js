@@ -31,12 +31,9 @@ export function mapVacancy(row) {
   if (!row) return null;
   const rawFilling = (row.filling_up_status || '').toUpperCase();
   const isFilled = rawFilling.startsWith('FILLED');
-  const docFetchPreference = row.doc_fetch_preference 
-    ? row.doc_fetch_preference 
-    : (rawFilling.includes('RETAIN_OLD') ? 'RETAIN_OLD' : (rawFilling.includes('FETCH_NEW') ? 'FETCH_NEW' : 'RETAIN_OLD'));
-  const hasFetchedDocs = row.has_fetched_docs !== undefined && row.has_fetched_docs !== null
-    ? Boolean(row.has_fetched_docs)
-    : (docFetchPreference === 'FETCH_NEW');
+  const isClosed = (row.status || '').toLowerCase() === 'closed';
+  const docFetchPreference = isClosed ? 'RETAIN_OLD' : (row.doc_fetch_preference || 'RETAIN_OLD');
+  const hasFetchedDocs = Boolean(row.has_fetched_docs);
 
   return {
     id: row.id,

@@ -77,7 +77,19 @@ export default function App() {
         setDivisionsByRegion(data.divisionsByRegion || {});
         setAllDivisions(data.allDivisions || []);
       } catch (e) {
-        console.error('Failed to load regions and divisions:', e);
+        console.warn('Using client fallback for regions and divisions:', e.message);
+        const fallback = {
+          'NCR': ['BHROD', 'SDO Manila', 'SDO Quezon City', 'SDO Caloocan', 'SDO Las Piñas', 'SDO Makati', 'SDO Malabon', 'SDO Mandaluyong', 'SDO Marikina', 'SDO Muntinlupa', 'SDO Navotas', 'SDO Parañaque', 'SDO Pasay', 'SDO Pasig', 'SDO San Juan', 'SDO Taguig-Pateros', 'SDO Valenzuela'],
+          'CAR': ['SDO Abra', 'SDO Apayao', 'SDO Baguio City', 'SDO Benguet', 'SDO Ifugao', 'SDO Kalinga', 'SDO Mountain Province', 'SDO Tabuk City'],
+          'Region I': ['SDO Batac City', 'SDO Candon City', 'SDO Dagupan City', 'SDO Ilocos Norte', 'SDO Ilocos Sur', 'SDO La Union', 'SDO Laoag City', 'SDO Pangasinan I', 'SDO Pangasinan II', 'SDO San Carlos City', 'SDO San Fernando City', 'SDO Urdaneta City'],
+          'Region II': ['SDO Batanes', 'SDO Cagayan', 'SDO Cauayan City', 'SDO Ilagan City', 'SDO Isabela', 'SDO Nueva Vizcaya', 'SDO Quirino', 'SDO Santiago City', 'SDO Tuguegarao City'],
+          'Region III': ['SDO Angeles City', 'SDO Aurora', 'SDO Bataan', 'SDO Bulacan', 'SDO Cabanatuan City', 'SDO Gapan City', 'SDO Mabalacat City', 'SDO Malolos City', 'SDO Meycauayan City', 'SDO Muñoz Science City', 'SDO Olongapo City', 'SDO Pampanga', 'SDO San Fernando City', 'SDO San Jose City', 'SDO Tarlac', 'SDO Tarlac City', 'SDO Zambales'],
+          'Region IV-A': ['SDO Antipolo City', 'SDO Batangas', 'SDO Batangas City', 'SDO Biñan City', 'SDO Cabuyao City', 'SDO Calamba City', 'SDO Cavite', 'SDO Cavite City', 'SDO Dasmariñas City', 'SDO General Trias City', 'SDO Imus City', 'SDO Laguna', 'SDO Lipa City', 'SDO Lucena City', 'SDO Quezon', 'SDO Rizal', 'SDO San Pablo City', 'SDO Santa Rosa City', 'SDO Tayabas City'],
+          'Region XI': ['SDO Davao City', 'SDO Davao de Oro', 'SDO Davao del Norte', 'SDO Davao del Sur', 'SDO Davao Occidental', 'SDO Davao Oriental', 'SDO Digos City', 'SDO Island Garden City of Samal', 'SDO Mati City', 'SDO Panabo City', 'SDO Tagum City']
+        };
+        setRegions(Object.keys(fallback).sort());
+        setDivisionsByRegion(fallback);
+        setAllDivisions(Object.values(fallback).flat().sort());
       }
     }
     fetchRegionsDivisions();

@@ -11,6 +11,8 @@ import applicationsRouter from './modules/applications/apps.router.js';
 import { getPositions } from './modules/vacancies/vacancies.controller.js';
 import { authenticateToken } from './middleware/auth.middleware.js';
 import { errorHandler } from './middleware/error.middleware.js';
+import { runMigration as runAuditLogMigration } from './db/migration_documents_audit_logs.js';
+import { runMigration as runVacanciesMigration } from './db/alter_vacancies_doc_fetch.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,6 +20,16 @@ dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+
+// Ensure database schema migrations are executed on startup
+(async () => {
+  try {
+    await runAuditLogMigration();
+    await runVacanciesMigration();
+  } catch (err) {
+    console.error('[Server Startup Migration Error]', err.message);
+  }
+})();
 
 // Custom CORS middleware to ensure reliability on Vercel and local dev
 app.use((req, res, next) => {

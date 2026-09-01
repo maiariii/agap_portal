@@ -1,6 +1,6 @@
 import { pool } from '../../config/db.js';
 import { getHydratedApplications } from './apps.service.js';
-import { fetchApplicantDocumentsFromAuditLogs, DOCUMENT_TYPE_MAP } from './documents.service.js';
+import { fetchApplicantDocumentsFromAuditLogs, isUploadedInOpenPeriod, DOCUMENT_TYPE_MAP } from './documents.service.js';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { BlobServiceClient } from '@azure/storage-blob';
@@ -18,17 +18,24 @@ const __dirname = path.dirname(__filename);
 
 export async function getApplications(req, res) {
   try {
-    const userQuery = await pool.query('SELECT region, division FROM users WHERE id = $1', [req.user.id]);
-    const user = userQuery.rows[0];
-    if (!user) {
-      return res.status(401).json({ error: 'User not found' });
+    const userId = req.user?.id || req.user?.userId;
+    let region = req.user?.region || null;
+    let division = req.user?.division || null;
+
+    if (userId) {
+      const userQuery = await pool.query('SELECT region, division FROM users WHERE id = $1', [userId]);
+      const user = userQuery.rows[0];
+      if (user) {
+        region = user.region || region;
+        division = user.division || division;
+      }
     }
-    const { region, division } = user;
 
     const list = await getHydratedApplications(null, region, division);
     res.json(list);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Error fetching applications:', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch applications' });
   }
 }
 
@@ -625,21 +632,9 @@ export async function getApplicationDocuments(req, res) {
     return res.status(400).json({ error: 'Invalid application ID provided' });
   }
   const AZURE_FOLDER_NAME = process.env.AZURE_FOLDER_NAME || "main-agap";
-  
-  const cacheKey = `docs_${id}`;
-  const forceRefresh = req.query.refresh === 'true' || req.query.nocache === 'true';
-  const cachedDocuments = forceRefresh ? null : getCachedDocList(cacheKey);
-  if (cachedDocuments) {
-    return res.json({
-      success: true,
-      azureFolder: AZURE_FOLDER_NAME,
-      documents: cachedDocuments
-    });
-  }
 
-  console.log(`[Azure Storage] Scoped lookup for application ID "${id}"...`);
-  
-  const appQuery = await pool.query(
+  try {
+    const appQuery = await pool.query(
     `SELECT a.id as application_id, a.applicant_id, a.job_cluster_id, a.documents as app_documents, a.letter_of_intent, a.sworn_document, a.sworn_document as sworn_declaration, ap.id as applicant_table_id, ap.applicant_number, ap.code, ap.surname, ap.first_name, ap.other_information, v.id as vacancy_id, v.division, v.status as vacancy_status, v.doc_fetch_preference, v.has_fetched_docs 
      FROM applications a 
      JOIN applicants ap ON a.applicant_id = ap.id 
@@ -658,6 +653,19 @@ export async function getApplicationDocuments(req, res) {
     jobClusterId: app?.job_cluster_id,
     division: app?.division
   });
+
+  const cacheKey = `docs_${id}_${auditLogResult.docFetchPreference}`;
+  const forceRefresh = req.query.refresh === 'true' || req.query.nocache === 'true';
+  const cachedDocuments = forceRefresh ? null : getCachedDocList(cacheKey);
+  if (cachedDocuments) {
+    return res.json({
+      success: true,
+      azureFolder: AZURE_FOLDER_NAME,
+      documents: cachedDocuments
+    });
+  }
+
+  console.log(`[Azure Storage] Scoped lookup for application ID "${id}"...`);
 
   const documents = [
     { key: 'letter_of_intent', label: 'Letter of Intent', filename: `${applicantCode}_Letter_of_Intent.pdf`, existsInAzure: false },
@@ -678,6 +686,8 @@ export async function getApplicationDocuments(req, res) {
     { key: 'cav', label: 'Certification on the Authenticity and Veracity (CAV)', filename: `${applicantCode}_CAV.pdf`, existsInAzure: false }
   ];
 
+  console.log(`[getApplicationDocuments] 🚀 Processing lookup for App ID "${id}", Applicant Code "${applicantCode}", Applicant ID "${app?.applicant_id}"`);
+
   // 1. Match from document_audit_logs first
   if (auditLogResult.documents && auditLogResult.documents.length > 0) {
     documents.forEach(doc => {
@@ -687,7 +697,7 @@ export async function getApplicationDocuments(req, res) {
       );
       if (matchedAudit) {
         doc.existsInAzure = true;
-        const targetUrl = matchedAudit.effective_blob_url || matchedAudit.current_blob_url;
+        const targetUrl = matchedAudit.new_blob_url || matchedAudit.effective_blob_url || matchedAudit.current_blob_url;
         if (targetUrl) {
           doc.filename = targetUrl.split('/').pop();
         }
@@ -696,9 +706,9 @@ export async function getApplicationDocuments(req, res) {
         doc.latestBlobUrl = matchedAudit.latest_blob_url;
         doc.effectiveBlobUrl = matchedAudit.effective_blob_url;
         doc.isLatest = matchedAudit.is_latest;
-        doc.oldBlobUrl = matchedAudit.old_blob_url;
         doc.newBlobUrl = matchedAudit.new_blob_url;
         doc.url = `/api/applications/${id}/documents/${doc.key}/download`;
+        console.log(`[getApplicationDocuments] 🟢 Matched audit log for "${doc.key}" (${doc.label}) -> URL: ${doc.url}`);
       }
     });
   }
@@ -719,12 +729,12 @@ export async function getApplicationDocuments(req, res) {
     let baselineUrl = null;
 
     for (const mt of mappedTypes) {
-      if (otherDocs[mt]) {
-        baselineUrl = otherDocs[mt];
-        break;
-      }
       if (parsedAppDocs[mt] || parsedAppDocs[doc.key]) {
         baselineUrl = parsedAppDocs[mt] || parsedAppDocs[doc.key];
+        break;
+      }
+      if (otherDocs[mt] || otherDocs[doc.key]) {
+        baselineUrl = otherDocs[mt] || otherDocs[doc.key];
         break;
       }
     }
@@ -743,10 +753,19 @@ export async function getApplicationDocuments(req, res) {
   const containerClient = getAzureContainerClient();
 
   if (containerClient) {
-    const hasUnresolvedDocs = documents.some(d => !d.existsInAzure);
+    const hasAuditLogDocs = auditLogResult.documents && auditLogResult.documents.length > 0;
+    const hasUnresolvedDocs = !hasAuditLogDocs && documents.some(d => !d.existsInAzure);
     if (hasUnresolvedDocs) {
       try {
-        const azureBlobs = await getBlobsForApplicant(containerClient, app);
+        let azureBlobs = await getBlobsForApplicant(containerClient, app);
+        if (auditLogResult.openIntervals && auditLogResult.openIntervals.length > 0) {
+          azureBlobs = azureBlobs.filter(b => b.lastModified ? isUploadedInOpenPeriod(b.lastModified, auditLogResult.openIntervals) : true);
+        }
+        if (auditLogResult.cutoffDate) {
+          const cutoffMs = new Date(auditLogResult.cutoffDate).getTime();
+          azureBlobs = azureBlobs.filter(b => (b.lastModified || 0) <= cutoffMs);
+        }
+        azureBlobs.sort((a, b) => (b.lastModified || 0) - (a.lastModified || 0));
 
         const findMatchingBlob = (appRow, docKey) => {
           const isAppSpecific = ['letter_of_intent', 'sworn_declaration', 'sworn_document', 'cav'].includes(docKey);
@@ -815,14 +834,18 @@ export async function getApplicationDocuments(req, res) {
 
   setCachedDocList(cacheKey, documents);
 
-  res.json({
-    success: true,
-    divisionStatus: auditLogResult.divisionStatus,
-    isClosed: auditLogResult.isClosed,
-    cutoffDate: auditLogResult.cutoffDate,
-    azureFolder: AZURE_FOLDER_NAME,
-    documents
-  });
+    res.json({
+      success: true,
+      divisionStatus: auditLogResult.divisionStatus,
+      isClosed: auditLogResult.isClosed,
+      cutoffDate: auditLogResult.cutoffDate,
+      azureFolder: AZURE_FOLDER_NAME,
+      documents
+    });
+  } catch (error) {
+    console.error('Error fetching application documents:', error);
+    res.status(500).json({ error: error.message || 'Error fetching application documents' });
+  }
 }
 
 export async function downloadApplicationDocument(req, res) {
@@ -847,6 +870,7 @@ export async function downloadApplicationDocument(req, res) {
     return res.send(minimalPdf);
   }
 
+  let auditLogResult = null;
   try {
     const appQuery = await pool.query(
       `SELECT a.id as application_id, a.applicant_id, a.job_cluster_id, a.documents as app_documents, a.letter_of_intent, a.sworn_document, a.sworn_document as sworn_declaration, ap.id as applicant_table_id, ap.applicant_number, ap.code, ap.surname, ap.first_name, ap.other_information, v.id as vacancy_id, v.division, v.status as vacancy_status, v.doc_fetch_preference, v.has_fetched_docs 
@@ -859,7 +883,7 @@ export async function downloadApplicationDocument(req, res) {
     const app = appQuery.rows[0];
     const applicantCode = app ? (app.code || app.applicant_number || app.applicant_id || id) : id;
 
-    const auditLogResult = await fetchApplicantDocumentsFromAuditLogs({
+    auditLogResult = await fetchApplicantDocumentsFromAuditLogs({
       applicantId: app?.applicant_id,
       applicationId: id,
       vacancyId: app?.vacancy_id,
@@ -867,7 +891,56 @@ export async function downloadApplicationDocument(req, res) {
       division: app?.division
     });
 
-    const allBlobs = await getBlobsForApplicant(containerClient, app);
+    // 1. Direct stream from document_audit_logs new_blob_url / effective_blob_url if matched
+    if (auditLogResult?.documents && auditLogResult.documents.length > 0) {
+      const mappedTypes = DOCUMENT_TYPE_MAP[key] || [];
+      const matchedAudit = auditLogResult.documents.find(a => 
+        mappedTypes.some(mt => mt.toLowerCase() === (a.document_type || '').toLowerCase())
+      );
+      const targetUrl = matchedAudit ? (matchedAudit.new_blob_url || matchedAudit.effective_blob_url || matchedAudit.current_blob_url) : null;
+      if (targetUrl) {
+        try {
+          const u = new URL(targetUrl);
+          const parts = u.pathname.replace(/^\//, '').split('/');
+          if (parts.length >= 2) {
+            const containerName = parts[0];
+            const blobPath = parts.slice(1).join('/');
+            console.log(`[Azure Storage Direct Stream] 🟢 Found in audit logs -> container: "${containerName}", path: "${blobPath}"`);
+            
+            const connString = process.env.AZURE_STORAGE_CONNECTION_STRING;
+            if (connString && connString !== 'ReplaceWithYourAzureStorageConnectionString') {
+              const blobServiceClient = BlobServiceClient.fromConnectionString(connString);
+              const blobClient = blobServiceClient.getContainerClient(containerName).getBlobClient(blobPath);
+              const downloadBlockBlobResponse = await blobClient.download(0);
+
+              const chunks = [];
+              for await (const chunk of downloadBlockBlobResponse.readableStreamBody) {
+                chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
+              }
+              const buffer = Buffer.concat(chunks);
+
+              console.log(`[Azure Storage Direct Stream] 🟢 Successfully fetched "${blobPath}" from container "${containerName}". Length: ${buffer.length} bytes.`);
+              res.setHeader('Content-Type', downloadBlockBlobResponse.contentType || 'application/pdf');
+              res.setHeader('Content-Length', buffer.length);
+              res.setHeader('Content-Disposition', `inline; filename="${blobPath.split('/').pop()}"`);
+              return res.send(buffer);
+            }
+          }
+        } catch (auditStreamErr) {
+          console.error(`[Azure Storage Direct Stream Error]`, auditStreamErr.message);
+        }
+      }
+    }
+
+    let allBlobs = await getBlobsForApplicant(containerClient, app);
+    if (auditLogResult.openIntervals && auditLogResult.openIntervals.length > 0) {
+      allBlobs = allBlobs.filter(b => b.lastModified ? isUploadedInOpenPeriod(b.lastModified, auditLogResult.openIntervals) : true);
+    }
+    if (auditLogResult.cutoffDate) {
+      const cutoffMs = new Date(auditLogResult.cutoffDate).getTime();
+      allBlobs = allBlobs.filter(b => (b.lastModified || 0) <= cutoffMs);
+    }
+    allBlobs.sort((a, b) => (b.lastModified || 0) - (a.lastModified || 0));
 
     const extractBlobPath = (urlOrPath) => {
       if (!urlOrPath) return '';
@@ -890,29 +963,6 @@ export async function downloadApplicationDocument(req, res) {
     };
 
     const findBlob = (appRow) => {
-      // 1. Check document_audit_logs via division status & docFetchPreference logic
-      if (auditLogResult.documents && auditLogResult.documents.length > 0) {
-        const mappedTypes = DOCUMENT_TYPE_MAP[key] || [];
-        const matchedAudit = auditLogResult.documents.find(a => 
-          mappedTypes.some(mt => mt.toLowerCase() === (a.document_type || '').toLowerCase())
-        );
-        const targetUrl = matchedAudit ? (matchedAudit.effective_blob_url || matchedAudit.current_blob_url) : null;
-        if (targetUrl) {
-          const extracted = extractBlobPath(targetUrl);
-          if (extracted) {
-            const filenameOnly = extracted.split('/').pop();
-            const foundInAzure = allBlobs.find(b => 
-              b.name === extracted || 
-              b.name.toLowerCase() === extracted.toLowerCase() ||
-              b.name.endsWith(extracted) || 
-              extracted.endsWith(b.name) ||
-              b.name.endsWith(filenameOnly)
-            );
-            if (foundInAzure) return foundInAzure.name;
-            return extracted;
-          }
-        }
-      }
 
       // 2. Check baseline documents from applicant other_information or app documents
       const otherDocs = appRow?.other_information?.documents || {};
@@ -1017,11 +1067,36 @@ export async function downloadApplicationDocument(req, res) {
     downloadBlockBlobResponse.readableStreamBody.pipe(res);
   } catch (err) {
     console.error(`[Azure Storage Error] Failed to process blob download for key "${key}":`, err.message);
+
+    // Attempt direct URL fetch fallback if blob URL was found in audit log
+    if (auditLogResult?.documents) {
+      const mappedTypes = DOCUMENT_TYPE_MAP[key] || [];
+      const matchedAudit = auditLogResult.documents.find(a => 
+        mappedTypes.some(mt => mt.toLowerCase() === (a.document_type || '').toLowerCase())
+      );
+      const targetUrl = matchedAudit ? (matchedAudit.effective_blob_url || matchedAudit.current_blob_url || matchedAudit.new_blob_url) : null;
+      if (targetUrl && (targetUrl.startsWith('http://') || targetUrl.startsWith('https://'))) {
+        try {
+          console.log(`[Azure Storage Fallback] Attempting direct fetch from URL: ${targetUrl}`);
+          const fetchRes = await fetch(targetUrl);
+          if (fetchRes.ok) {
+            const arrayBuf = await fetchRes.arrayBuffer();
+            const contentType = fetchRes.headers.get('content-type') || 'application/pdf';
+            res.setHeader('Content-Type', contentType);
+            res.setHeader('Content-Disposition', `inline; filename="${key}.pdf"`);
+            return res.send(Buffer.from(arrayBuf));
+          }
+        } catch (fetchErr) {
+          console.error(`[Direct URL Fetch Error]`, fetchErr.message);
+        }
+      }
+    }
+
     if (err.statusCode === 404 || (err.message && (err.message.includes('does not exist') || err.message.includes('BlobNotFound')))) {
-      console.log(`[Azure Storage] Blob missing in Azure container. Serving fallback PDF.`);
+      console.log(`[Azure Storage] Blob missing in Azure container. Serving valid fallback PDF.`);
       res.setHeader('Content-Type', 'application/pdf');
       const minimalPdf = Buffer.from(
-        'JVBERi0xLjUKMSAwIG9iago8PAovVHlwZSAvQ2F0YWxvZwovUGFnZXMgMiAwIFIKPj4KZW5kb2JqCjIgMCBvYmoKPDwKLVR5cGUgL1BhZ2VzCi9LaWRzIFszIDAgUl0KL0NvdW50IDEKPj4KZW5kb2JqCjMgMCBvYmoKPDwKLVR5cGUgL1BhcmVudCAyIDAgUgovTWVkaWFCb3ggWzAgMCA1OTUgODQyXQovQ29udGVudHMgNCAwIFIKPj4KZW5kb2JqCjQgMCBvYmoKPDwKL0xlbmd0aCA4Cj4+CnN0cmVhbQoKZW5kc3RyZWFtCmVuZG9iagp4cmVmCjAgNQowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwMTUgMDAwMDA meSAKMDAwMDAwMDA3MCAwMDAwMCBuIAowMDAwMDAwMTIwIDAwMDAwIGYgCjAwMDAwMDAyMDEgMDAwMDAgbiAKdHJhaWxlcgo8PAovU2l6ZSA1Ci9Sb290IDEgMCBSCj4+CnN0YXJ0eHJlZgoyNTcKJSVFT0YK',
+        'JVBERi0xLjUKMSAwIG9iago8PAovVHlwZSAvQ2F0YWxvZwovUGFnZXMgMiAwIFIKPj4KZW5kb2JqCjIgMCBvYmoKPDwKLVR5cGUgL1BhZ2VzCi9LaWRzIFszIDAgUl0KL0NvdW50IDEKPj4KZW5kb2JqCjMgMCBvYmoKPDwKLVR5cGUgL1BhcmVudCAyIDAgUgovTWVkaWFCb3ggWzAgMCA1OTUgODQyXQovQ29udGVudHMgNCAwIFIKPj4KZW5kb2JqCjQgMCBvYmoKPDwKL0xlbmd0aCA4Cj4+CnN0cmVhbQoKZW5kc3RyZWFtCmVuZG9iagp4cmVmCjAgNQowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwMTUgMDAwMDAgbiAKMDAwMDAwMDA3MCAwMDAwMCBuIAowMDAwMDAwMTIwIDAwMDAwIGYgCjAwMDAwMDAyMDEgMDAwMDAgbiAKdHJhaWxlcgo8PAovU2l6ZSA1Ci9Sb290 IDEgMCBSCj4+CnN0YXJ0eHJlZgoyNTcKJSVFT0YK',
         'base64'
       );
       return res.send(minimalPdf);

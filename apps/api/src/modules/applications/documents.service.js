@@ -98,6 +98,8 @@ export async function determineDivisionPeriods(divisionName, vacancyId = null, j
   let openHasRetainOld = false;
   let closedHasFetchNew = false;
   let closedHasRetainOld = false;
+  let hasFetchedDocs = false;
+  let latestDocFetchedAt = null;
   const openIntervals = [];
 
   for (const row of rows) {
@@ -106,9 +108,24 @@ export async function determineDivisionPeriods(divisionName, vacancyId = null, j
     const prefStr = (row.doc_fetch_preference || '').toUpperCase();
     const hasFetched = row.has_fetched_docs === true;
 
+    if (hasFetched || prefStr === 'FETCH_NEW' || prefStr === 'RETAIN_OLD' || row.doc_fetched_at != null) {
+      hasFetchedDocs = true;
+      if (row.doc_fetched_at) {
+        const d = new Date(row.doc_fetched_at);
+        if (!latestDocFetchedAt || d.getTime() > latestDocFetchedAt.getTime()) {
+          latestDocFetchedAt = d;
+        }
+      } else if (row.updated_at && statusLower === 'closed') {
+        const d = new Date(row.updated_at);
+        if (!latestDocFetchedAt || d.getTime() > latestDocFetchedAt.getTime()) {
+          latestDocFetchedAt = d;
+        }
+      }
+    }
+
     if (statusLower === 'open') {
       openCount++;
-      if (prefStr === 'FETCH_NEW' || hasFetched) {
+      if (prefStr === 'FETCH_NEW' && hasFetched) {
         openHasFetchNew = true;
       }
       if (prefStr === 'RETAIN_OLD' || fillingStr.includes('RETAIN_OLD')) {
@@ -116,8 +133,7 @@ export async function determineDivisionPeriods(divisionName, vacancyId = null, j
       }
     } else {
       closedCount++;
-      // A closed vacancy is only considered FETCH_NEW if user explicitly opened with FETCH_NEW and has a valid doc_fetched_at timestamp
-      if (prefStr === 'FETCH_NEW' && hasFetched && row.doc_fetched_at != null) {
+      if ((prefStr === 'FETCH_NEW' || fillingStr.includes('FETCH_NEW')) && hasFetched) {
         closedHasFetchNew = true;
       }
       if (prefStr === 'RETAIN_OLD' || fillingStr.includes('RETAIN_OLD')) {
@@ -151,27 +167,26 @@ export async function determineDivisionPeriods(divisionName, vacancyId = null, j
   const divisionStatus = isClosed ? 'Closed' : 'Open';
 
   let docFetchPreference;
-  let hasFetchedDocs;
 
   if (isClosed) {
-    // When Closed: always default to RETAIN_OLD unless explicitly fetched and frozen by user action
-    if (closedHasFetchNew && !closedHasRetainOld) {
-      docFetchPreference = 'FETCH_NEW';
-      hasFetchedDocs = true;
-    } else {
-      docFetchPreference = 'RETAIN_OLD';
-      hasFetchedDocs = false;
-    }
+    // When all vacancies in division are Closed: ALWAYS RETAIN_OLD! Never fetch new documents.
+    docFetchPreference = 'RETAIN_OLD';
   } else {
     // When Open:
-    // If explicitly set to RETAIN_OLD (Option B: Retain Current Files), retain old files.
-    // Otherwise, Open vacancies default to fetching the latest documents (FETCH_NEW).
-    if (openHasRetainOld && !openHasFetchNew) {
-      docFetchPreference = 'RETAIN_OLD';
-      hasFetchedDocs = false;
-    } else {
+    // Only use FETCH_NEW if HR explicitly selected FETCH_NEW when opening the vacancy.
+    // Otherwise default to RETAIN_OLD.
+    if (openHasFetchNew && !openHasRetainOld) {
       docFetchPreference = 'FETCH_NEW';
-      hasFetchedDocs = true;
+    } else {
+      docFetchPreference = 'RETAIN_OLD';
+    }
+  }
+
+  let cutoffDate = latestDocFetchedAt;
+  if (!cutoffDate && isClosed) {
+    const endTimes = openIntervals.map(i => i.end.getTime()).filter(t => t < new Date('2099-01-01').getTime());
+    if (endTimes.length > 0) {
+      cutoffDate = new Date(Math.max(...endTimes));
     }
   }
 
@@ -180,6 +195,9 @@ export async function determineDivisionPeriods(divisionName, vacancyId = null, j
     isClosed,
     docFetchPreference,
     hasFetchedDocs,
+    openHasFetchNew,
+    closedHasFetchNew,
+    cutoffDate,
     openIntervals,
     recordsCount
   };
@@ -203,11 +221,9 @@ export function isUploadedInOpenPeriod(uploadedAt, openIntervals) {
 /**
  * Fetches documents from documents_audit_logs for a specific applicant_id,
  * applying upload-time division period rules:
- * - When division is Closed: keeps existing/current document and excludes closed-period uploads.
- * - When division is Open: automatically fetches the latest documents (new_blob_url).
- * - When user selects 'Retain Current File' upon reopening: keeps existing document untouched.
- * - When user selects 'Fetch Latest Document' upon reopening: fetches new_blob_url and sets it as current document.
- * - If division is closed again: newly fetched document is frozen and retained without reverting.
+ * - When user clicks 'Fetch All Documents': freezes latest documents as of fetch timestamp.
+ * - When vacancy becomes Closed: preserves last fetched documents frozen as final version.
+ * - Under no circumstances auto-fetches newer uploads after closing.
  * 
  * @param {Object} params 
  * @param {string|number} params.applicantId 
@@ -222,6 +238,8 @@ export async function fetchApplicantDocumentsFromAuditLogs({ applicantId, applic
   let targetDivision = division;
   let targetVacancyId = vacancyId;
   let targetJobClusterId = jobClusterId;
+
+  console.log(`\n[AuditLog Audit] 🔍 Fetching audit logs for Applicant ID: "${applicantId}", Application ID: "${applicationId}"...`);
 
   // Resolve missing applicantId or division from application record if needed
   if ((!targetApplicantId || !targetDivision) && applicationId) {
@@ -241,11 +259,13 @@ export async function fetchApplicantDocumentsFromAuditLogs({ applicantId, applic
   }
 
   if (!targetApplicantId) {
+    console.warn(`[AuditLog Audit] ⚠️ No applicantId resolved. Returning empty document audit logs.`);
     return {
       divisionStatus: 'Closed',
       isClosed: true,
       docFetchPreference: 'RETAIN_OLD',
       hasFetchedDocs: false,
+      cutoffDate: null,
       openIntervals: [],
       documents: []
     };
@@ -257,52 +277,152 @@ export async function fetchApplicantDocumentsFromAuditLogs({ applicantId, applic
     `SELECT 
        id,
        applicant_id,
-       document_type,
-       old_blob_url,
-       new_blob_url,
-       affected_applications_count,
        application_id,
-       item_no,
+       document_type,
+       new_blob_url,
+       batch_number,
+       is_open,
        created_at AS uploaded_at
      FROM document_audit_logs
      WHERE applicant_id::text = $1::text
-     ORDER BY created_at DESC`,
+     ORDER BY created_at DESC, id DESC`,
     [String(targetApplicantId)]
   );
 
-  // Filter for eligibility: documents uploaded while Closed are excluded
-  const strictEligibleRows = rows.filter(row => isUploadedInOpenPeriod(row.uploaded_at, divisionInfo.openIntervals));
-  const eligibleRows = strictEligibleRows.length > 0 
-    ? strictEligibleRows 
-    : (divisionInfo.isClosed ? [] : rows);
-
-  // When docFetchPreference is RETAIN_OLD (closed or explicit retain): use old_blob_url
-  // When docFetchPreference is FETCH_NEW (open or previously fetched): use new_blob_url
-  const useOldBlob = divisionInfo.docFetchPreference === 'RETAIN_OLD';
-
-  const processedRows = eligibleRows.map(r => {
-    const latestBlob = r.new_blob_url || r.old_blob_url;
-    const currentBlob = useOldBlob
-      ? (r.old_blob_url || r.new_blob_url)
-      : (r.new_blob_url || r.old_blob_url);
-
-    return {
-      ...r,
-      current_blob_url: currentBlob,
-      latest_blob_url: latestBlob,
-      effective_blob_url: currentBlob,
-      is_latest: Boolean(currentBlob && latestBlob && currentBlob === latestBlob)
-    };
+  console.log(`\n=================== [AUDIT LOG IS_OPEN & VACANCY CHECK TRACE] ===================`);
+  console.log(`[AuditLog Audit] 📥 Target App ID: "${applicationId || 'N/A'}" | Division Status: "${divisionInfo.divisionStatus}" | Cutoff Date: ${divisionInfo.cutoffDate}`);
+  console.log(`[AuditLog Audit] 📥 Retrieved ${rows.length} total row(s) from document_audit_logs:`);
+  rows.forEach(r => {
+    console.log(`  • ID: ${r.id} | AppID: "${r.application_id}" | Document: "${r.document_type}" | Batch: "${r.batch_number}" | is_open: ${r.is_open} | UploadedAt: ${r.uploaded_at}`);
   });
+  console.log(`=================================================================================\n`);
+
+  const docGroupMap = new Map();
+  rows.forEach(r => {
+    const key = (r.document_type || '').toLowerCase().trim();
+    if (!docGroupMap.has(key)) {
+      docGroupMap.set(key, []);
+    }
+    docGroupMap.get(key).push(r);
+  });
+
+  const processedRows = [];
+
+  docGroupMap.forEach((logs, key) => {
+    // Sort logs: Prioritize exact application_id match first, then latest uploaded_at, then higher ID
+    logs.sort((a, b) => {
+      const aApp = (applicationId && a.application_id && String(a.application_id) === String(applicationId)) ? 1 : 0;
+      const bApp = (applicationId && b.application_id && String(b.application_id) === String(applicationId)) ? 1 : 0;
+      if (aApp !== bApp) return bApp - aApp;
+      return new Date(b.uploaded_at).getTime() - new Date(a.uploaded_at).getTime() || b.id - a.id;
+    });
+    
+    // Strict Validation Rule: Check is_open, application_id, and vacancy closed cutoff
+    const isRecordOpen = (r) => {
+      const isOpenVal = r.is_open;
+      const matchesAppId = applicationId && r.application_id && String(r.application_id) === String(applicationId);
+
+      // 1. Exclude explicitly closed / signed-out uploads
+      if (isOpenVal === false || isOpenVal === 'false' || isOpenVal === 0) {
+        console.log(`   ⛔ Exclude ID ${r.id} ("${r.document_type}"): is_open = ${isOpenVal} (Closed/Signed Out Document)`);
+        return false;
+      }
+
+      // 2. Closed Vacancy Cutoff Date Check: Exclude uploads created AFTER vacancy closed date unless linked to application_id
+      if (divisionInfo.cutoffDate && r.uploaded_at) {
+        const uploadTime = new Date(r.uploaded_at).getTime();
+        const cutoffTime = new Date(divisionInfo.cutoffDate).getTime();
+        if (uploadTime > cutoffTime && !matchesAppId) {
+          console.log(`   ⛔ Exclude ID ${r.id} ("${r.document_type}"): Uploaded at ${r.uploaded_at} AFTER closed vacancy cutoff date ${divisionInfo.cutoffDate}`);
+          return false;
+        }
+      }
+
+      // 3. Open posting interval check when vacancy is closed
+      if (divisionInfo.isClosed && divisionInfo.openIntervals && divisionInfo.openIntervals.length > 0) {
+        const inPeriod = isUploadedInOpenPeriod(r.uploaded_at, divisionInfo.openIntervals);
+        if (!inPeriod && !matchesAppId) {
+          console.log(`   ⛔ Exclude ID ${r.id} ("${r.document_type}"): Vacancy is CLOSED and document was NOT uploaded in an open posting period`);
+          return false;
+        }
+      }
+
+      if (isOpenVal === true || isOpenVal === 'true' || isOpenVal === 1) {
+        console.log(`   ✅ Select ID ${r.id} ("${r.document_type}"): is_open = ${isOpenVal} (Valid Open Document)`);
+        return true;
+      }
+
+      const isPeriodOpen = isUploadedInOpenPeriod(r.uploaded_at, divisionInfo.openIntervals);
+      console.log(`   ℹ️ Check ID ${r.id} ("${r.document_type}"): is_open = null -> Division Open Period check: ${isPeriodOpen}`);
+      return isPeriodOpen;
+    };
+
+    const targetLog = logs.find(isRecordOpen);
+
+    if (targetLog) {
+      const effectiveBlob = targetLog.new_blob_url || null;
+
+      console.log(`[AuditLog Audit] 🎯 Final matched record for "${targetLog.document_type}": ID ${targetLog.id}, batch "${targetLog.batch_number}", is_open: ${targetLog.is_open}, URL: ${effectiveBlob}`);
+
+      processedRows.push({
+        ...targetLog,
+        current_blob_url: effectiveBlob,
+        latest_blob_url: targetLog.new_blob_url || null,
+        effective_blob_url: effectiveBlob,
+        is_latest: true
+      });
+    } else {
+      console.log(`[AuditLog Audit] ❌ No valid is_open=true record found for document group "${key}" among ${logs.length} logs.`);
+    }
+  });
+
+  console.log(`[AuditLog Audit] 📋 Returning ${processedRows.length} valid open document(s) to application controller.\n`);
 
   return {
     divisionStatus: divisionInfo.divisionStatus,
     isClosed: divisionInfo.isClosed,
     docFetchPreference: divisionInfo.docFetchPreference,
     hasFetchedDocs: divisionInfo.hasFetchedDocs,
+    cutoffDate: divisionInfo.cutoffDate,
     openIntervals: divisionInfo.openIntervals,
     documents: processedRows
   };
+}
+
+/**
+ * Helper to insert a batch of uploaded documents into document_audit_logs.
+ */
+export async function recordDocumentAuditLogBatch({
+  applicantId,
+  applicationId = null,
+  documents = [],
+  isOpen = true,
+  batchNumber = null
+}) {
+  if (!applicantId || !documents || documents.length === 0) return [];
+
+  const batch = batchNumber || `batch_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+  const insertedRows = [];
+
+  for (const doc of documents) {
+    const { rows } = await pool.query(
+      `INSERT INTO document_audit_logs 
+         (applicant_id, application_id, document_type, new_blob_url, batch_number, is_open, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, NOW())
+       RETURNING *`,
+      [
+        String(applicantId),
+        applicationId ? String(applicationId) : null,
+        doc.documentType,
+        doc.newBlobUrl,
+        batch,
+        Boolean(isOpen)
+      ]
+    );
+    if (rows.length > 0) insertedRows.push(rows[0]);
+  }
+
+  return insertedRows;
 }
 
 // Retain alias export for backwards compatibility

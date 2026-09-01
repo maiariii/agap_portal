@@ -202,7 +202,7 @@ export default function VacanciesPage() {
   const [calField, setCalField] = useState('start');
   const [calYear, setCalYear] = useState(new Date().getFullYear());
   const [calMonth, setCalMonth] = useState(new Date().getMonth());
-  const [calDocPolicy, setCalDocPolicy] = useState('FETCH_NEW');
+  const [calDocPolicy, setCalDocPolicy] = useState('RETAIN_OLD');
 
   // NOSCA Scanning states
   const [showNosca, setShowNosca] = useState(false);
@@ -274,19 +274,20 @@ export default function VacanciesPage() {
     const end = v.postingEnd ? new Date(v.postingEnd.slice(0, 10) + "T23:59:59.999") : null;
     const deadlinePassed = end ? end < today : false;
     const isFilled = v.fillingUpStatus === 'FILLED' || v.filling_up_status === 'FILLED';
+    const isClosedStatus = (v.status || '').toLowerCase() === 'closed';
 
-    // Closed: Reserve exclusively for postings where deadline passed OR position is filled OR explicitly closed
-    if (isFilled || deadlinePassed || v.status === 'closed') {
+    // 1. Closed: Item_no was closed manually or met its deadline or is filled
+    if (isClosedStatus || deadlinePassed || isFilled) {
       return 'Closed';
     }
 
-    // Open for Application: Active posting within scheduled date range
-    if (v.status === 'open' && start && today >= start && end && today <= end) {
-      return 'Open for Application';
+    // 2. For Publication: New added item_no or when starting date is in advance (future)
+    if (!start || start > today || (v.status || '').toLowerCase() === 'for_publication') {
+      return 'For Publication';
     }
 
-    // For Publication: Item has not yet been opened, or when manually closed by HR
-    return 'For Publication';
+    // 3. Open for Application: Item_no is open (posting_start <= today and posting_end >= today or active open status)
+    return 'Open for Application';
   };
 
   const vacanciesKpiStats = useMemo(() => {
@@ -398,8 +399,19 @@ export default function VacanciesPage() {
       setCalMonth(initDate.getMonth());
 
       // Reopening / Posting Decision Modal (Option A: Fetch Latest Document vs Option B: Retain Current Files)
-      setCalDocPolicy(vac.docFetchPreference || 'FETCH_NEW');
-      setShowDocPolicyModal(true);
+      setCalDocPolicy(vac.docFetchPreference || 'RETAIN_OLD');
+
+      // Check if all vacancies in the same division are closed
+      const targetDiv = (vac.division || 'SDO').toLowerCase();
+      const divVacancies = vacancies.filter(v => (v.division || 'SDO').toLowerCase() === targetDiv);
+      const isAnyOpenInDivision = divVacancies.some(v => getVacancyPostingStatus(v) === 'Open for Application' || (v.status || '').toLowerCase() === 'open');
+
+      if (isAnyOpenInDivision) {
+        setShowDocPolicyModal(false);
+        setShowCalendar(true);
+      } else {
+        setShowDocPolicyModal(true);
+      }
     } else {
       setCloseWarningVac(vac);
       setShowCloseWarning(true);
@@ -496,12 +508,24 @@ export default function VacanciesPage() {
           status: 'open',
           postingStart: calStart,
           postingEnd: calEnd,
-          docFetchPreference: calDocPolicy || 'FETCH_NEW'
+          docFetchPreference: calDocPolicy || 'RETAIN_OLD'
         })
       });
 
+      // Once Confirm & Open Vacancy succeeds, call the document fetching endpoint to retrieve updated records
+      if (calDocPolicy === 'FETCH_NEW') {
+        try {
+          await apiFetch(`/api/vacancies/${calVacancy.id}/fetch-documents`, {
+            method: 'POST'
+          });
+          console.log(`[Vacancies FE] 🟢 Successfully triggered document fetching for vacancy ${calVacancy.id}`);
+        } catch (fetchErr) {
+          console.warn('[Vacancies FE] Document fetching notice:', fetchErr.message);
+        }
+      }
+
       setShowCalendar(false);
-      setToast({ message: 'Vacancy posting opened successfully!', type: 'success' });
+      setToast({ message: 'Vacancy posting opened successfully and latest documents retrieved!', type: 'success' });
       loadAllData();
     } catch (e) {
       setToast({ message: e.message, type: 'error' });

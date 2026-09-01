@@ -1,3 +1,5 @@
+import { fileURLToPath } from 'url';
+import path from 'path';
 import { pool } from '../config/db.js';
 
 export async function runMigration() {
@@ -18,11 +20,11 @@ export async function runMigration() {
       ALTER TABLE vacancies ADD COLUMN IF NOT EXISTS doc_fetched_at TIMESTAMPTZ;
     `);
 
-    // Migrate existing vacancies that have filling_up_status = 'FETCH_NEW' or are open
+    // Migrate existing vacancies that explicitly have filling_up_status = 'FETCH_NEW' or doc_fetch_preference = 'FETCH_NEW'
     await client.query(`
       UPDATE vacancies 
       SET has_fetched_docs = TRUE, doc_fetch_preference = 'FETCH_NEW'
-      WHERE LOWER(status) = 'open' OR filling_up_status LIKE '%FETCH_NEW%' OR doc_fetch_preference = 'FETCH_NEW';
+      WHERE filling_up_status LIKE '%FETCH_NEW%' OR doc_fetch_preference = 'FETCH_NEW';
     `);
 
     await client.query('COMMIT');
@@ -36,7 +38,8 @@ export async function runMigration() {
   }
 }
 
-if (process.argv[1] && import.meta.url === `file:///${process.argv[1].replace(/\\/g, '/')}`) {
+if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
   runMigration().then(() => pool.end());
 }
+
 

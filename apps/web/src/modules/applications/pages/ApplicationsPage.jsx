@@ -401,11 +401,14 @@ export default function ApplicationsPage() {
     setShowReviewDocsVault(false);
     if (appRow.id) {
       setDocsLoading(true);
+      console.log(`[Document Vault FE] 🚀 Requesting documents for Application ID "${appRow.id}"...`);
       apiFetch(`/api/applications/${appRow.id}/documents?refresh=true`)
         .then(data => {
-          setAvailableDocs(data.documents || []);
+          const docs = data.documents || [];
+          console.log(`[Document Vault FE] 📥 Received ${docs.length} document(s) from API:`, docs.map(d => ({ key: d.key, label: d.label, existsInAzure: d.existsInAzure, filename: d.filename, url: d.url })));
+          setAvailableDocs(docs);
         })
-        .catch(err => console.error('Error fetching documents:', err))
+        .catch(err => console.error('[Document Vault FE] ❌ Error fetching documents:', err))
         .finally(() => setDocsLoading(false));
     }
 

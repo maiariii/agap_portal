@@ -66,27 +66,46 @@ export async function getVacancies(req, res) {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const userQuery = await pool.query('SELECT region, division FROM users WHERE id = $1', [req.user.id]);
-    const user = userQuery.rows[0];
-    if (!user) {
-      return res.status(401).json({ error: 'User not found' });
+    const userId = req.user?.id || req.user?.userId;
+    let region = req.user?.region || null;
+    let division = req.user?.division || null;
+
+    if (userId) {
+      const userQuery = await pool.query('SELECT region, division FROM users WHERE id = $1', [userId]);
+      const user = userQuery.rows[0];
+      if (user) {
+        region = user.region || region;
+        division = user.division || division;
+      }
     }
-    const { region, division } = user;
 
-    const { rows: pastDeadlineVacancies } = await pool.query(
-      "SELECT id FROM vacancies WHERE status = 'open' AND posting_end < $1 AND region = $2 AND division = $3",
-      [today, region, division]
-    );
-
-    if (pastDeadlineVacancies.length > 0) {
-      const pastDeadlineIds = pastDeadlineVacancies.map(v => v.id);
-      await pool.query(
-        "UPDATE vacancies SET status = 'closed' WHERE id = ANY($1)",
-        [pastDeadlineIds]
+    if (region && division) {
+      const { rows: pastDeadlineVacancies } = await pool.query(
+        "SELECT id FROM vacancies WHERE status = 'open' AND posting_end < $1 AND UPPER(TRIM(region)) = UPPER(TRIM($2)) AND UPPER(TRIM(division)) = UPPER(TRIM($3))",
+        [today, region, division]
       );
+
+      if (pastDeadlineVacancies.length > 0) {
+        const pastDeadlineIds = pastDeadlineVacancies.map(v => v.id);
+        await pool.query(
+          "UPDATE vacancies SET status = 'closed' WHERE id = ANY($1)",
+          [pastDeadlineIds]
+        );
+      }
     }
 
     const posCols = await getPositionCols();
+    const queryValues = [];
+    let whereClause = '';
+
+    if (region && division) {
+      whereClause = 'WHERE UPPER(TRIM(v.region)) = UPPER(TRIM($1)) AND UPPER(TRIM(v.division)) = UPPER(TRIM($2))';
+      queryValues.push(region, division);
+    } else if (division) {
+      whereClause = 'WHERE UPPER(TRIM(v.division)) = UPPER(TRIM($1))';
+      queryValues.push(division);
+    }
+
     const { rows } = await pool.query(`
       SELECT 
         v.id,
@@ -112,16 +131,18 @@ export async function getVacancies(req, res) {
         v.updated_at,
         CASE WHEN v.status = 'open' AND v.filling_up_status = 'UNFILLED' THEN 1 ELSE 0 END as open_slots,
         1 as total_slots,
-        p.title as position_title, p.track as position_track,
+        COALESCE(p.title, v.title) as position_title, 
+        p.track as position_track,
         p.required_bachelor_degree as position_required_bachelor_degree,
         p.required_degree_keywords as position_required_degree_keywords,
         p.${posCols.exp} as position_min_years_experience,
         p.${posCols.train} as position_min_training_hours,
         p.eligibility_required as position_eligibility_required
       FROM vacancies v
-      JOIN positions p ON v.position_id = p.id
-      WHERE v.region = $1 AND v.division = $2
-    `, [region, division]);
+      LEFT JOIN positions p ON (v.position_id = p.id OR UPPER(TRIM(v.title)) = UPPER(TRIM(p.title)))
+      ${whereClause}
+      ORDER BY v.created_at DESC
+    `, queryValues);
 
     res.json(rows.map(r => ({
       ...mapVacancy(r),
@@ -130,17 +151,18 @@ export async function getVacancies(req, res) {
       unfilledItemNos: r.unfilled_item_nos || '',
       position: {
         id: r.position_id,
-        title: r.position_title,
-        track: r.position_track,
-        requiredBachelorDegree: r.position_required_bachelor_degree,
+        title: r.position_title || r.title,
+        track: r.position_track || 'Teaching',
+        requiredBachelorDegree: r.position_required_bachelor_degree || '',
         requiredDegreeKeywords: Array.isArray(r.position_required_degree_keywords) ? r.position_required_degree_keywords : (r.position_required_degree_keywords ? r.position_required_degree_keywords.split(',') : []),
-        minYearsExperience: r.position_min_years_experience,
-        minTrainingHours: r.position_min_training_hours,
-        eligibilityRequired: r.position_eligibility_required
+        minYearsExperience: r.position_min_years_experience || 0,
+        minTrainingHours: r.position_min_training_hours || 0,
+        eligibilityRequired: r.position_eligibility_required || ''
       }
     })));
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Error fetching vacancies:', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch vacancies' });
   }
 }
 
@@ -163,6 +185,20 @@ export async function createVacancy(req, res) {
       [jobClusterId, positionId, division, region]
     );
 
+    const startD = postingStart ? new Date(postingStart) : null;
+    const endD = postingEnd ? new Date(postingEnd) : null;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    let initialStatus = 'for_publication';
+    if (startD && startD <= today && (!endD || endD >= today)) {
+      initialStatus = 'open';
+    } else if (endD && endD < today) {
+      initialStatus = 'closed';
+    } else {
+      initialStatus = 'for_publication';
+    }
+
     const id = crypto.randomUUID();
     const { rows } = await pool.query(
       `INSERT INTO vacancies (id, position_id, item_no, title, school, division, region, status, posting_start, posting_end, salary_grade, job_cluster_id)
@@ -176,7 +212,7 @@ export async function createVacancy(req, res) {
         school,
         division,
         region,
-        postingStart && postingEnd ? 'open' : 'for_publication',
+        initialStatus,
         parseOrFormatDateParam(postingStart),
         parseOrFormatEndDateParam(postingEnd),
         salaryGrade ? parseInt(salaryGrade) : null,
@@ -196,6 +232,11 @@ export async function toggleVacancyStatus(req, res) {
   const { id } = req.params;
   const { status, postingStart, postingEnd, docFetchPreference } = req.body;
   try {
+    const vacCheck = await pool.query('SELECT * FROM vacancies WHERE id = $1', [id]);
+    if (vacCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Vacancy not found' });
+    }
+
     const fields = [];
     const values = [];
     let idx = 1;
@@ -206,9 +247,9 @@ export async function toggleVacancyStatus(req, res) {
 
       if (status === 'open' && docFetchPreference === undefined) {
         fields.push(`doc_fetch_preference = $${idx++}`);
-        values.push('FETCH_NEW');
+        values.push('RETAIN_OLD');
         fields.push(`has_fetched_docs = $${idx++}`);
-        values.push(true);
+        values.push(false);
       }
     }
     if (postingStart !== undefined) {
@@ -228,24 +269,52 @@ export async function toggleVacancyStatus(req, res) {
         values.push(true);
         fields.push(`doc_fetched_at = $${idx++}`);
         values.push(new Date());
-      } else {
-        fields.push(`has_fetched_docs = $${idx++}`);
-        values.push(false);
+
+        // When Option A (FETCH_NEW) is selected on Reopen/Open Vacancy:
+        // Update document_audit_logs.is_open = true for all applications linked to this vacancy/job cluster
+        try {
+          await pool.query(
+            `UPDATE document_audit_logs
+             SET is_open = TRUE
+             WHERE application_id IN (
+               SELECT a.id 
+               FROM applications a
+               JOIN vacancies v ON (
+                 (a.job_cluster_id IS NOT NULL AND a.job_cluster_id = v.job_cluster_id)
+                 OR (v.id = $1)
+               )
+               WHERE v.id = $1 OR (v.job_cluster_id IS NOT NULL AND v.job_cluster_id = (SELECT job_cluster_id FROM vacancies WHERE id = $1))
+             )
+             OR applicant_id IN (
+               SELECT a.applicant_id::text
+               FROM applications a
+               JOIN vacancies v ON (
+                 (a.job_cluster_id IS NOT NULL AND a.job_cluster_id = v.job_cluster_id)
+                 OR (v.id = $1)
+               )
+               WHERE v.id = $1 OR (v.job_cluster_id IS NOT NULL AND v.job_cluster_id = (SELECT job_cluster_id FROM vacancies WHERE id = $1))
+             )`,
+            [id]
+          );
+          console.log(`[Vacancy Controller] 🟢 Option A (FETCH_NEW) selected. Updated document_audit_logs.is_open = true for vacancy "${id}".`);
+        } catch (auditUpdateErr) {
+          console.error('[Vacancy Controller] Error updating document_audit_logs.is_open:', auditUpdateErr.message);
+        }
       }
     }
 
     if (fields.length === 0) {
-      const { rows } = await pool.query('SELECT * FROM vacancies WHERE id = $1', [id]);
-      return res.json(mapVacancy(rows[0]));
+      return res.json(mapVacancy(vacCheck.rows[0]));
     }
 
     values.push(id);
     const query = `UPDATE vacancies SET ${fields.join(', ')}, updated_at = NOW() WHERE id = $${idx} RETURNING *`;
     const { rows } = await pool.query(query, values);
     clearDocListCache();
-    res.json(mapVacancy(rows[0]));
+    res.json(mapVacancy(rows[0] || vacCheck.rows[0]));
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Error updating vacancy:', error);
+    res.status(500).json({ error: error.message || 'Failed to update vacancy status' });
   }
 }
 
@@ -275,11 +344,33 @@ export async function fetchVacancyDocuments(req, res) {
          WHERE job_cluster_id = $1`,
         [jobClusterId]
       );
+      await pool.query(
+        `UPDATE document_audit_logs
+         SET is_open = TRUE
+         WHERE application_id IN (
+           SELECT a.id FROM applications a WHERE a.job_cluster_id = $1
+         )
+         OR applicant_id IN (
+           SELECT a.applicant_id::text FROM applications a WHERE a.job_cluster_id = $1
+         )`,
+        [jobClusterId]
+      );
     } else {
       await pool.query(
         `UPDATE vacancies 
          SET doc_fetch_preference = 'FETCH_NEW', has_fetched_docs = TRUE, doc_fetched_at = NOW(), updated_at = NOW() 
          WHERE id = $1`,
+        [id]
+      );
+      await pool.query(
+        `UPDATE document_audit_logs
+         SET is_open = TRUE
+         WHERE application_id IN (
+           SELECT a.id FROM applications a JOIN vacancies v ON (a.job_cluster_id = v.job_cluster_id OR v.id = $1) WHERE v.id = $1
+         )
+         OR applicant_id IN (
+           SELECT a.applicant_id::text FROM applications a JOIN vacancies v ON (a.job_cluster_id = v.job_cluster_id OR v.id = $1) WHERE v.id = $1
+         )`,
         [id]
       );
     }
