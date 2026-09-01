@@ -99,11 +99,40 @@ export default function ApplicationsPage() {
   const [selectedDocKey, setSelectedDocKey] = useState('pds');
   const [docsLoading, setDocsLoading] = useState(false);
   const [docIframeLoading, setDocIframeLoading] = useState(true);
+  const [docIframeError, setDocIframeError] = useState(false);
   const [isDocFullscreen, setIsDocFullscreen] = useState(false);
 
   useEffect(() => {
     setDocIframeLoading(true);
-  }, [selectedDocKey, showReviewDocsVault]);
+    setDocIframeError(false);
+
+    if (showReviewDocsVault && reviewApp?.id && selectedDocKey) {
+      const selectedDocInfo = availableDocs.find(d => d.key === selectedDocKey);
+      if (selectedDocInfo?.existsInAzure) {
+        let isMounted = true;
+        const apiHost = import.meta.env.VITE_API_URL || window.location.origin;
+        const token = localStorage.getItem('agap_token');
+        const url = `${apiHost}/api/applications/${reviewApp.id}/documents/${selectedDocKey}/download?token=${token}&dpi=98`;
+        fetch(url, { method: 'HEAD' })
+          .then(res => {
+            if (isMounted) {
+              const contentType = (res.headers.get('content-type') || '').toLowerCase();
+              if (!res.ok || contentType.includes('text/xml') || contentType.includes('application/xml') || contentType.includes('json')) {
+                setDocIframeError(true);
+                setDocIframeLoading(false);
+              }
+            }
+          })
+          .catch(() => {
+            if (isMounted) {
+              setDocIframeError(true);
+              setDocIframeLoading(false);
+            }
+          });
+        return () => { isMounted = false; };
+      }
+    }
+  }, [selectedDocKey, showReviewDocsVault, reviewApp?.id, availableDocs]);
 
   React.useEffect(() => {
     const handleTourUpdate = () => {
@@ -1511,7 +1540,40 @@ export default function ApplicationsPage() {
                       alignItems: 'stretch'
                     }}>
                       {existsInAzure ? (
-                        isPdf ? (
+                        docIframeError ? (
+                          <div style={{ textAlign: 'center', color: '#64748B', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '12px', minHeight: '400px', width: '100%', padding: '32px' }}>
+                            <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#EF4444" strokeWidth="1.5">
+                              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                              <line x1="12" y1="9" x2="12" y2="13" />
+                              <line x1="12" y1="17" x2="12.01" y2="17" />
+                            </svg>
+                            <b style={{ fontSize: '15px', color: '#1E293B' }}>Document File Unavailable</b>
+                            <span style={{ fontSize: '12.5px', maxWidth: '360px', color: '#64748B', lineHeight: '1.4' }}>
+                              The requested document file could not be retrieved from Azure storage or returned a load error.
+                            </span>
+                            <a
+                              href={`${import.meta.env.VITE_API_URL || window.location.origin}/api/applications/${reviewApp.id}/documents/${selectedDocKey}/download?token=${localStorage.getItem('agap_token')}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              style={{
+                                marginTop: '8px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                padding: '8px 16px',
+                                fontSize: '12px',
+                                fontWeight: '700',
+                                color: '#0EA5E9',
+                                backgroundColor: '#F0F9FF',
+                                border: '1px solid #BAE6FD',
+                                borderRadius: '8px',
+                                textDecoration: 'none'
+                              }}
+                            >
+                              Try Direct Download
+                            </a>
+                          </div>
+                        ) : isPdf ? (
                           <div style={{ width: '100%', height: '600px', position: 'relative' }}>
                             {docIframeLoading && (
                               <div style={{
@@ -1548,6 +1610,10 @@ export default function ApplicationsPage() {
                             <iframe
                               src={`${import.meta.env.VITE_API_URL || window.location.origin}/api/applications/${reviewApp.id}/documents/${selectedDocKey}/download?token=${localStorage.getItem('agap_token')}&dpi=98`}
                               onLoad={() => setDocIframeLoading(false)}
+                              onError={() => {
+                                setDocIframeError(true);
+                                setDocIframeLoading(false);
+                              }}
                               style={{ width: '100%', height: '600px', border: 'none', borderRadius: '0 0 12px 12px', display: docIframeLoading ? 'none' : 'block' }}
                               title="Azure Document Viewer"
                             />

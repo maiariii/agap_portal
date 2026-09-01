@@ -29,10 +29,41 @@ export default function FullScreenDocViewer({
   DOC_REQUIREMENTS = []
 }) {
   const [iframeLoading, setIframeLoading] = useState(true);
+  const [hasError, setHasError] = useState(false);
+
+  const currentDocInfo = availableDocs.find(d => d.key === selectedDocKey);
+  const existsInAzure = !!currentDocInfo?.existsInAzure;
+  const filename = currentDocInfo?.filename || '';
+  const isPdf = filename.toLowerCase().endsWith('.pdf') || !filename.includes('.');
+  const token = typeof window !== 'undefined' ? localStorage.getItem('agap_token') : '';
+  const apiHost = import.meta.env.VITE_API_URL || (typeof window !== 'undefined' ? window.location.origin : '');
+  const documentUrl = applicationId && selectedDocKey ? `${apiHost}/api/applications/${applicationId}/documents/${selectedDocKey}/download?token=${token}&dpi=98` : '';
 
   useEffect(() => {
     setIframeLoading(true);
-  }, [selectedDocKey]);
+    setHasError(false);
+
+    if (isOpen && existsInAzure && isPdf && documentUrl) {
+      let isMounted = true;
+      fetch(documentUrl, { method: 'HEAD' })
+        .then(res => {
+          if (isMounted) {
+            const contentType = (res.headers.get('content-type') || '').toLowerCase();
+            if (!res.ok || contentType.includes('text/xml') || contentType.includes('application/xml') || contentType.includes('json')) {
+              setHasError(true);
+              setIframeLoading(false);
+            }
+          }
+        })
+        .catch(() => {
+          if (isMounted) {
+            setHasError(true);
+            setIframeLoading(false);
+          }
+        });
+      return () => { isMounted = false; };
+    }
+  }, [isOpen, selectedDocKey, existsInAzure, isPdf, documentUrl]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -45,14 +76,6 @@ export default function FullScreenDocViewer({
   }, [isOpen, onClose]);
 
   if (!isOpen) return null;
-
-  const currentDocInfo = availableDocs.find(d => d.key === selectedDocKey);
-  const existsInAzure = !!currentDocInfo?.existsInAzure;
-  const filename = currentDocInfo?.filename || '';
-  const isPdf = filename.toLowerCase().endsWith('.pdf');
-  const token = localStorage.getItem('agap_token');
-  const apiHost = import.meta.env.VITE_API_URL || window.location.origin;
-  const documentUrl = `${apiHost}/api/applications/${applicationId}/documents/${selectedDocKey}/download?token=${token}&dpi=98`;
 
   const docList = DOC_REQUIREMENTS.length > 0 
     ? DOC_REQUIREMENTS 
@@ -101,7 +124,7 @@ export default function FullScreenDocViewer({
           <div>
             <div style={{ fontSize: '15px', fontWeight: '700', color: '#F8FAFC', display: 'flex', alignItems: 'center', gap: '8px' }}>
               {DOC_LABELS[selectedDocKey] || selectedDocKey}
-              {existsInAzure && (
+              {existsInAzure && !hasError && (
                 <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '12px', backgroundColor: 'rgba(34, 197, 94, 0.2)', color: '#4ADE80', fontWeight: '600' }}>
                   ✓ Uploaded
                 </span>
@@ -205,7 +228,42 @@ export default function FullScreenDocViewer({
       {/* Main Fullscreen Document Frame */}
       <div style={{ flex: 1, width: '100%', position: 'relative', overflow: 'hidden', backgroundColor: '#0F172A' }}>
         {existsInAzure ? (
-          isPdf ? (
+          hasError ? (
+            <div style={{ width: '100%', height: '100%', padding: '32px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#F8FAFC' }}>
+              <div style={{ backgroundColor: '#1E293B', borderRadius: '16px', padding: '32px', border: '1px solid #334155', textAlign: 'center', maxWidth: '520px' }}>
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#F87171" strokeWidth="1.5" style={{ marginBottom: '16px' }}>
+                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                  <line x1="12" y1="9" x2="12" y2="13" />
+                  <line x1="12" y1="17" x2="12.01" y2="17" />
+                </svg>
+                <h3 style={{ margin: '0 0 8px', fontSize: '18px', color: '#F8FAFC' }}>Document File Unavailable</h3>
+                <p style={{ margin: '0 0 20px', fontSize: '13px', color: '#94A3B8', lineHeight: '1.5' }}>
+                  The file for <b>{DOC_LABELS[selectedDocKey] || selectedDocKey}</b> was not found in storage or could not be loaded. Please contact support or request a document re-upload.
+                </p>
+                <div style={{ display: 'flex', justifyContent: 'center', gap: '12px' }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHasError(false);
+                      setIframeLoading(true);
+                    }}
+                    style={{
+                      padding: '10px 20px',
+                      fontSize: '13px',
+                      fontWeight: '700',
+                      color: '#F8FAFC',
+                      backgroundColor: '#0EA5E9',
+                      border: 'none',
+                      borderRadius: '8px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Retry Loading
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : isPdf ? (
             <div style={{ width: '100%', height: '100%', position: 'relative' }}>
               {iframeLoading && (
                 <div style={{
@@ -243,6 +301,10 @@ export default function FullScreenDocViewer({
               <iframe
                 src={documentUrl}
                 onLoad={() => setIframeLoading(false)}
+                onError={() => {
+                  setHasError(true);
+                  setIframeLoading(false);
+                }}
                 style={{ width: '100%', height: '100%', border: 'none', display: iframeLoading ? 'none' : 'block' }}
                 title="Full Screen Document Viewer"
               />

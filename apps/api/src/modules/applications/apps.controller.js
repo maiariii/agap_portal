@@ -2,7 +2,13 @@ import { pool } from '../../config/db.js';
 import { getHydratedApplications } from './apps.service.js';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
-import { BlobServiceClient } from '@azure/storage-blob';
+import { 
+  BlobServiceClient, 
+  generateBlobSASQueryParameters, 
+  BlobSASPermissions, 
+  StorageSharedKeyCredential, 
+  SASProtocol 
+} from '@azure/storage-blob';
 import fs from 'fs';
 import PizZip from 'pizzip';
 import Docxtemplater from 'docxtemplater';
@@ -455,6 +461,81 @@ function getAzureContainerClient() {
   return azureContainerClientInstance;
 }
 
+function getStorageCredential() {
+  const connStr = process.env.AZURE_STORAGE_CONNECTION_STRING;
+  if (!connStr || connStr === 'ReplaceWithYourAzureStorageConnectionString') return null;
+  const matchesName = connStr.match(/AccountName=([^;]+)/);
+  const matchesKey = connStr.match(/AccountKey=([^;]+)/);
+  if (matchesName && matchesKey) {
+    return new StorageSharedKeyCredential(matchesName[1], matchesKey[1]);
+  }
+  return null;
+}
+
+export function extractBlobPath(urlOrPath) {
+  if (!urlOrPath) return '';
+  if (urlOrPath.startsWith('http://') || urlOrPath.startsWith('https://')) {
+    try {
+      const u = new URL(urlOrPath);
+      let p = u.pathname;
+      if (p.startsWith('/')) p = p.slice(1);
+      const slashIdx = p.indexOf('/');
+      if (slashIdx !== -1) {
+        return p.slice(slashIdx + 1);
+      }
+      return p;
+    } catch (e) {
+      return urlOrPath;
+    }
+  }
+  return urlOrPath;
+}
+
+export function generateSignedBlobUrl(urlOrBlobPath) {
+  if (!urlOrBlobPath) return null;
+  const credential = getStorageCredential();
+  if (!credential) return urlOrBlobPath;
+
+  try {
+    let containerName = process.env.AZURE_FOLDER_NAME || 'staging-agap';
+    let blobName = urlOrBlobPath;
+
+    if (urlOrBlobPath.startsWith('http://') || urlOrBlobPath.startsWith('https://')) {
+      const u = new URL(urlOrBlobPath);
+      let p = u.pathname;
+      if (p.startsWith('/')) p = p.slice(1);
+      const slashIdx = p.indexOf('/');
+      if (slashIdx !== -1) {
+        containerName = p.slice(0, slashIdx);
+        blobName = p.slice(slashIdx + 1);
+      } else {
+        blobName = p;
+      }
+    }
+
+    const queryIdx = blobName.indexOf('?');
+    if (queryIdx !== -1) {
+      blobName = blobName.slice(0, queryIdx);
+    }
+
+    const expiresOn = new Date(Date.now() + 60 * 60 * 1000);
+    const sasOptions = {
+      containerName,
+      blobName,
+      permissions: BlobSASPermissions.parse('r'),
+      startsOn: new Date(Date.now() - 5 * 60 * 1000),
+      expiresOn,
+      protocol: SASProtocol.Https
+    };
+
+    const sasToken = generateBlobSASQueryParameters(sasOptions, credential).toString();
+    return `https://${credential.accountName}.blob.core.windows.net/${containerName}/${blobName}?${sasToken}`;
+  } catch (err) {
+    console.error('[Azure SAS Generation Error]:', err.message);
+    return urlOrBlobPath;
+  }
+}
+
 const docListCache = new Map();
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
@@ -479,6 +560,7 @@ const getFolderAliasesFromKey = (k) => {
   const folderSet = new Set([cleanK, cleanK.replace(/_/g, '-')]);
 
   if (cleanK === 'pds' || cleanK === 'personal-data-sheet') {
+    folderSet.add('notarized-personal-data-sheet');
     folderSet.add('personal-data-sheet');
     folderSet.add('pds');
   }
@@ -518,6 +600,7 @@ const getFolderAliasesFromKey = (k) => {
     folderSet.add('resume');
   }
   if (cleanK === 'coe' || cleanK === 'certificate_of_employment' || cleanK === 'certificate-of-employment' || cleanK.includes('employment')) {
+    folderSet.add('service-record---certificate-of-employment');
     folderSet.add('certificate-of-employment');
     folderSet.add('certificate_of_employment');
     folderSet.add('certificate-of-employment-coe');
@@ -629,7 +712,7 @@ export async function getApplicationDocuments(req, res) {
   console.log(`[Azure Storage] Scoped lookup for application ID "${id}"...`);
   
   const appQuery = await pool.query(
-    `SELECT a.id as application_id, a.applicant_id, a.letter_of_intent, a.sworn_document, a.sworn_document as sworn_declaration, ap.id as applicant_table_id, ap.applicant_number, ap.code, ap.surname, ap.first_name 
+    `SELECT a.id, a.id as application_id, a.applicant_id, a.letter_of_intent, a.sworn_document, a.sworn_document as sworn_declaration, ap.id as applicant_table_id, ap.applicant_number, ap.code, ap.surname, ap.first_name, ap.other_information 
      FROM applications a 
      JOIN applicants ap ON a.applicant_id = ap.id 
      WHERE a.id = $1`,
@@ -637,6 +720,50 @@ export async function getApplicationDocuments(req, res) {
   );
   const app = appQuery.rows[0];
   const applicantCode = app ? (app.code || app.applicant_number || app.applicant_id || id) : id;
+
+  let otherInfo = {};
+  if (app?.other_information) {
+    if (typeof app.other_information === 'object') {
+      otherInfo = app.other_information;
+    } else {
+      try { otherInfo = JSON.parse(app.other_information); } catch(e){}
+    }
+  }
+  const otherDocs = (otherInfo && typeof otherInfo.documents === 'object' && otherInfo.documents !== null) ? otherInfo.documents : {};
+
+  const getDocUrlFromOtherInfo = (docKey) => {
+    if (!otherDocs || Object.keys(otherDocs).length === 0) return null;
+    const keyMap = {
+      pds: ['Personal Data Sheet', 'Notarized Personal Data Sheet', 'pds'],
+      work_experience: ['Work Experience Sheet', 'work_experience', 'work-experience'],
+      eligibility: ['Certificate of Eligibility', 'eligibility', 'coe'],
+      tor: ['Transcript of Records', 'tor', 'transcript-of-records'],
+      prc: ['Updated PRC License/ID', 'PRC', 'prc', 'prc-license'],
+      diploma: ['Diploma (optional)', 'Diploma', 'diploma'],
+      resume: ['Resume', 'resume', 'cv'],
+      coe: ['Service Record / Certificate of Employment', 'Certificate of Employment', 'coe', 'certificate_of_employment'],
+      outstanding_accomplishments: ['Outstanding Accomplishments', 'outstanding_accomplishments'],
+      performance_rating: ['Performance Rating', 'performance_rating'],
+      training_certificates: ['Training Certificates', 'training_certificates'],
+      application_education: ['Application of Education', 'application_education'],
+      application_learning: ['Application of Learning and Development', 'application_learning']
+    };
+
+    const targetNames = keyMap[docKey] || [docKey];
+    for (const name of targetNames) {
+      if (otherDocs[name]) return otherDocs[name];
+    }
+    const cleanDocKey = docKey.toLowerCase().replace(/_/g, '');
+    for (const [k, url] of Object.entries(otherDocs)) {
+      if (url && typeof url === 'string') {
+        const cleanK = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (cleanK.includes(cleanDocKey) || cleanDocKey.includes(cleanK)) {
+          return url;
+        }
+      }
+    }
+    return null;
+  };
 
   const documents = [
     { key: 'letter_of_intent', label: 'Letter of Intent', filename: `${applicantCode}_Letter_of_Intent.pdf`, existsInAzure: false },
@@ -659,73 +786,87 @@ export async function getApplicationDocuments(req, res) {
 
   const containerClient = getAzureContainerClient();
 
-  if (containerClient) {
-    try {
-      const azureBlobs = await getBlobsForApplicant(containerClient, app);
+  try {
+    let azureBlobs = [];
+    if (containerClient) {
+      azureBlobs = await getBlobsForApplicant(containerClient, app);
+    }
 
-      const findMatchingBlob = (appRow, docKey) => {
-        const isAppSpecific = ['letter_of_intent', 'sworn_declaration', 'sworn_document', 'cav'].includes(docKey);
-        const applicantPrefixes = getApplicantFolderPrefixes(appRow, isAppSpecific);
-        const folderAliases = getFolderAliasesFromKey(docKey);
+    const findMatchingBlob = (appRow, docKey) => {
+      const isAppSpecific = ['letter_of_intent', 'sworn_declaration', 'sworn_document', 'cav'].includes(docKey);
+      const applicantPrefixes = getApplicantFolderPrefixes(appRow, isAppSpecific);
+      const folderAliases = getFolderAliasesFromKey(docKey);
 
-        for (const appPrefix of applicantPrefixes) {
-          for (const folderAlias of folderAliases) {
-            const prefix = `${appPrefix}${folderAlias}/`.toLowerCase();
-            const matched = azureBlobs.find(b => b.nameLower.startsWith(prefix));
-            if (matched) return matched;
-          }
+      for (const appPrefix of applicantPrefixes) {
+        for (const folderAlias of folderAliases) {
+          const prefix = `${appPrefix}${folderAlias}/`.toLowerCase();
+          const matched = azureBlobs.find(b => b.nameLower.startsWith(prefix));
+          if (matched) return matched;
         }
-        for (const appPrefix of applicantPrefixes) {
-          for (const folderAlias of folderAliases) {
-            const matched = azureBlobs.find(b => {
-              if (!b.nameLower.startsWith(appPrefix)) return false;
-              const relativeName = b.nameLower.slice(appPrefix.length);
-              const pattern = folderAlias.replace(/[-_]/g, '[-_]');
-              const regex = new RegExp(`(?:^|[/_-])${pattern}(?:$|[/._-])`, 'i');
-              return regex.test(relativeName);
-            });
-            if (matched) return matched;
-          }
-        }
-        // If app-specific doc key (LOI/Sworn Doc), check if any blob explicitly contains application ID
-        if (isAppSpecific && (appRow.id || appRow.application_id)) {
-          const appIdStr = String(appRow.application_id || appRow.id).toLowerCase();
+      }
+      for (const appPrefix of applicantPrefixes) {
+        for (const folderAlias of folderAliases) {
           const matched = azureBlobs.find(b => {
-            const nameLower = b.nameLower;
-            return folderAliases.some(alias => nameLower.includes(alias.replace(/_/g, '-')) || nameLower.includes(alias)) &&
-                   (nameLower.includes(`_${appIdStr}`) || nameLower.includes(`-${appIdStr}`));
+            if (!b.nameLower.startsWith(appPrefix)) return false;
+            const relativeName = b.nameLower.slice(appPrefix.length);
+            const pattern = folderAlias.replace(/[-_]/g, '[-_]');
+            const regex = new RegExp(`(?:^|[/_-])${pattern}(?:$|[/._-])`, 'i');
+            return regex.test(relativeName);
           });
           if (matched) return matched;
         }
-        return null;
-      };
+      }
+      if (isAppSpecific && (appRow.id || appRow.application_id)) {
+        const appIdStr = String(appRow.application_id || appRow.id).toLowerCase();
+        const matched = azureBlobs.find(b => {
+          const nameLower = b.nameLower;
+          return folderAliases.some(alias => nameLower.includes(alias.replace(/_/g, '-')) || nameLower.includes(alias)) &&
+                 (nameLower.includes(`_${appIdStr}`) || nameLower.includes(`-${appIdStr}`));
+        });
+        if (matched) return matched;
+      }
+      return null;
+    };
 
-      documents.forEach(doc => {
-        const isAppSpecific = ['letter_of_intent', 'sworn_declaration', 'sworn_document', 'cav'].includes(doc.key);
+    documents.forEach(doc => {
+      const isAppSpecific = ['letter_of_intent', 'sworn_declaration', 'sworn_document', 'cav'].includes(doc.key);
 
-        if (doc.key === 'letter_of_intent' && app?.letter_of_intent) {
-          doc.existsInAzure = true;
-          doc.filename = app.letter_of_intent;
-          doc.url = `/api/applications/${id}/documents/${doc.key}/download`;
-        } else if ((doc.key === 'sworn_declaration' || doc.key === 'cav') && app?.sworn_declaration) {
-          doc.existsInAzure = true;
-          doc.filename = app.sworn_declaration;
-          doc.url = `/api/applications/${id}/documents/${doc.key}/download`;
-        } else {
-          const matchedBlob = findMatchingBlob(app, doc.key);
-          if (matchedBlob) {
-            doc.existsInAzure = true;
-            doc.filename = matchedBlob.name;
-            doc.url = `/api/applications/${id}/documents/${doc.key}/download`;
-          }
+      let targetBlobPath = '';
+      if (doc.key === 'letter_of_intent' && app?.letter_of_intent) {
+        targetBlobPath = extractBlobPath(app.letter_of_intent);
+      } else if ((doc.key === 'sworn_declaration' || doc.key === 'cav') && app?.sworn_declaration) {
+        targetBlobPath = extractBlobPath(app.sworn_declaration);
+      } else if (!isAppSpecific) {
+        const docUrlFromOtherInfo = getDocUrlFromOtherInfo(doc.key);
+        if (docUrlFromOtherInfo) {
+          targetBlobPath = extractBlobPath(docUrlFromOtherInfo);
         }
-      });
+      }
 
-      setCachedDocList(cacheKey, documents);
-      console.log(`[Azure Storage] Resolved blobs for applicant "${applicantCode}":`, documents.filter(d => d.existsInAzure).map(d => d.key));
-    } catch (err) {
-      console.error('[Azure Listing Error in getApplicationDocuments]', err.message);
-    }
+      // Check if targetBlobPath actually exists in azureBlobs
+      let matchedBlobInAzure = null;
+      if (targetBlobPath && azureBlobs.length > 0) {
+        matchedBlobInAzure = azureBlobs.find(b => b.name === targetBlobPath || b.nameLower === targetBlobPath.toLowerCase());
+      }
+
+      // Fall back to findMatchingBlob if targetBlobPath is missing or not found in azureBlobs
+      if (!matchedBlobInAzure) {
+        matchedBlobInAzure = findMatchingBlob(app, doc.key);
+      }
+
+      if (matchedBlobInAzure) {
+        doc.existsInAzure = true;
+        doc.filename = matchedBlobInAzure.name;
+        doc.url = `/api/applications/${id}/documents/${doc.key}/download`;
+      } else {
+        doc.existsInAzure = false;
+      }
+    });
+
+    setCachedDocList(cacheKey, documents);
+    console.log(`[Azure Storage] Resolved blobs for applicant "${applicantCode}":`, documents.filter(d => d.existsInAzure).map(d => d.key));
+  } catch (err) {
+    console.error('[Azure Listing Error in getApplicationDocuments]', err.message);
   }
 
   res.json({
@@ -744,19 +885,9 @@ export async function downloadApplicationDocument(req, res) {
 
   const containerClient = getAzureContainerClient();
 
-  if (!containerClient) {
-    console.log(`[Azure Storage] Connection string not configured. Serving local fallback optimized for ${requestedDpi} DPI.`);
-    res.setHeader('Content-Type', 'application/pdf');
-    const minimalPdf = Buffer.from(
-      'JVBERi0xLjUKMSAwIG9iago8PAovVHlwZSAvQ2F0YWxvZwovUGFnZXMgMiAwIFIKPj4KZW5kb2JqCjIgMCBvYmoKPDwKLVR5cGUgL1BhZ2VzCi9LaWRzIFszIDAgUl0KL0NvdW50IDEKPj4KZW5kb2JqCjMgMCBvYmoKPDwKLVR5cGUgL1BhcmVudCAyIDAgUgovTWVkaWFCb3ggWzAgMCA1OTUgODQyXQovQ29udGVudHMgNCAwIFIKPj4KZW5kb2JqCjQgMCBvYmoKPDwKL0xlbmd0aCA4Cj4+CnN0cmVhbQoKZW5kc3RyZWFtCmVuZG9iagp4cmVmCjAgNQowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwMTUgMDAwMDAgbiAKMDAwMDAwMDA3MCAwMDAwMCBuIAowMDAwMDAwMTIwIDAwMDAwIGYgCjAwMDAwMDAyMDEgMDAwMDAgbiAKdHJhaWxlcgo8PAovU2l6ZSA1Ci9Sb290 IDEgMCBSCj4+CnN0YXJ0eHJlZgoyNTcKJSVFT0YK',
-      'base64'
-    );
-    return res.send(minimalPdf);
-  }
-
   try {
     const appQuery = await pool.query(
-      `SELECT a.id as application_id, a.applicant_id, a.letter_of_intent, a.sworn_document, a.sworn_document as sworn_declaration, ap.id as applicant_table_id, ap.applicant_number, ap.code, ap.surname, ap.first_name 
+      `SELECT a.id, a.id as application_id, a.applicant_id, a.letter_of_intent, a.sworn_document, a.sworn_document as sworn_declaration, ap.id as applicant_table_id, ap.applicant_number, ap.code, ap.surname, ap.first_name, ap.other_information 
        FROM applications a 
        JOIN applicants ap ON a.applicant_id = ap.id 
        WHERE a.id = $1`,
@@ -765,40 +896,69 @@ export async function downloadApplicationDocument(req, res) {
     const app = appQuery.rows[0];
     const applicantCode = app ? (app.code || app.applicant_number || app.applicant_id || id) : id;
 
-    const allBlobs = await getBlobsForApplicant(containerClient, app);
+    let otherInfo = {};
+    if (app?.other_information) {
+      if (typeof app.other_information === 'object') {
+        otherInfo = app.other_information;
+      } else {
+        try { otherInfo = JSON.parse(app.other_information); } catch(e){}
+      }
+    }
+    const otherDocs = (otherInfo && typeof otherInfo.documents === 'object' && otherInfo.documents !== null) ? otherInfo.documents : {};
 
-    const extractBlobPath = (urlOrPath) => {
-      if (!urlOrPath) return '';
-      if (urlOrPath.startsWith('http://') || urlOrPath.startsWith('https://')) {
-        try {
-          const u = new URL(urlOrPath);
-          let p = u.pathname;
-          if (p.startsWith('/')) p = p.slice(1);
-          if (p.startsWith(AZURE_FOLDER_NAME + '/')) {
-            p = p.slice(AZURE_FOLDER_NAME.length + 1);
+    const getDocUrlFromOtherInfo = (docKey) => {
+      if (!otherDocs || Object.keys(otherDocs).length === 0) return null;
+      const keyMap = {
+        pds: ['Personal Data Sheet', 'Notarized Personal Data Sheet', 'pds'],
+        work_experience: ['Work Experience Sheet', 'work_experience', 'work-experience'],
+        eligibility: ['Certificate of Eligibility', 'eligibility', 'coe'],
+        tor: ['Transcript of Records', 'tor', 'transcript-of-records'],
+        prc: ['Updated PRC License/ID', 'PRC', 'prc', 'prc-license'],
+        diploma: ['Diploma (optional)', 'Diploma', 'diploma'],
+        resume: ['Resume', 'resume', 'cv'],
+        coe: ['Service Record / Certificate of Employment', 'Certificate of Employment', 'coe', 'certificate_of_employment'],
+        outstanding_accomplishments: ['Outstanding Accomplishments', 'outstanding_accomplishments'],
+        performance_rating: ['Performance Rating', 'performance_rating'],
+        training_certificates: ['Training Certificates', 'training_certificates'],
+        application_education: ['Application of Education', 'application_education'],
+        application_learning: ['Application of Learning and Development', 'application_learning']
+      };
+
+      const targetNames = keyMap[docKey] || [docKey];
+      for (const name of targetNames) {
+        if (otherDocs[name]) return otherDocs[name];
+      }
+      const cleanDocKey = docKey.toLowerCase().replace(/_/g, '');
+      for (const [k, url] of Object.entries(otherDocs)) {
+        if (url && typeof url === 'string') {
+          const cleanK = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+          if (cleanK.includes(cleanDocKey) || cleanDocKey.includes(cleanK)) {
+            return url;
           }
-          return p;
-        } catch (e) {
-          return urlOrPath;
         }
       }
-      return urlOrPath;
+      return null;
     };
 
-    const findBlob = (appRow) => {
-      const isAppSpecific = ['letter_of_intent', 'sworn_declaration', 'sworn_document', 'cav'].includes(key);
+    const isAppSpecific = ['letter_of_intent', 'sworn_declaration', 'sworn_document', 'cav'].includes(key);
+    const docUrlFromOtherInfo = !isAppSpecific ? getDocUrlFromOtherInfo(key) : null;
+    let targetBlobPath = docUrlFromOtherInfo ? extractBlobPath(docUrlFromOtherInfo) : '';
 
+    let allBlobs = [];
+    if (containerClient) {
+      allBlobs = await getBlobsForApplicant(containerClient, app);
+    }
+
+    const findBlob = (appRow) => {
       if (key === 'letter_of_intent' && appRow?.letter_of_intent) {
         const extracted = extractBlobPath(appRow.letter_of_intent);
-        const found = allBlobs.find(b => b.name === extracted || b.name.endsWith(extracted) || extracted.endsWith(b.name));
+        const found = allBlobs.find(b => b.name === extracted || b.nameLower === extracted.toLowerCase() || b.name.endsWith(extracted) || extracted.endsWith(b.name));
         if (found) return found.name;
-        return extracted;
       }
       if ((key === 'sworn_declaration' || key === 'cav') && appRow?.sworn_declaration) {
         const extracted = extractBlobPath(appRow.sworn_declaration);
-        const found = allBlobs.find(b => b.name === extracted || b.name.endsWith(extracted) || extracted.endsWith(b.name));
+        const found = allBlobs.find(b => b.name === extracted || b.nameLower === extracted.toLowerCase() || b.name.endsWith(extracted) || extracted.endsWith(b.name));
         if (found) return found.name;
-        return extracted;
       }
 
       const applicantPrefixes = getApplicantFolderPrefixes(appRow, isAppSpecific);
@@ -837,37 +997,66 @@ export async function downloadApplicationDocument(req, res) {
       return '';
     };
 
-    const matchedBlobName = findBlob(app);
-
-    if (!matchedBlobName) {
-      const availableBlobs = allBlobs.map(b => b.name);
-      console.log(`[Azure Storage] Strict match failed for applicant "${applicantCode}". Scoped blobs:`, availableBlobs);
-      return res.status(404).json({
-        error: `Azure Blob matching key "${key}" for applicant "${applicantCode}" not found in folder applicant-${app ? app.id : 'unknown'}.`,
-        availableBlobsInContainer: availableBlobs
-      });
+    // Check if targetBlobPath actually exists in allBlobs
+    let matchedBlobName = '';
+    if (targetBlobPath && allBlobs.length > 0) {
+      const existsInAllBlobs = allBlobs.find(b => b.name === targetBlobPath || b.nameLower === targetBlobPath.toLowerCase());
+      if (existsInAllBlobs) {
+        matchedBlobName = existsInAllBlobs.name;
+      }
     }
 
-    console.log(`[Azure Storage] Matches resolved to blob name: "${matchedBlobName}". Downloading...`);
-    const blobClient = containerClient.getBlobClient(matchedBlobName);
-    const downloadBlockBlobResponse = await blobClient.download(0);
-    
-    res.setHeader('Content-Type', downloadBlockBlobResponse.contentType || 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="${matchedBlobName}"`);
-    
-    downloadBlockBlobResponse.readableStreamBody.pipe(res);
+    // If targetBlobPath wasn't in allBlobs, fall back to findBlob
+    if (!matchedBlobName) {
+      matchedBlobName = findBlob(app);
+    }
+
+    if (matchedBlobName && containerClient) {
+      console.log(`[Azure Storage] Matches resolved to blob name: "${matchedBlobName}". Downloading...`);
+      try {
+        const blobClient = containerClient.getBlobClient(matchedBlobName);
+        if (req.method === 'HEAD') {
+          try {
+            const props = await blobClient.getProperties();
+            res.setHeader('Content-Type', props.contentType || 'application/pdf');
+            res.setHeader('Content-Length', props.contentLength || 0);
+            res.setHeader('Content-Disposition', `inline; filename="${matchedBlobName.split('/').pop() || matchedBlobName}"`);
+            return res.status(200).end();
+          } catch (propsErr) {
+            console.warn(`[Azure Storage] HEAD getProperties error for "${matchedBlobName}":`, propsErr.message);
+            return res.status(404).json({ error: `Document file for key "${key}" was not found in storage.` });
+          }
+        }
+        const downloadBlockBlobResponse = await blobClient.download(0);
+        
+        res.setHeader('Content-Type', downloadBlockBlobResponse.contentType || 'application/pdf');
+        res.setHeader('Content-Disposition', `inline; filename="${matchedBlobName.split('/').pop() || matchedBlobName}"`);
+        
+        return downloadBlockBlobResponse.readableStreamBody.pipe(res);
+      } catch (blobErr) {
+        console.warn(`[Azure Storage] Streaming error for "${matchedBlobName}":`, blobErr.message);
+        // Try fallback if matchedBlobName failed to stream and wasn't findBlob result
+        const fallbackBlob = findBlob(app);
+        if (fallbackBlob && fallbackBlob !== matchedBlobName) {
+          try {
+            console.log(`[Azure Storage] Trying fallback blob: "${fallbackBlob}"...`);
+            const fallbackClient = containerClient.getBlobClient(fallbackBlob);
+            const downloadResponse = await fallbackClient.download(0);
+            res.setHeader('Content-Type', downloadResponse.contentType || 'application/pdf');
+            res.setHeader('Content-Disposition', `inline; filename="${fallbackBlob.split('/').pop() || fallbackBlob}"`);
+            return downloadResponse.readableStreamBody.pipe(res);
+          } catch (e) {
+            console.warn(`[Azure Storage] Fallback streaming error:`, e.message);
+          }
+        }
+      }
+    }
+
+    console.log(`[Azure Storage] Document blob for key "${key}" not found in storage.`);
+    return res.status(404).json({ error: `Document file for key "${key}" was not found in storage. Please contact support or re-upload.` });
   } catch (err) {
     console.error(`[Azure Storage Error] Failed to process blob download for key "${key}":`, err.message);
-    if (err.statusCode === 404 || (err.message && (err.message.includes('does not exist') || err.message.includes('BlobNotFound')))) {
-      console.log(`[Azure Storage] Blob missing in Azure container. Serving fallback PDF.`);
-      res.setHeader('Content-Type', 'application/pdf');
-      const minimalPdf = Buffer.from(
-        'JVBERi0xLjUKMSAwIG9iago8PAovVHlwZSAvQ2F0YWxvZwovUGFnZXMgMiAwIFIKPj4KZW5kb2JqCjIgMCBvYmoKPDwKLVR5cGUgL1BhZ2VzCi9LaWRzIFszIDAgUl0KL0NvdW50IDEKPj4KZW5kb2JqCjMgMCBvYmoKPDwKLVR5cGUgL1BhcmVudCAyIDAgUgovTWVkaWFCb3ggWzAgMCA1OTUgODQyXQovQ29udGVudHMgNCAwIFIKPj4KZW5kb2JqCjQgMCBvYmoKPDwKL0xlbmd0aCA4Cj4+CnN0cmVhbQoKZW5kc3RyZWFtCmVuZG9iagp4cmVmCjAgNQowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwMTUgMDAwMDA meSAKMDAwMDAwMDA3MCAwMDAwMCBuIAowMDAwMDAwMTIwIDAwMDAwIGYgCjAwMDAwMDAyMDEgMDAwMDAgbiAKdHJhaWxlcgo8PAovU2l6ZSA1Ci9Sb290IDEgMCBSCj4+CnN0YXJ0eHJlZgoyNTcKJSVFT0YK',
-        'base64'
-      );
-      return res.send(minimalPdf);
-    }
-    res.status(500).json({ error: `Azure Blob download failed: ${err.message}` });
+    return res.status(404).json({ error: `Document file for key "${key}" was not found in storage.` });
   }
 }
 
