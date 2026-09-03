@@ -463,6 +463,85 @@ function getAzureContainerClient() {
   return azureContainerClientInstance;
 }
 
+/**
+ * Streams a specific blob directly from Azure Blob Storage or public URL.
+ * Strictly used for application-bound documents (e.g. Letter of Intent, CAV) where NO fallback is permitted.
+ */
+async function streamBlobDirectly(rawUrlOrPath, res, defaultFilename = 'document.pdf') {
+  const connString = process.env.AZURE_STORAGE_CONNECTION_STRING;
+  const defaultContainer = process.env.AZURE_FOLDER_NAME || "staging-agap";
+
+  let containerName = defaultContainer;
+  let blobPath = rawUrlOrPath;
+
+  if (rawUrlOrPath.startsWith('http://') || rawUrlOrPath.startsWith('https://')) {
+    try {
+      const u = new URL(rawUrlOrPath);
+      let p = decodeURIComponent(u.pathname);
+      if (p.startsWith('/')) p = p.slice(1);
+      const firstSlashIdx = p.indexOf('/');
+      if (firstSlashIdx !== -1) {
+        containerName = p.slice(0, firstSlashIdx);
+        blobPath = p.slice(firstSlashIdx + 1);
+      } else {
+        blobPath = p;
+      }
+    } catch (e) {
+      blobPath = rawUrlOrPath;
+    }
+  } else {
+    if (blobPath.startsWith(`${containerName}/`)) {
+      blobPath = blobPath.slice(containerName.length + 1);
+    }
+  }
+
+  const filename = blobPath.split('/').pop() || defaultFilename;
+
+  if (connString && connString !== 'ReplaceWithYourAzureStorageConnectionString') {
+    try {
+      const blobServiceClient = BlobServiceClient.fromConnectionString(connString);
+      const containerClient = blobServiceClient.getContainerClient(containerName);
+      const blobClient = containerClient.getBlobClient(blobPath);
+
+      const exists = await blobClient.exists();
+      if (exists) {
+        const downloadResponse = await blobClient.download(0);
+        res.setHeader('Content-Type', downloadResponse.contentType || 'application/pdf');
+        res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+        if (downloadResponse.contentLength) {
+          res.setHeader('Content-Length', downloadResponse.contentLength);
+        }
+        console.log(`[streamBlobDirectly] 🟢 Successfully streamed "${blobPath}" from container "${containerName}".`);
+        return downloadResponse.readableStreamBody.pipe(res);
+      } else {
+        console.warn(`[streamBlobDirectly] ⚠️ Blob not found in Azure container "${containerName}": "${blobPath}"`);
+      }
+    } catch (err) {
+      console.error(`[streamBlobDirectly Error] Failed to stream blob "${blobPath}":`, err.message);
+    }
+  }
+
+  // Attempt direct HTTP fetch if public URL
+  if (rawUrlOrPath.startsWith('http://') || rawUrlOrPath.startsWith('https://')) {
+    try {
+      const fetchRes = await fetch(rawUrlOrPath);
+      if (fetchRes.ok) {
+        const arrayBuf = await fetchRes.arrayBuffer();
+        res.setHeader('Content-Type', fetchRes.headers.get('content-type') || 'application/pdf');
+        res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+        console.log(`[streamBlobDirectly] 🟢 Successfully fetched public URL: "${rawUrlOrPath}".`);
+        return res.send(Buffer.from(arrayBuf));
+      }
+    } catch (e) {
+      console.error(`[streamBlobDirectly Public Fetch Error]`, e.message);
+    }
+  }
+
+  // Strictly NO fallback placeholder PDF!
+  console.log(`[streamBlobDirectly] ⛔ Document file not found in storage: "${filename}". Returning 404.`);
+  return res.status(404).json({ error: `Document file not found in storage: ${filename}` });
+}
+
 const docListCache = new Map();
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
@@ -688,9 +767,11 @@ export async function getApplicationDocuments(req, res) {
 
   console.log(`[getApplicationDocuments] 🚀 Processing lookup for App ID "${id}", Applicant Code "${applicantCode}", Applicant ID "${app?.applicant_id}"`);
 
-  // 1. Match from document_audit_logs first
+  // 1. Match from document_audit_logs first (EXCLUDE letter_of_intent, sworn_declaration, cav)
   if (auditLogResult.documents && auditLogResult.documents.length > 0) {
     documents.forEach(doc => {
+      if (['letter_of_intent', 'sworn_declaration', 'cav'].includes(doc.key)) return;
+
       const mappedTypes = DOCUMENT_TYPE_MAP[doc.key] || [];
       const matchedAudit = auditLogResult.documents.find(a => 
         mappedTypes.some(mt => mt.toLowerCase() === (a.document_type || '').toLowerCase())
@@ -713,7 +794,7 @@ export async function getApplicationDocuments(req, res) {
     });
   }
 
-  // 2. Resolve baseline documents from applicant's other_information.documents or application.documents
+  // 2. Resolve baseline documents from applicant's other_information.documents or application.documents (EXCLUDE letter_of_intent, sworn_declaration, cav)
   const otherDocs = app?.other_information?.documents || {};
   let parsedAppDocs = {};
   if (app?.app_documents) {
@@ -724,6 +805,7 @@ export async function getApplicationDocuments(req, res) {
 
   documents.forEach(doc => {
     if (doc.existsInAzure) return;
+    if (['letter_of_intent', 'sworn_declaration', 'cav'].includes(doc.key)) return;
 
     const mappedTypes = DOCUMENT_TYPE_MAP[doc.key] || [doc.label];
     let baselineUrl = null;
@@ -750,11 +832,58 @@ export async function getApplicationDocuments(req, res) {
     }
   });
 
+  // 3. STRICT RESOLUTION FOR LETTER OF INTENT AND SWORN / CAV (ONLY FROM APPLICATIONS TABLE, NO FALLBACK NA)
+  const loiDoc = documents.find(d => d.key === 'letter_of_intent');
+  if (loiDoc) {
+    const rawLoi = app?.letter_of_intent?.trim();
+    if (rawLoi) {
+      loiDoc.existsInAzure = true;
+      loiDoc.filename = rawLoi.split('/').pop();
+      loiDoc.currentBlobUrl = rawLoi;
+      loiDoc.latestBlobUrl = rawLoi;
+      loiDoc.effectiveBlobUrl = rawLoi;
+      loiDoc.isLatest = true;
+      loiDoc.url = `/api/applications/${id}/documents/letter_of_intent/download`;
+      console.log(`[getApplicationDocuments] 🟢 Strict application LOI found: ${loiDoc.filename}`);
+    } else {
+      loiDoc.existsInAzure = false;
+      loiDoc.filename = null;
+      loiDoc.currentBlobUrl = null;
+      loiDoc.latestBlobUrl = null;
+      loiDoc.effectiveBlobUrl = null;
+      loiDoc.url = null;
+      console.log(`[getApplicationDocuments] ⚪ No LOI in applications table for App ID "${id}". Marked not uploaded.`);
+    }
+  }
+
+  const cavDocs = documents.filter(d => d.key === 'sworn_declaration' || d.key === 'cav');
+  cavDocs.forEach(cavDoc => {
+    const rawCav = (app?.sworn_document || app?.sworn_declaration)?.trim();
+    if (rawCav) {
+      cavDoc.existsInAzure = true;
+      cavDoc.filename = rawCav.split('/').pop();
+      cavDoc.currentBlobUrl = rawCav;
+      cavDoc.latestBlobUrl = rawCav;
+      cavDoc.effectiveBlobUrl = rawCav;
+      cavDoc.isLatest = true;
+      cavDoc.url = `/api/applications/${id}/documents/${cavDoc.key}/download`;
+      console.log(`[getApplicationDocuments] 🟢 Strict application CAV found: ${cavDoc.filename}`);
+    } else {
+      cavDoc.existsInAzure = false;
+      cavDoc.filename = null;
+      cavDoc.currentBlobUrl = null;
+      cavDoc.latestBlobUrl = null;
+      cavDoc.effectiveBlobUrl = null;
+      cavDoc.url = null;
+      console.log(`[getApplicationDocuments] ⚪ No CAV/Sworn doc in applications table for App ID "${id}". Marked not uploaded.`);
+    }
+  });
+
   const containerClient = getAzureContainerClient();
 
   if (containerClient) {
     const hasAuditLogDocs = auditLogResult.documents && auditLogResult.documents.length > 0;
-    const hasUnresolvedDocs = !hasAuditLogDocs && documents.some(d => !d.existsInAzure);
+    const hasUnresolvedDocs = !hasAuditLogDocs && documents.some(d => !d.existsInAzure && !['letter_of_intent', 'sworn_declaration', 'cav'].includes(d.key));
     if (hasUnresolvedDocs) {
       try {
         let azureBlobs = await getBlobsForApplicant(containerClient, app);
@@ -768,7 +897,9 @@ export async function getApplicationDocuments(req, res) {
         azureBlobs.sort((a, b) => (b.lastModified || 0) - (a.lastModified || 0));
 
         const findMatchingBlob = (appRow, docKey) => {
-          const isAppSpecific = ['letter_of_intent', 'sworn_declaration', 'sworn_document', 'cav'].includes(docKey);
+          if (['letter_of_intent', 'sworn_declaration', 'sworn_document', 'cav'].includes(docKey)) return null;
+
+          const isAppSpecific = false;
           const applicantPrefixes = getApplicantFolderPrefixes(appRow, isAppSpecific);
           const folderAliases = getFolderAliasesFromKey(docKey);
 
@@ -791,37 +922,18 @@ export async function getApplicationDocuments(req, res) {
               if (matched) return matched;
             }
           }
-          // If app-specific doc key (LOI/Sworn Doc), check if any blob explicitly contains application ID
-          if (isAppSpecific && (appRow.id || appRow.application_id)) {
-            const appIdStr = String(appRow.application_id || appRow.id).toLowerCase();
-            const matched = azureBlobs.find(b => {
-              const nameLower = b.nameLower;
-              return folderAliases.some(alias => nameLower.includes(alias.replace(/_/g, '-')) || nameLower.includes(alias)) &&
-                     (nameLower.includes(`_${appIdStr}`) || nameLower.includes(`-${appIdStr}`));
-            });
-            if (matched) return matched;
-          }
           return null;
         };
 
         documents.forEach(doc => {
           if (doc.existsInAzure) return; // already resolved
+          if (['letter_of_intent', 'sworn_declaration', 'cav'].includes(doc.key)) return; // strictly no prefix scan fallback
 
-          if (doc.key === 'letter_of_intent' && app?.letter_of_intent) {
+          const matchedBlob = findMatchingBlob(app, doc.key);
+          if (matchedBlob) {
             doc.existsInAzure = true;
-            doc.filename = app.letter_of_intent;
+            doc.filename = matchedBlob.name;
             doc.url = `/api/applications/${id}/documents/${doc.key}/download`;
-          } else if ((doc.key === 'sworn_declaration' || doc.key === 'cav') && app?.sworn_declaration) {
-            doc.existsInAzure = true;
-            doc.filename = app.sworn_declaration;
-            doc.url = `/api/applications/${id}/documents/${doc.key}/download`;
-          } else {
-            const matchedBlob = findMatchingBlob(app, doc.key);
-            if (matchedBlob) {
-              doc.existsInAzure = true;
-              doc.filename = matchedBlob.name;
-              doc.url = `/api/applications/${id}/documents/${doc.key}/download`;
-            }
           }
         });
 
@@ -853,22 +965,8 @@ export async function downloadApplicationDocument(req, res) {
   if (!id || id === 'undefined' || id === 'null' || id === 'invalid' || !key || key === 'undefined' || key === 'invalid') {
     return res.status(400).json({ error: 'Invalid application ID or document key provided' });
   }
-  const AZURE_FOLDER_NAME = process.env.AZURE_FOLDER_NAME || "main-agap";
-  const requestedDpi = req.query.dpi || '98';
 
   res.setHeader('Cache-Control', 'private, max-age=300');
-
-  const containerClient = getAzureContainerClient();
-
-  if (!containerClient) {
-    console.log(`[Azure Storage] Connection string not configured. Serving local fallback optimized for ${requestedDpi} DPI.`);
-    res.setHeader('Content-Type', 'application/pdf');
-    const minimalPdf = Buffer.from(
-      'JVBERi0xLjUKMSAwIG9iago8PAovVHlwZSAvQ2F0YWxvZwovUGFnZXMgMiAwIFIKPj4KZW5kb2JqCjIgMCBvYmoKPDwKLVR5cGUgL1BhZ2VzCi9LaWRzIFszIDAgUl0KL0NvdW50IDEKPj4KZW5kb2JqCjMgMCBvYmoKPDwKLVR5cGUgL1BhcmVudCAyIDAgUgovTWVkaWFCb3ggWzAgMCA1OTUgODQyXQovQ29udGVudHMgNCAwIFIKPj4KZW5kb2JqCjQgMCBvYmoKPDwKL0xlbmd0aCA4Cj4+CnN0cmVhbQoKZW5kc3RyZWFtCmVuZG9iagp4cmVmCjAgNQowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwMTUgMDAwMDAgbiAKMDAwMDAwMDA3MCAwMDAwMCBuIAowMDAwMDAwMTIwIDAwMDAwIGYgCjAwMDAwMDAyMDEgMDAwMDAgbiAKdHJhaWxlcgo8PAovU2l6ZSA1Ci9Sb290 IDEgMCBSCj4+CnN0YXJ0eHJlZgoyNTcKJSVFT0YK',
-      'base64'
-    );
-    return res.send(minimalPdf);
-  }
 
   let auditLogResult = null;
   try {
@@ -881,6 +979,44 @@ export async function downloadApplicationDocument(req, res) {
       [id]
     );
     const app = appQuery.rows[0];
+    if (!app) {
+      return res.status(404).json({ error: 'Application not found' });
+    }
+
+    // STRICT APPLICATION-ONLY RULE FOR LOI AND CAV / SWORN DECLARATION (NO FALLBACK NA)
+    if (key === 'letter_of_intent') {
+      const rawLoi = app.letter_of_intent?.trim();
+      if (!rawLoi) {
+        console.log(`[downloadApplicationDocument] ⛔ Letter of Intent not found in applications table for App ID "${id}". Returning 404.`);
+        return res.status(404).json({ error: 'Letter of Intent not uploaded for this application' });
+      }
+      return await streamBlobDirectly(rawLoi, res, 'Letter_of_Intent.pdf');
+    }
+
+    if (key === 'sworn_declaration' || key === 'cav' || key === 'sworn_document') {
+      const rawCav = (app.sworn_document || app.sworn_declaration)?.trim();
+      if (!rawCav) {
+        console.log(`[downloadApplicationDocument] ⛔ Sworn Declaration / CAV not found in applications table for App ID "${id}". Returning 404.`);
+        return res.status(404).json({ error: 'Certification on Authenticity and Veracity (CAV) not uploaded for this application' });
+      }
+      return await streamBlobDirectly(rawCav, res, 'CAV.pdf');
+    }
+
+    const AZURE_FOLDER_NAME = process.env.AZURE_FOLDER_NAME || "main-agap";
+    const requestedDpi = req.query.dpi || '98';
+
+    const containerClient = getAzureContainerClient();
+
+    if (!containerClient) {
+      console.log(`[Azure Storage] Connection string not configured. Serving local fallback optimized for ${requestedDpi} DPI.`);
+      res.setHeader('Content-Type', 'application/pdf');
+      const minimalPdf = Buffer.from(
+        'JVBERi0xLjUKMSAwIG9iago8PAovVHlwZSAvQ2F0YWxvZwovUGFnZXMgMiAwIFIKPj4KZW5kb2JqCjIgMCBvYmoKPDwKLVR5cGUgL1BhZ2VzCi9LaWRzIFszIDAgUl0KL0NvdW50IDEKPj4KZW5kb2JqCjMgMCBvYmoKPDwKLVR5cGUgL1BhcmVudCAyIDAgUgovTWVkaWFCb3ggWzAgMCA1OTUgODQyXQovQ29udGVudHMgNCAwIFIKPj4KZW5kb2JqCjQgMCBvYmoKPDwKL0xlbmd0aCA4Cj4+CnN0cmVhbQoKZW5kc3RyZWFtCmVuZG9iagp4cmVmCjAgNQowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwMTUgMDAwMDAgbiAKMDAwMDAwMDA3MCAwMDAwMCBuIAowMDAwMDAwMTIwIDAwMDAwIGYgCjAwMDAwMDAyMDEgMDAwMDAgbiAKdHJhaWxlcgo8PAovU2l6ZSA1Ci9Sb290 IDEgMCBSCj4+CnN0YXJ0eHJlZgoyNTcKJSVFT0YK',
+        'base64'
+      );
+      return res.send(minimalPdf);
+    }
+
     const applicantCode = app ? (app.code || app.applicant_number || app.applicant_id || id) : id;
 
     auditLogResult = await fetchApplicantDocumentsFromAuditLogs({
