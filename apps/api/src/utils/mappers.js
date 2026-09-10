@@ -35,6 +35,19 @@ export function mapVacancy(row) {
   const docFetchPreference = isClosed ? 'RETAIN_OLD' : (row.doc_fetch_preference || 'RETAIN_OLD');
   const hasFetchedDocs = Boolean(row.has_fetched_docs);
 
+  let allowedEmails = [];
+  if (row.allowed_emails) {
+    if (Array.isArray(row.allowed_emails)) {
+      allowedEmails = row.allowed_emails;
+    } else if (typeof row.allowed_emails === 'string') {
+      try {
+        allowedEmails = JSON.parse(row.allowed_emails);
+      } catch (e) {
+        allowedEmails = [];
+      }
+    }
+  }
+
   return {
     id: row.id,
     positionId: row.position_id,
@@ -50,6 +63,7 @@ export function mapVacancy(row) {
     docFetchPreference,
     hasFetchedDocs,
     docFetchedAt: row.doc_fetched_at ? new Date(row.doc_fetched_at) : null,
+    allowedEmails: Array.isArray(allowedEmails) ? allowedEmails : [],
     postingStart: formatDateOnly(row.posting_start),
     postingEnd: formatDateOnly(row.posting_end),
     salaryGrade: row.salary_grade,

@@ -204,6 +204,211 @@ export default function VacanciesPage() {
   const [calMonth, setCalMonth] = useState(new Date().getMonth());
   const [calDocPolicy, setCalDocPolicy] = useState('RETAIN_OLD');
 
+  // Invite Modal states (for Closed vacancies)
+  const [showInviteModal, setShowInviteModal] = useState(false);
+  const [inviteVacancy, setInviteVacancy] = useState(null);
+  const [inviteAllowedEmails, setInviteAllowedEmails] = useState([]);
+  const [inviteEmailInput, setInviteEmailInput] = useState('');
+  const [inviteEmailError, setInviteEmailError] = useState('');
+  const [inviteSuggestions, setInviteSuggestions] = useState([]);
+  const [showInviteSuggestionsDropdown, setShowInviteSuggestionsDropdown] = useState(false);
+  const [inviteModalTab, setInviteModalTab] = useState('config'); // 'config' | 'invitations'
+  const [showRevokeConfirmModal, setShowRevokeConfirmModal] = useState(false);
+  const [revokeConfirmEmail, setRevokeConfirmEmail] = useState(null);
+  const [showResendConfirmModal, setShowResendConfirmModal] = useState(false);
+  const [resendConfirmEmail, setResendConfirmEmail] = useState(null);
+
+  const isValidEmailFormat = (email) => {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email).trim().toLowerCase());
+  };
+
+  const getApplicantNameForEmail = (email) => {
+    if (!email) return 'Applicant';
+    const match = (applications || []).find(a => {
+      const aEmail = a.applicant?.email_address || a.applicant_email_address || a.email_address || a.email || '';
+      return aEmail.toLowerCase() === email.toLowerCase();
+    });
+    if (match) {
+      return match.applicantName || match.applicant_name || match.applicant?.fullName || match.applicant?.name || email.split('@')[0];
+    }
+    const prefix = email.split('@')[0].replace(/[._-]/g, ' ');
+    return prefix.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+  };
+
+  // Autocomplete search for Invite modal
+  React.useEffect(() => {
+    if (!inviteEmailInput || !inviteEmailInput.trim() || !showInviteModal) {
+      setInviteSuggestions([]);
+      setShowInviteSuggestionsDropdown(false);
+      return;
+    }
+    const term = inviteEmailInput.trim().toLowerCase();
+    const delayDebounce = setTimeout(async () => {
+      try {
+        const data = await apiFetch(`/api/vacancies/applicants/autocomplete?q=${encodeURIComponent(term)}`);
+        let list = Array.isArray(data) ? data : [];
+
+        // Combine with local applications for instant matching
+        const localMatches = (applications || [])
+          .map(a => ({
+            email: a.applicant?.email_address || a.applicant_email_address || a.email_address || a.email || '',
+            name: a.applicantName || a.applicant_name || a.applicant?.fullName || a.applicant?.name || ''
+          }))
+          .filter(it => it.email && (it.email.toLowerCase().includes(term) || (it.name && it.name.toLowerCase().includes(term))));
+
+        const merged = new Map();
+        [...list, ...localMatches].forEach(item => {
+          if (item.email && !inviteAllowedEmails.includes(item.email.toLowerCase())) {
+            merged.set(item.email.toLowerCase(), {
+              email: item.email.toLowerCase(),
+              name: item.name || ''
+            });
+          }
+        });
+
+        const finalList = Array.from(merged.values()).slice(0, 10);
+        setInviteSuggestions(finalList);
+        setShowInviteSuggestionsDropdown(finalList.length > 0);
+      } catch (err) {
+        console.error('Error fetching applicant suggestions for invite:', err);
+      }
+    }, 200);
+    return () => clearTimeout(delayDebounce);
+  }, [inviteEmailInput, showInviteModal, inviteAllowedEmails, applications]);
+
+  const handleOpenInviteModal = (vac) => {
+    setInviteVacancy(vac);
+    const existing = Array.isArray(vac.allowedEmails) ? [...vac.allowedEmails] : [];
+    setInviteAllowedEmails(existing);
+    setInviteEmailInput('');
+    setInviteEmailError('');
+    setInviteSuggestions([]);
+    setShowInviteSuggestionsDropdown(false);
+    setInviteModalTab(existing.length > 0 ? 'invitations' : 'config');
+    setShowInviteModal(true);
+  };
+
+  const handleAddInviteEmail = () => {
+    const raw = inviteEmailInput.trim();
+    if (!raw) return;
+
+    const parts = raw.split(/[\s,]+/).map(e => e.trim().toLowerCase()).filter(Boolean);
+    let addedCount = 0;
+    let nextEmails = [...inviteAllowedEmails];
+    let errorMsg = '';
+
+    for (const p of parts) {
+      if (!isValidEmailFormat(p)) {
+        errorMsg = `Invalid email format: "${p}". Please enter a valid email address.`;
+        break;
+      }
+      if (nextEmails.includes(p)) {
+        errorMsg = `Email "${p}" is already in the list.`;
+        continue;
+      }
+      nextEmails.push(p);
+      addedCount++;
+    }
+
+    if (errorMsg && addedCount === 0) {
+      setInviteEmailError(errorMsg);
+      return;
+    }
+
+    setInviteAllowedEmails(nextEmails);
+    setInviteEmailInput('');
+    setInviteEmailError('');
+    setShowInviteSuggestionsDropdown(false);
+  };
+
+  const handleSelectInviteSuggestion = (email) => {
+    if (!email) return;
+    const cleanEmail = email.trim().toLowerCase();
+    if (isValidEmailFormat(cleanEmail) && !inviteAllowedEmails.includes(cleanEmail)) {
+      setInviteAllowedEmails(prev => [...prev, cleanEmail]);
+    }
+    setInviteEmailInput('');
+    setInviteEmailError('');
+    setShowInviteSuggestionsDropdown(false);
+    setInviteSuggestions([]);
+  };
+
+  const handleRemoveInviteEmail = (emailToRemove) => {
+    setInviteAllowedEmails(prev => prev.filter(e => e !== emailToRemove));
+    setInviteEmailError('');
+  };
+
+  const handleConfirmRevokeInvite = async () => {
+    if (!inviteVacancy || !revokeConfirmEmail) return;
+    const nextEmails = inviteAllowedEmails.filter(e => e.toLowerCase() !== revokeConfirmEmail.toLowerCase());
+    try {
+      await apiFetch(`/api/vacancies/${inviteVacancy.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          status: 'open',
+          docFetchPreference: 'RETAIN_OLD',
+          allowedEmails: nextEmails
+        })
+      });
+      setInviteAllowedEmails(nextEmails);
+      setInviteVacancy(prev => prev ? { ...prev, allowedEmails: nextEmails } : null);
+      setShowRevokeConfirmModal(false);
+      setRevokeConfirmEmail(null);
+      setToast({ message: 'Invitation revoked successfully.', type: 'success' });
+      loadAllData();
+    } catch (e) {
+      setToast({ message: e.message || 'Failed to revoke invitation', type: 'error' });
+    }
+  };
+
+  const handleConfirmResendInvite = () => {
+    if (!resendConfirmEmail) return;
+    setToast({ message: `Invitation resent successfully to ${resendConfirmEmail}.`, type: 'success' });
+    setShowResendConfirmModal(false);
+    setResendConfirmEmail(null);
+  };
+
+  const handleSaveInviteModal = async () => {
+    if (!inviteVacancy) return;
+
+    let currentEmails = [...inviteAllowedEmails];
+    if (inviteEmailInput.trim()) {
+      const raw = inviteEmailInput.trim().toLowerCase();
+      if (isValidEmailFormat(raw) && !currentEmails.includes(raw)) {
+        currentEmails.push(raw);
+        setInviteAllowedEmails(currentEmails);
+        setInviteEmailInput('');
+      }
+    }
+
+    if (currentEmails.length === 0) {
+      setInviteEmailError('Please add at least one valid email address to invite.');
+      setToast({ message: 'Please add at least one valid email address to invite.', type: 'error' });
+      return;
+    }
+
+    try {
+      await apiFetch(`/api/vacancies/${inviteVacancy.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          status: 'open',
+          docFetchPreference: 'RETAIN_OLD',
+          allowedEmails: currentEmails
+        })
+      });
+
+      setToast({
+        message: `Invitations saved! Access granted to ${currentEmails.length} applicant email(s).`,
+        type: 'success'
+      });
+      setInviteVacancy(prev => prev ? { ...prev, allowedEmails: currentEmails } : null);
+      setInviteModalTab('invitations');
+      loadAllData();
+    } catch (e) {
+      setToast({ message: e.message, type: 'error' });
+    }
+  };
+
   // NOSCA Scanning states
   const [showNosca, setShowNosca] = useState(false);
   const [showNoscaConfirm, setShowNoscaConfirm] = useState(false);
@@ -398,7 +603,7 @@ export default function VacanciesPage() {
       setCalYear(initDate.getFullYear());
       setCalMonth(initDate.getMonth());
 
-      // Reopening / Posting Decision Modal (Option A: Fetch Latest Document vs Option B: Retain Current Files)
+      // Reopening / Posting Decision Modal (Option A: Fetch Latest vs Option B: Retain Current)
       setCalDocPolicy(vac.docFetchPreference || 'RETAIN_OLD');
 
       // Check if all vacancies in the same division are closed
@@ -502,17 +707,19 @@ export default function VacanciesPage() {
     }
     try {
       const isClosedStatus = (calVacancy.status || '').toLowerCase() === 'closed';
+
       await apiFetch(`/api/vacancies/${calVacancy.id}`, {
         method: 'PUT',
         body: JSON.stringify({
           status: 'open',
           postingStart: calStart,
           postingEnd: calEnd,
-          docFetchPreference: calDocPolicy || 'RETAIN_OLD'
+          docFetchPreference: calDocPolicy || 'RETAIN_OLD',
+          allowedEmails: []
         })
       });
 
-      // Once Confirm & Open Vacancy succeeds, call the document fetching endpoint to retrieve updated records
+      // Once Confirm & Open Vacancy succeeds, call the document fetching endpoint to retrieve updated records if Option A
       if (calDocPolicy === 'FETCH_NEW') {
         try {
           await apiFetch(`/api/vacancies/${calVacancy.id}/fetch-documents`, {
@@ -525,7 +732,12 @@ export default function VacanciesPage() {
       }
 
       setShowCalendar(false);
-      setToast({ message: 'Vacancy posting opened successfully and latest documents retrieved!', type: 'success' });
+      setToast({ 
+        message: calDocPolicy === 'FETCH_NEW' 
+          ? 'Vacancy posting opened successfully and latest documents retrieved!' 
+          : 'Vacancy posting opened successfully!', 
+        type: 'success' 
+      });
       loadAllData();
     } catch (e) {
       setToast({ message: e.message, type: 'error' });
@@ -896,7 +1108,7 @@ export default function VacanciesPage() {
                     <option value="FILLED">FILLED</option>
                   </select>
                 </th>
-                <th>ACTION</th>
+                <th style={{ width: '190px', minWidth: '190px', textAlign: 'center' }}>ACTION</th>
               </tr>
             </thead>
             <tbody>
@@ -937,7 +1149,16 @@ export default function VacanciesPage() {
                       return (
                         <tr key={vac.id}>
                           <td className="row-num">{(vacPage - 1) * vacPageSize + idx + 1}</td>
-                          <td><b>{vac.itemNo}</b></td>
+                          <td>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                              <b>{vac.itemNo}</b>
+                              {Array.isArray(vac.allowedEmails) && vac.allowedEmails.length > 0 && (
+                                <span style={{ fontSize: '10px', color: '#4F46E5', background: '#EEF2FF', border: '1px solid #C7D2FE', borderRadius: '4px', padding: '1px 5px', width: 'fit-content', fontWeight: '700' }}>
+                                  👥 Restricted ({vac.allowedEmails.length})
+                                </span>
+                              )}
+                            </div>
+                          </td>
                           <td>{positions.find(p => p.id === vac.positionId)?.title || vac.title}</td>
                           <td>{vac.school || 'Division Pool'}</td>
 
@@ -953,33 +1174,87 @@ export default function VacanciesPage() {
                               {vac.fillingUpStatus === 'FILLED' ? 'FILLED' : 'UNFILLED'}
                             </span>
                           </td>
-                          <td style={{ textAlign: 'center' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'center' }}>
+                          <td style={{ textAlign: 'center', whiteSpace: 'nowrap', width: '190px', minWidth: '190px' }}>
+                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', justifyContent: 'center', flexWrap: 'nowrap' }}>
                               <button 
                                 className={`vac-action ${postingStatus === 'Open for Application' ? 'danger' : 'good'}`} 
                                 onClick={() => handleToggleVacancy(vac)}
+                                style={{
+                                  whiteSpace: 'nowrap',
+                                  padding: '5px 12px',
+                                  fontSize: '12px',
+                                  fontWeight: '700',
+                                  borderRadius: '8px',
+                                  minWidth: '56px',
+                                  height: '30px'
+                                }}
                               >
                                 {postingStatus === 'Open for Application' ? 'Close' : 'Open'}
                               </button>
+                              {postingStatus === 'Closed' && (
+                                <button
+                                  type="button"
+                                  className="vac-action"
+                                  onClick={() => handleOpenInviteModal(vac)}
+                                  title="Invite specific emails to access this closed vacancy"
+                                  style={{
+                                    whiteSpace: 'nowrap',
+                                    background: '#EEF2FF',
+                                    color: '#4338CA',
+                                    border: '1.5px solid #C7D2FE',
+                                    fontWeight: '700',
+                                    fontSize: '12px',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '5px',
+                                    padding: '5px 10px',
+                                    borderRadius: '8px',
+                                    height: '30px',
+                                    cursor: 'pointer',
+                                    boxShadow: '0 1px 2px rgba(79, 70, 229, 0.08)',
+                                    transition: 'all 0.15s ease'
+                                  }}
+                                  onMouseOver={e => {
+                                    e.currentTarget.style.background = '#4F46E5';
+                                    e.currentTarget.style.color = '#FFFFFF';
+                                    e.currentTarget.style.borderColor = '#4338CA';
+                                  }}
+                                  onMouseOut={e => {
+                                    e.currentTarget.style.background = '#EEF2FF';
+                                    e.currentTarget.style.color = '#4338CA';
+                                    e.currentTarget.style.borderColor = '#C7D2FE';
+                                  }}
+                                >
+                                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                                    <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                                    <polyline points="22,6 12,13 2,6"></polyline>
+                                  </svg>
+                                  <span>Invite</span>
+                                </button>
+                              )}
                               <button
+                                type="button"
                                 onClick={() => handleInitiateDeleteVacancy(vac)}
                                 title="Delete vacancy"
                                 style={{
-                                  background: 'none',
+                                  background: 'transparent',
                                   border: 'none',
                                   cursor: 'pointer',
                                   color: '#EF4444',
-                                  padding: '6px',
+                                  padding: '5px',
+                                  height: '30px',
+                                  width: '30px',
                                   display: 'inline-flex',
                                   alignItems: 'center',
                                   justifyContent: 'center',
-                                  borderRadius: '6px',
-                                  transition: 'background-color 0.2s'
+                                  borderRadius: '8px',
+                                  transition: 'background-color 0.15s ease',
+                                  flexShrink: 0
                                 }}
                                 onMouseOver={e => e.currentTarget.style.backgroundColor = '#FEE2E2'}
                                 onMouseOut={e => e.currentTarget.style.backgroundColor = 'transparent'}
                               >
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                   <polyline points="3 6 5 6 21 6"></polyline>
                                   <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
                                   <line x1="10" y1="11" x2="10" y2="17"></line>
@@ -1028,14 +1303,14 @@ export default function VacanciesPage() {
 
       {/* MODAL: STEP 1 - REOPEN DOCUMENT POLICY SELECTION */}
       {showDocPolicyModal && calVacancy && (
-        <div className="modal open" style={{ backdropFilter: 'blur(6px)', background: 'rgba(15, 23, 42, 0.55)' }}>
-          <div className="modal-box" style={{ width: 'min(620px, 94vw)', borderRadius: '24px', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)', border: '1px solid rgba(226, 232, 240, 0.8)', overflow: 'hidden', padding: 0 }}>
+        <div className="modal open" style={{ backdropFilter: 'blur(6px)', background: 'rgba(15, 23, 42, 0.55)', zIndex: 100000 }}>
+          <div className="modal-box" style={{ width: 'min(640px, 94vw)', maxHeight: '90vh', display: 'flex', flexDirection: 'column', borderRadius: '24px', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)', border: '1px solid rgba(226, 232, 240, 0.8)', overflow: 'hidden', padding: 0 }}>
             {/* Modal Header */}
-            <div className="modal-head" style={{ padding: '20px 28px', background: 'linear-gradient(180deg, #FFFFFF 0%, #F8FAFC 100%)', borderBottom: '1px solid #E2E8F0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div className="modal-head" style={{ padding: '18px 24px', background: 'linear-gradient(180deg, #FFFFFF 0%, #F8FAFC 100%)', borderBottom: '1px solid #E2E8F0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <span style={{ fontSize: '20px' }}>📂</span>
                 <div>
-                  <h3 style={{ margin: 0, fontSize: '17px', fontWeight: '800', color: '#0F172A', fontFamily: 'var(--font-heading)' }}>Reopen Vacancy — Document Policy</h3>
+                  <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '800', color: '#0F172A', fontFamily: 'var(--font-heading)' }}>Reopen Vacancy — Document Policy</h3>
                   <span style={{ fontSize: '11px', color: '#64748B', fontWeight: '600' }}>Step 1 of 2: Configure applicant document rules</span>
                 </div>
               </div>
@@ -1048,14 +1323,14 @@ export default function VacanciesPage() {
               </button>
             </div>
 
-            {/* Modal Content */}
-            <div style={{ padding: '24px 28px', background: '#FFFFFF' }}>
+            {/* Modal Content - Scrollable Body */}
+            <div style={{ padding: '20px 24px', background: '#FFFFFF', overflowY: 'auto', flex: 1 }}>
               {/* Position Context Card */}
-              <div style={{ background: 'linear-gradient(135deg, #F8FAFC 0%, #F1F5F9 100%)', border: '1px solid #E2E8F0', borderRadius: '16px', padding: '16px 20px', marginBottom: '22px', textAlign: 'left' }}>
+              <div style={{ background: 'linear-gradient(135deg, #F8FAFC 0%, #F1F5F9 100%)', border: '1px solid #E2E8F0', borderRadius: '16px', padding: '14px 18px', marginBottom: '18px', textAlign: 'left' }}>
                 <div style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: '800', color: '#64748B', marginBottom: '4px' }}>Target Vacancy Item</div>
-                <h4 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: '#0F172A', lineHeight: 1.3 }}>{calVacancy.title || 'Vacancy Item'}</h4>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '8px' }}>
-                  <span style={{ background: '#E2E8F0', color: '#334155', fontSize: '11px', fontWeight: '700', padding: '3px 10px', borderRadius: '8px', fontFamily: 'monospace' }}>
+                <h4 style={{ margin: 0, fontSize: '14.5px', fontWeight: '800', color: '#0F172A', lineHeight: 1.3 }}>{calVacancy.title || 'Vacancy Item'}</h4>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '6px' }}>
+                  <span style={{ background: '#E2E8F0', color: '#334155', fontSize: '11px', fontWeight: '700', padding: '2px 8px', borderRadius: '6px', fontFamily: 'monospace' }}>
                     {calVacancy.itemNo}
                   </span>
                   <span style={{ fontSize: '12px', color: '#64748B', fontWeight: '600' }}>
@@ -1066,11 +1341,11 @@ export default function VacanciesPage() {
 
               {/* Selection Section */}
               <div style={{ textAlign: 'left' }}>
-                <label style={{ fontSize: '11px', fontWeight: '800', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '12px', display: 'block' }}>
+                <label style={{ fontSize: '11px', fontWeight: '800', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '10px', display: 'block' }}>
                   Select Applicant Document Fetching Policy
                 </label>
                 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                   {/* Option 1: FETCH_NEW */}
                   <div
                     onClick={() => setCalDocPolicy('FETCH_NEW')}
@@ -1080,7 +1355,7 @@ export default function VacanciesPage() {
                       alignItems: 'center',
                       gap: '14px',
                       cursor: 'pointer',
-                      padding: '16px 18px',
+                      padding: '14px 16px',
                       borderRadius: '16px',
                       background: calDocPolicy === 'FETCH_NEW' ? 'linear-gradient(135deg, #ECFDF5 0%, #F0FDF4 100%)' : '#FFFFFF',
                       border: calDocPolicy === 'FETCH_NEW' ? '2px solid #10B981' : '1.5px solid #E2E8F0',
@@ -1100,8 +1375,8 @@ export default function VacanciesPage() {
                       🟢
                     </div>
                     <div>
-                      <b style={{ display: 'block', fontSize: '14px', color: '#0F172A', fontWeight: '800', lineHeight: 1.2 }}>Option A — Fetch New Documents</b>
-                      <span style={{ fontSize: '12px', color: '#64748B', fontWeight: '500', lineHeight: 1.4, display: 'block', marginTop: '3px' }}>
+                      <b style={{ display: 'block', fontSize: '13.5px', color: '#0F172A', fontWeight: '800', lineHeight: 1.2 }}>Option A — Fetch New Documents</b>
+                      <span style={{ fontSize: '11.5px', color: '#64748B', fontWeight: '500', lineHeight: 1.4, display: 'block', marginTop: '3px' }}>
                         Fetch the applicant's latest documents from new uploads. These newly fetched documents will become the current documents and remain retained even if the item is closed again.
                       </span>
                     </div>
@@ -1116,7 +1391,7 @@ export default function VacanciesPage() {
                       alignItems: 'center',
                       gap: '14px',
                       cursor: 'pointer',
-                      padding: '16px 18px',
+                      padding: '14px 16px',
                       borderRadius: '16px',
                       background: calDocPolicy === 'RETAIN_OLD' ? 'linear-gradient(135deg, #FFFBEB 0%, #FEF3C7 100%)' : '#FFFFFF',
                       border: calDocPolicy === 'RETAIN_OLD' ? '2px solid #D97706' : '1.5px solid #E2E8F0',
@@ -1136,33 +1411,658 @@ export default function VacanciesPage() {
                       🔒
                     </div>
                     <div>
-                      <b style={{ display: 'block', fontSize: '14px', color: '#0F172A', fontWeight: '800', lineHeight: 1.2 }}>Option B — Retain Current Files</b>
-                      <span style={{ fontSize: '12px', color: '#64748B', fontWeight: '500', lineHeight: 1.4, display: 'block', marginTop: '3px' }}>
+                      <b style={{ display: 'block', fontSize: '13.5px', color: '#0F172A', fontWeight: '800', lineHeight: 1.2 }}>Option B — Retain Current Files</b>
+                      <span style={{ fontSize: '11.5px', color: '#64748B', fontWeight: '500', lineHeight: 1.4, display: 'block', marginTop: '3px' }}>
                         Do not fetch from new uploads. Keep the currently stored documents unchanged without importing newer versions.
                       </span>
                     </div>
                   </div>
                 </div>
               </div>
+            </div>
 
-              {/* Modal Footer Actions */}
-              <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '12px', marginTop: '28px', paddingTop: '18px', borderTop: '1px solid #F1F5F9' }}>
-                <button 
-                  type="button" 
-                  onClick={() => setShowDocPolicyModal(false)}
-                  style={{ padding: '10px 18px', borderRadius: '12px', border: '1.5px solid #CBD5E1', background: '#FFFFFF', color: '#475569', fontWeight: '700', fontSize: '13px', cursor: 'pointer', transition: 'all 0.15s' }}
+            {/* Modal Footer Actions - Pinned at bottom */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '12px', padding: '16px 24px', borderTop: '1px solid #E2E8F0', background: '#F8FAFC', flexShrink: 0 }}>
+              <button 
+                type="button" 
+                onClick={() => setShowDocPolicyModal(false)}
+                style={{ padding: '9px 16px', borderRadius: '10px', border: '1.5px solid #CBD5E1', background: '#FFFFFF', color: '#475569', fontWeight: '700', fontSize: '12.5px', cursor: 'pointer', transition: 'all 0.15s' }}
+              >
+                Cancel
+              </button>
+              <button 
+                type="button" 
+                onClick={handleProceedToCalendar} 
+                style={{ padding: '10px 20px', borderRadius: '10px', border: 'none', background: 'linear-gradient(135deg, #10B981 0%, #059669 100%)', color: '#FFFFFF', fontWeight: '800', fontSize: '12.5px', cursor: 'pointer', boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)', display: 'flex', alignItems: 'center', gap: '8px', transition: 'all 0.15s' }}
+              >
+                <span>Next: Set Posting Schedule</span>
+                <span style={{ fontSize: '14px' }}>→</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: INVITE SPECIFIC EMAILS TO CLOSED VACANCY */}
+      {showInviteModal && inviteVacancy && (
+        <div className="modal open" style={{ backdropFilter: 'blur(6px)', background: 'rgba(15, 23, 42, 0.55)', zIndex: 100000 }}>
+          <div className="modal-box" style={{ width: 'min(860px, 96vw)', minHeight: 'min(500px, 85vh)', maxHeight: '92vh', display: 'flex', flexDirection: 'column', borderRadius: '24px', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)', border: '1px solid rgba(226, 232, 240, 0.8)', overflow: 'hidden', padding: 0 }}>
+            {/* Modal Header */}
+            <div className="modal-head" style={{ padding: '18px 28px', background: 'linear-gradient(180deg, #FFFFFF 0%, #F8FAFC 100%)', borderBottom: '1px solid #E2E8F0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <span style={{ fontSize: '20px' }}>✉️</span>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '800', color: '#0F172A', fontFamily: 'var(--font-heading)' }}>Invite Applicants to Vacancy</h3>
+                  <span style={{ fontSize: '11px', color: '#64748B', fontWeight: '600' }}>Restrict access & application submissions exclusively to authorized emails</span>
+                </div>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => setShowInviteModal(false)}
+                style={{ background: '#F1F5F9', border: '1px solid #CBD5E1', borderRadius: '50%', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#475569', fontWeight: '800', fontSize: '14px', transition: 'all 0.15s' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Content - Scrollable Body */}
+            <div style={{ padding: '20px 28px', background: '#FFFFFF', overflowY: 'auto', flex: 1 }}>
+              {/* Target Item Context Card */}
+              <div style={{ background: 'linear-gradient(135deg, #F8FAFC 0%, #F1F5F9 100%)', border: '1px solid #E2E8F0', borderRadius: '16px', padding: '14px 18px', marginBottom: '16px', textAlign: 'left' }}>
+                <div style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: '800', color: '#64748B', marginBottom: '4px' }}>Target Vacancy Item</div>
+                <h4 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: '#0F172A', lineHeight: 1.3 }}>{inviteVacancy.title || 'Vacancy Item'}</h4>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '6px' }}>
+                  <span style={{ background: '#E2E8F0', color: '#334155', fontSize: '11.5px', fontWeight: '700', padding: '3px 10px', borderRadius: '6px', fontFamily: 'monospace' }}>
+                    {inviteVacancy.itemNo}
+                  </span>
+                  <span style={{ fontSize: '12px', color: '#64748B', fontWeight: '600' }}>
+                    Division: <strong style={{ color: '#1E293B' }}>{inviteVacancy.division || 'SDO'}</strong>
+                  </span>
+                </div>
+              </div>
+
+              {/* Navigation Tab Bar */}
+              <div style={{ display: 'flex', gap: '8px', borderBottom: '1.5px solid #E2E8F0', marginBottom: '18px', paddingBottom: '2px' }}>
+                <button
+                  type="button"
+                  onClick={() => setInviteModalTab('config')}
+                  style={{
+                    padding: '8px 16px',
+                    borderRadius: '8px 8px 0 0',
+                    border: 'none',
+                    borderBottom: inviteModalTab === 'config' ? '3px solid #4F46E5' : '3px solid transparent',
+                    background: inviteModalTab === 'config' ? '#EEF2FF' : 'transparent',
+                    color: inviteModalTab === 'config' ? '#4338CA' : '#64748B',
+                    fontWeight: '800',
+                    fontSize: '13px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    transition: 'all 0.15s ease'
+                  }}
                 >
-                  Cancel
+                  <span>✉️</span>
+                  <span>Invite Applicants</span>
                 </button>
-                <button 
-                  type="button" 
-                  onClick={handleProceedToCalendar} 
-                  style={{ padding: '11px 22px', borderRadius: '12px', border: 'none', background: 'linear-gradient(135deg, #10B981 0%, #059669 100%)', color: '#FFFFFF', fontWeight: '800', fontSize: '13px', cursor: 'pointer', boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)', display: 'flex', alignItems: 'center', gap: '8px', transition: 'all 0.15s' }}
+                <button
+                  type="button"
+                  onClick={() => setInviteModalTab('invitations')}
+                  style={{
+                    padding: '8px 16px',
+                    borderRadius: '8px 8px 0 0',
+                    border: 'none',
+                    borderBottom: inviteModalTab === 'invitations' ? '3px solid #4F46E5' : '3px solid transparent',
+                    background: inviteModalTab === 'invitations' ? '#EEF2FF' : 'transparent',
+                    color: inviteModalTab === 'invitations' ? '#4338CA' : '#64748B',
+                    fontWeight: '800',
+                    fontSize: '13px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    transition: 'all 0.15s ease'
+                  }}
                 >
-                  <span>Next: Set Posting Schedule</span>
-                  <span style={{ fontSize: '15px' }}>→</span>
+                  <span>👥</span>
+                  <span>Invited Applicants</span>
+                  <span style={{
+                    fontSize: '10.5px',
+                    padding: '1px 7px',
+                    borderRadius: '10px',
+                    background: inviteModalTab === 'invitations' ? '#4F46E5' : '#E2E8F0',
+                    color: inviteModalTab === 'invitations' ? '#FFFFFF' : '#475569',
+                    fontWeight: '900'
+                  }}>
+                    {inviteAllowedEmails.length}
+                  </span>
                 </button>
               </div>
+
+              {/* TAB 1: INVITE APPLICANTS */}
+              {inviteModalTab === 'config' && (
+                <div
+                  style={{
+                    padding: '18px 20px',
+                    background: 'linear-gradient(135deg, #EEF2FF 0%, #E0E7FF 100%)',
+                    borderRadius: '16px',
+                    border: '1.5px solid #C7D2FE',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '12px'
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <label style={{ fontSize: '11px', fontWeight: '800', color: '#4338CA', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>
+                      Authorized Email Allowlist
+                    </label>
+                    <span style={{ fontSize: '11px', fontWeight: '700', color: inviteAllowedEmails.length > 0 ? '#4F46E5' : '#94A3B8' }}>
+                      {inviteAllowedEmails.length} email{inviteAllowedEmails.length === 1 ? '' : 's'} authorized
+                    </span>
+                  </div>
+
+                  <p style={{ margin: 0, fontSize: '12px', color: '#475569', lineHeight: 1.4 }}>
+                    Enter the email address of applicants you wish to grant access to. Only invited applicants will be able to view and submit applications for this item.
+                  </p>
+
+                  {/* Input bar with floating suggestions dropdown */}
+                  <div style={{ display: 'flex', gap: '8px', position: 'relative' }}>
+                    <div style={{ position: 'relative', flex: 1 }}>
+                      <input
+                        type="email"
+                        value={inviteEmailInput}
+                        onChange={(e) => {
+                          setInviteEmailInput(e.target.value);
+                          if (inviteEmailError) setInviteEmailError('');
+                          setShowInviteSuggestionsDropdown(true);
+                        }}
+                        onFocus={() => {
+                          if (inviteSuggestions.length > 0) {
+                            setShowInviteSuggestionsDropdown(true);
+                          }
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ',') {
+                            e.preventDefault();
+                            handleAddInviteEmail();
+                            setShowInviteSuggestionsDropdown(false);
+                          } else if (e.key === 'Escape') {
+                            setShowInviteSuggestionsDropdown(false);
+                          }
+                        }}
+                        placeholder="Type applicant email or name (e.g. user@deped.gov.ph)..."
+                        style={{
+                          width: '100%',
+                          height: '38px',
+                          padding: '0 12px',
+                          borderRadius: '10px',
+                          border: inviteEmailError ? '1.5px solid #EF4444' : '1.5px solid #CBD5E1',
+                          fontSize: '12.5px',
+                          background: '#FFFFFF',
+                          color: '#0F172A',
+                          outline: 'none',
+                          boxSizing: 'border-box'
+                        }}
+                      />
+
+                      {/* Floating Suggestions Dropdown */}
+                      {showInviteSuggestionsDropdown && inviteSuggestions.length > 0 && (
+                        <div
+                          style={{
+                            position: 'absolute',
+                            top: '100%',
+                            left: 0,
+                            right: 0,
+                            background: '#FFFFFF',
+                            border: '1.5px solid #C7D2FE',
+                            borderRadius: '10px',
+                            boxShadow: '0 10px 25px -5px rgba(79, 70, 229, 0.25), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
+                            zIndex: 999999,
+                            maxHeight: '160px',
+                            overflowY: 'auto',
+                            marginTop: '4px'
+                          }}
+                        >
+                          <div style={{ padding: '6px 12px 4px', fontSize: '10px', fontWeight: '800', color: '#6366F1', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '1px solid #F1F5F9', background: '#F8FAFC' }}>
+                            Matching Applicants ({inviteSuggestions.length})
+                          </div>
+                          {inviteSuggestions.map((sug) => (
+                            <div
+                              key={sug.email}
+                              onClick={() => handleSelectInviteSuggestion(sug.email)}
+                              style={{
+                                padding: '8px 12px',
+                                fontSize: '12px',
+                                cursor: 'pointer',
+                                userSelect: 'none',
+                                borderBottom: '1px solid #F8FAFC',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                gap: '8px',
+                                transition: 'background 0.15s ease'
+                              }}
+                              onMouseEnter={(e) => e.currentTarget.style.background = '#EEF2FF'}
+                              onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
+                                <span style={{ fontSize: '14px', flexShrink: 0 }}>👤</span>
+                                <div style={{ overflow: 'hidden' }}>
+                                  <b style={{ color: '#1E293B', fontSize: '12px', fontFamily: 'monospace', display: 'block', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>{sug.email}</b>
+                                  {sug.name && (
+                                    <span style={{ display: 'block', fontSize: '10.5px', color: '#64748B', fontWeight: '600', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                                      {sug.name}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              <span style={{ fontSize: '10.5px', color: '#4F46E5', fontWeight: '800', background: '#E0E7FF', padding: '2px 8px', borderRadius: '6px', flexShrink: 0 }}>
+                                + Select
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        handleAddInviteEmail();
+                        setShowInviteSuggestionsDropdown(false);
+                      }}
+                      style={{
+                        padding: '0 16px',
+                        height: '38px',
+                        borderRadius: '10px',
+                        border: 'none',
+                        background: '#4F46E5',
+                        color: '#FFFFFF',
+                        fontWeight: '700',
+                        fontSize: '12px',
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        whiteSpace: 'nowrap',
+                        boxShadow: '0 2px 6px rgba(79, 70, 229, 0.25)',
+                        flexShrink: 0
+                      }}
+                    >
+                      + Add Email
+                    </button>
+                  </div>
+
+                  {/* Validation Error */}
+                  {inviteEmailError && (
+                    <div style={{ fontSize: '11.5px', color: '#DC2626', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <span>⚠</span> {inviteEmailError}
+                    </div>
+                  )}
+
+                  {/* Chip List */}
+                  {inviteAllowedEmails.length > 0 ? (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', maxHeight: '140px', overflowY: 'auto', padding: '8px', background: '#FFFFFF', borderRadius: '10px', border: '1px solid #C7D2FE' }}>
+                      {inviteAllowedEmails.map((email) => (
+                        <span
+                          key={email}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            padding: '4px 10px',
+                            background: '#EEF2FF',
+                            border: '1px solid #C7D2FE',
+                            color: '#3730A3',
+                            borderRadius: '16px',
+                            fontSize: '12px',
+                            fontWeight: '700',
+                            fontFamily: 'monospace'
+                          }}
+                        >
+                          <span>✉</span>
+                          <span>{email}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveInviteEmail(email)}
+                            title="Remove email"
+                            style={{
+                              background: 'transparent',
+                              border: 'none',
+                              color: '#6366F1',
+                              cursor: 'pointer',
+                              fontWeight: '900',
+                              fontSize: '14px',
+                              lineHeight: 1,
+                              padding: '0 2px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center'
+                            }}
+                          >
+                            ×
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: '12px', color: '#64748B', fontStyle: 'italic', padding: '8px', background: '#FFFFFF', borderRadius: '10px', border: '1px dashed #CBD5E1', textAlign: 'center' }}>
+                      No emails invited yet. Enter applicant emails above and click "Add Email".
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* TAB 2: INVITATIONS MANAGEMENT */}
+              {inviteModalTab === 'invitations' && (
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                    <div>
+                      <h4 style={{ margin: 0, fontSize: '14px', fontWeight: '800', color: '#0F172A' }}>Invited Applicants</h4>
+                      <span style={{ fontSize: '11.5px', color: '#64748B' }}>Applicants authorized to submit applications for this closed vacancy item</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setInviteModalTab('config')}
+                      style={{
+                        padding: '6px 14px',
+                        borderRadius: '8px',
+                        border: 'none',
+                        background: '#4F46E5',
+                        color: '#FFFFFF',
+                        fontWeight: '700',
+                        fontSize: '12px',
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        boxShadow: '0 2px 4px rgba(79, 70, 229, 0.2)'
+                      }}
+                    >
+                      <span>+</span>
+                      <span>Invite / Add Applicant</span>
+                    </button>
+                  </div>
+
+                  {inviteAllowedEmails.length > 0 ? (
+                    <div style={{ border: '1px solid #E2E8F0', borderRadius: '14px', overflowX: 'auto', background: '#FFFFFF', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}>
+                      <table style={{ width: '100%', minWidth: '680px', borderCollapse: 'collapse', textAlign: 'left', fontSize: '12.5px' }}>
+                        <thead>
+                          <tr style={{ background: '#F8FAFC', borderBottom: '1px solid #E2E8F0' }}>
+                            <th style={{ padding: '10px 14px', fontWeight: '800', color: '#475569', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em', width: '22%' }}>Applicant</th>
+                            <th style={{ padding: '10px 14px', fontWeight: '800', color: '#475569', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em', width: '28%' }}>Email Address</th>
+                            <th style={{ padding: '10px 14px', fontWeight: '800', color: '#475569', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em', width: '12%' }}>Status</th>
+                            <th style={{ padding: '10px 14px', fontWeight: '800', color: '#475569', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em', width: '16%' }}>Date Invited</th>
+                            <th style={{ padding: '10px 14px', fontWeight: '800', color: '#475569', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em', width: '22%', textAlign: 'right' }}>Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {inviteAllowedEmails.map((email) => {
+                            const applicantName = getApplicantNameForEmail(email);
+                            const dateStr = inviteVacancy.updatedAt
+                              ? new Date(inviteVacancy.updatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                              : 'Today';
+                            return (
+                              <tr key={email} style={{ borderBottom: '1px solid #F1F5F9' }}>
+                                <td style={{ padding: '12px 14px', fontWeight: '700', color: '#0F172A' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <div style={{ width: '26px', height: '26px', borderRadius: '50%', background: '#EEF2FF', color: '#4F46E5', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: '800', flexShrink: 0 }}>
+                                      {applicantName.charAt(0).toUpperCase()}
+                                    </div>
+                                    <span style={{ whiteSpace: 'nowrap' }}>{applicantName}</span>
+                                  </div>
+                                </td>
+                                <td style={{ padding: '12px 14px', fontFamily: 'monospace', color: '#334155', fontSize: '12px' }}>
+                                  {email}
+                                </td>
+                                <td style={{ padding: '12px 14px' }}>
+                                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', fontWeight: '800', color: '#059669', background: '#D1FAE5', padding: '3px 8px', borderRadius: '12px' }}>
+                                    ● Active
+                                  </span>
+                                </td>
+                                <td style={{ padding: '12px 14px', color: '#64748B', fontSize: '12px', whiteSpace: 'nowrap' }}>
+                                  {dateStr}
+                                </td>
+                                <td style={{ padding: '12px 14px', textAlign: 'right' }}>
+                                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '6px', alignItems: 'center', flexWrap: 'nowrap' }}>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setResendConfirmEmail(email);
+                                        setShowResendConfirmModal(true);
+                                      }}
+                                      title="Resend invitation notification"
+                                      style={{
+                                        padding: '5px 10px',
+                                        borderRadius: '7px',
+                                        border: '1px solid #C7D2FE',
+                                        background: '#EEF2FF',
+                                        color: '#4338CA',
+                                        fontSize: '11px',
+                                        fontWeight: '700',
+                                        cursor: 'pointer',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '4px',
+                                        whiteSpace: 'nowrap',
+                                        transition: 'all 0.15s'
+                                      }}
+                                    >
+                                      <span>🔄</span>
+                                      <span>Resend</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setRevokeConfirmEmail(email);
+                                        setShowRevokeConfirmModal(true);
+                                      }}
+                                      title="Revoke applicant invitation"
+                                      style={{
+                                        padding: '5px 10px',
+                                        borderRadius: '7px',
+                                        border: '1px solid #FECACA',
+                                        background: '#FEF2F2',
+                                        color: '#DC2626',
+                                        fontSize: '11px',
+                                        fontWeight: '700',
+                                        cursor: 'pointer',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '4px',
+                                        whiteSpace: 'nowrap',
+                                        transition: 'all 0.15s'
+                                      }}
+                                    >
+                                      <span>✕</span>
+                                      <span>Revoke</span>
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div style={{ padding: '32px 20px', textAlign: 'center', background: '#F8FAFC', border: '1.5px dashed #CBD5E1', borderRadius: '16px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
+                      <span style={{ fontSize: '28px' }}>📬</span>
+                      <b style={{ color: '#0F172A', fontSize: '14px' }}>No Invitations Configured</b>
+                      <p style={{ margin: 0, color: '#64748B', fontSize: '12.5px', maxWidth: '380px' }}>
+                        There are currently no applicants invited to access this vacancy item. Switch to the Invite Applicants tab to add applicant email addresses.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setInviteModalTab('config')}
+                        style={{
+                          marginTop: '6px',
+                          padding: '8px 18px',
+                          borderRadius: '10px',
+                          border: 'none',
+                          background: '#4F46E5',
+                          color: '#FFFFFF',
+                          fontWeight: '800',
+                          fontSize: '12.5px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        + Add Applicant to Invite
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer Actions */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '12px', padding: '16px 28px', borderTop: '1px solid #E2E8F0', background: '#F8FAFC', flexShrink: 0 }}>
+              <button 
+                type="button" 
+                onClick={() => setShowInviteModal(false)}
+                style={{ padding: '9px 16px', borderRadius: '10px', border: '1.5px solid #CBD5E1', background: '#FFFFFF', color: '#475569', fontWeight: '700', fontSize: '12.5px', cursor: 'pointer', transition: 'all 0.15s' }}
+              >
+                Close
+              </button>
+              {inviteModalTab === 'config' ? (
+                <button 
+                  type="button" 
+                  onClick={handleSaveInviteModal} 
+                  style={{ padding: '10px 20px', borderRadius: '10px', border: 'none', background: 'linear-gradient(135deg, #4F46E5 0%, #4338CA 100%)', color: '#FFFFFF', fontWeight: '800', fontSize: '12.5px', cursor: 'pointer', boxShadow: '0 4px 12px rgba(79, 70, 229, 0.3)', display: 'flex', alignItems: 'center', gap: '8px', transition: 'all 0.15s' }}
+                >
+                  <span>Save & Grant Access</span>
+                  <span style={{ fontSize: '14px' }}>✓</span>
+                </button>
+              ) : (
+                <button 
+                  type="button" 
+                  onClick={() => setInviteModalTab('config')}
+                  style={{ padding: '10px 20px', borderRadius: '10px', border: 'none', background: 'linear-gradient(135deg, #4F46E5 0%, #4338CA 100%)', color: '#FFFFFF', fontWeight: '800', fontSize: '12.5px', cursor: 'pointer', boxShadow: '0 4px 12px rgba(79, 70, 229, 0.3)', display: 'flex', alignItems: 'center', gap: '8px', transition: 'all 0.15s' }}
+                >
+                  <span>+ Add More Applicants</span>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: REVOKE INVITATION CONFIRMATION */}
+      {showRevokeConfirmModal && revokeConfirmEmail && (
+        <div className="modal open" style={{ zIndex: 100003, left: 0, background: 'rgba(15, 23, 42, 0.45)', backdropFilter: 'blur(16px)' }}>
+          <div className="modal-box" style={{ width: 'min(480px, 94vw)', padding: '24px 30px', borderRadius: '24px', background: 'white', borderTop: '6px solid #EF4444', boxShadow: '0 24px 60px rgba(0, 0, 0, 0.18)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px' }}>
+              <div style={{ width: '40px', height: '40px', borderRadius: '12px', background: '#FEF2F2', color: '#EF4444', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px' }}>
+                ⚠️
+              </div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '800', color: '#0F172A', fontFamily: 'var(--font-heading)' }}>Revoke invitation?</h3>
+                <span style={{ fontSize: '12px', color: '#64748B', fontWeight: '600' }}>Confirm removal of access permissions</span>
+              </div>
+            </div>
+
+            <p style={{ margin: '0 0 14px', fontSize: '13.5px', color: '#334155', lineHeight: '1.5' }}>
+              You are about to remove this applicant’s invitation to access this item. They will no longer be able to access it using this invitation.
+            </p>
+
+            <div style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '12px', padding: '12px 16px', marginBottom: '20px' }}>
+              <div style={{ fontSize: '11px', fontWeight: '800', textTransform: 'uppercase', color: '#64748B', marginBottom: '2px' }}>Target Applicant</div>
+              <div style={{ fontWeight: '800', color: '#0F172A', fontSize: '13.5px' }}>{getApplicantNameForEmail(revokeConfirmEmail)}</div>
+              <div style={{ fontFamily: 'monospace', fontSize: '12px', color: '#6366F1' }}>{revokeConfirmEmail}</div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button 
+                type="button" 
+                className="secondary" 
+                onClick={() => {
+                  setShowRevokeConfirmModal(false);
+                  setRevokeConfirmEmail(null);
+                }}
+                style={{ padding: '10px 20px', borderRadius: '12px', cursor: 'pointer', fontWeight: '700', fontSize: '13px' }}
+              >
+                Cancel
+              </button>
+              <button 
+                type="button" 
+                onClick={handleConfirmRevokeInvite}
+                style={{
+                  padding: '10px 20px',
+                  borderRadius: '12px',
+                  border: 'none',
+                  background: 'linear-gradient(135deg, #EF4444 0%, #DC2626 100%)',
+                  color: 'white',
+                  fontWeight: '800',
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 12px rgba(239, 68, 68, 0.3)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                <span>Revoke Invitation</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: RESEND INVITATION CONFIRMATION */}
+      {showResendConfirmModal && resendConfirmEmail && (
+        <div className="modal open" style={{ zIndex: 100003, left: 0, background: 'rgba(15, 23, 42, 0.45)', backdropFilter: 'blur(16px)' }}>
+          <div className="modal-box" style={{ width: 'min(480px, 94vw)', padding: '24px 30px', borderRadius: '24px', background: 'white', borderTop: '6px solid #4F46E5', boxShadow: '0 24px 60px rgba(0, 0, 0, 0.18)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px' }}>
+              <div style={{ width: '40px', height: '40px', borderRadius: '12px', background: '#EEF2FF', color: '#4F46E5', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px' }}>
+                ✉️
+              </div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '800', color: '#0F172A', fontFamily: 'var(--font-heading)' }}>Resend invitation?</h3>
+                <span style={{ fontSize: '12px', color: '#64748B', fontWeight: '600' }}>Re-send invitation notification & access instructions</span>
+              </div>
+            </div>
+
+            <p style={{ margin: '0 0 14px', fontSize: '13.5px', color: '#334155', lineHeight: '1.5' }}>
+              You are about to resend the invitation email to this applicant, allowing them to access and apply for this closed vacancy item.
+            </p>
+
+            <div style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '12px', padding: '12px 16px', marginBottom: '20px' }}>
+              <div style={{ fontSize: '11px', fontWeight: '800', textTransform: 'uppercase', color: '#64748B', marginBottom: '2px' }}>Target Applicant</div>
+              <div style={{ fontWeight: '800', color: '#0F172A', fontSize: '13.5px' }}>{getApplicantNameForEmail(resendConfirmEmail)}</div>
+              <div style={{ fontFamily: 'monospace', fontSize: '12px', color: '#4F46E5' }}>{resendConfirmEmail}</div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button 
+                type="button" 
+                className="secondary" 
+                onClick={() => {
+                  setShowResendConfirmModal(false);
+                  setResendConfirmEmail(null);
+                }}
+                style={{ padding: '10px 20px', borderRadius: '12px', cursor: 'pointer', fontWeight: '700', fontSize: '13px' }}
+              >
+                Cancel
+              </button>
+              <button 
+                type="button" 
+                onClick={handleConfirmResendInvite}
+                style={{
+                  padding: '10px 20px',
+                  borderRadius: '12px',
+                  border: 'none',
+                  background: 'linear-gradient(135deg, #4F46E5 0%, #4338CA 100%)',
+                  color: 'white',
+                  fontWeight: '800',
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 12px rgba(79, 70, 229, 0.3)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                <span>🔄 Resend Invitation</span>
+              </button>
             </div>
           </div>
         </div>
@@ -1563,7 +2463,23 @@ export default function VacanciesPage() {
                     </div>
 
                     <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: 'auto', paddingTop: '16px', borderTop: '1px solid var(--line)' }}>
-                      <button type="button" className="secondary" onClick={() => setShowManualFields(false)} style={{ padding: '10px 20px', borderRadius: '10px', fontSize: '13px' }}>Cancel</button>
+                      <button 
+                        type="button" 
+                        className="secondary" 
+                        onClick={() => {
+                          setShowManualFields(false);
+                          setShowNosca(false);
+                          setManualPositionId('');
+                          setManualItemNo('SCA1-00000-2026');
+                          setManualSchoolLevel('');
+                          setManualSchoolId(null);
+                          setManualSchoolName('');
+                          setManualSchoolSearchQuery('');
+                        }} 
+                        style={{ padding: '10px 20px', borderRadius: '10px', fontSize: '13px' }}
+                      >
+                        Cancel
+                      </button>
                       <button type="button" className="good" onClick={handleConfirmAddManual} style={{ padding: '10px 20px', borderRadius: '10px', fontSize: '13px' }}>Add Vacancy</button>
                     </div>
                   </div>
@@ -1709,6 +2625,18 @@ export default function VacanciesPage() {
                           + Add Item
                         </button>
                         <button className="secondary" onClick={() => { setDetectedItems([]); setSelectedNoscaItemNos([]); }}>Clear</button>
+                        <button 
+                          type="button"
+                          className="secondary" 
+                          onClick={() => {
+                            setShowNosca(false);
+                            setDetectedItems([]);
+                            setSelectedNoscaItemNos([]);
+                            setShowManualFields(false);
+                          }}
+                        >
+                          Cancel
+                        </button>
                         <button className="good" onClick={() => {
                           if (!selectedNoscaItemNos.length) return setToast({ message: 'Please tick at least one item to add', type: 'error' });
                           
@@ -1730,6 +2658,21 @@ export default function VacanciesPage() {
                     <div className="nosca-empty" style={{ height: '100%', minHeight: '230px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', color: 'var(--muted)', fontWeight: '700', fontSize: '13px', gap: '4px' }}>
                       <span>No document scanned yet.</span>
                       <span>Upload a NOSCA to extract item numbers and position titles.</span>
+                      <div style={{ marginTop: '16px' }}>
+                        <button 
+                          type="button" 
+                          className="secondary" 
+                          onClick={() => {
+                            setShowNosca(false);
+                            setShowManualFields(false);
+                            setDetectedItems([]);
+                            setSelectedNoscaItemNos([]);
+                          }} 
+                          style={{ padding: '8px 18px', borderRadius: '10px', fontSize: '12px' }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>

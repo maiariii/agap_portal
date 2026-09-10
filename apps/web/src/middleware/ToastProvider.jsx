@@ -25,7 +25,7 @@ export function ToastProvider({ children }) {
     <ToastContext.Provider value={{ toast, setToast }}>
       {children}
       {toast && (
-        <div className="toast-container" style={{ zIndex: 99999 }}>
+        <div className="toast-container" style={{ zIndex: 99999999 }}>
           <div className={`toast-card ${toast.type}`}>
             <span style={{ fontSize: '18px' }}>
               {toast.type === 'success' ? '✅' : toast.type === 'error' ? '❌' : 'ℹ️'}

@@ -609,9 +609,27 @@ export default function AssessmentPage() {
     });
   };
 
+  const COMP_MAX_SCORES = {
+    bei: 5,
+    wst: 10,
+    we: 5
+  };
+
   const handleCompScoreChange = (key, val) => {
     setModalCompScores(prev => {
-      const updated = { ...prev, [key]: val === '' ? '' : Math.max(0, Math.min(100, Number(val))) };
+      const maxVal = COMP_MAX_SCORES[key] ?? 100;
+      let finalVal = val;
+      if (val !== '') {
+        const num = Number(val);
+        if (!isNaN(num)) {
+          if (num > maxVal) {
+            finalVal = maxVal.toString();
+          } else if (num < 0) {
+            finalVal = '0';
+          }
+        }
+      }
+      const updated = { ...prev, [key]: finalVal };
       setQualModalDirty(true);
       return updated;
     });
@@ -640,8 +658,8 @@ export default function AssessmentPage() {
 
   const compValues = Object.values(modalCompScores).filter(v => v !== '' && v !== null && v !== undefined);
   const compAllScored = compValues.length === 3;
-  const compAverage = compAllScored ? (compValues.reduce((sum, v) => sum + Number(v), 0) / 3) : 0;
-  const compTone = scoreTone(compAverage);
+  const compTotal = compAllScored ? (Number(modalCompScores.bei || 0) + Number(modalCompScores.wst || 0) + Number(modalCompScores.we || 0)) : 0;
+  const compTone = scoreTone((compTotal / 20) * 100);
 
   return (
     <section className="view active">
@@ -890,14 +908,15 @@ export default function AssessmentPage() {
                     <option value="Assessment Completed">Assessment Completed</option>
                   </select>
                 </th>
-                <th>
-                  <button className="th-btn" onClick={() => handleQualSort('appointmentStatus')}>
+                <th style={{ textAlign: 'center' }}>
+                  <button className="th-btn" style={{ justifyContent: 'center', width: '100%' }} onClick={() => handleQualSort('appointmentStatus')}>
                     Action{getQualSortIndicator('appointmentStatus')}
                   </button>
                   <select
                     className="column-filter-select"
                     value={qualColFilters.appointmentStatus || ''}
                     onChange={e => handleQualColFilterChange('appointmentStatus', e.target.value)}
+                    style={{ textAlign: 'center', textAlignLast: 'center' }}
                   >
                     <option value="">All</option>
                     <option value="Appoint">Appoint</option>
@@ -942,6 +961,12 @@ export default function AssessmentPage() {
                       const fmtScore = (v) => (v !== '' && v !== null && v !== undefined && Number.isFinite(Number(v))) ? (
                         <span className={`badge ${Number(v) >= 80 ? 'green' : Number(v) >= 25 ? 'orange' : 'red'}`}>
                           {Number(v).toFixed(2)}%
+                        </span>
+                      ) : '—';
+
+                      const fmtCompScore = (v, max = 100) => (v !== '' && v !== null && v !== undefined && Number.isFinite(Number(v))) ? (
+                        <span className={`badge ${(Number(v) / max) >= 0.8 ? 'green' : (Number(v) / max) >= 0.5 ? 'orange' : 'red'}`}>
+                          {Number(v).toFixed(2)}
                         </span>
                       ) : '—';
 
@@ -1017,13 +1042,13 @@ export default function AssessmentPage() {
                               </span>
                             ) : '—'}
                           </td>
-                          <td className="num-col">{fmtScore(cs.bei)}</td>
-                          <td className="num-col">{fmtScore(cs.wst)}</td>
-                          <td className="num-col">{fmtScore(cs.we)}</td>
+                          <td className="num-col">{fmtCompScore(cs.bei, 5)}</td>
+                          <td className="num-col">{fmtCompScore(cs.wst, 10)}</td>
+                          <td className="num-col">{fmtCompScore(cs.we, 5)}</td>
                           <td style={{ textAlign: 'center' }}>
                             <span className={`badge ${assessment.badge}`}>{assessment.label}</span>
                           </td>
-                          <td>{actionCell}</td>
+                          <td style={{ textAlign: 'center' }}>{actionCell}</td>
                         </tr>
                       );
                     })}
@@ -1248,13 +1273,13 @@ export default function AssessmentPage() {
                 <div className="qualified-card-head" style={{ padding: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px', borderBottom: '1px solid var(--line)' }}>
                   <div>
                     <div className="position-detail-eyebrow">Comparative Assessment</div>
-                    <h4>Comparative Assessment Average</h4>
-                    <p className="small">Encode BEI, WST, and WE scores. The system computes the average score automatically.</p>
+                    <h4>Comparative Assessment Total Score</h4>
+                    <p className="small">Encode BEI (5 pts), WST (10 pts), and WE (5 pts) scores. The system computes the total score (out of 20 pts) automatically.</p>
                   </div>
                   <div className="qs-matrix-summary" style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
                     <div className={`qs-score-card ${compAllScored ? compTone.color : ''}`} style={{ padding: '12px 20px', border: '2px solid var(--line)', borderRadius: '16px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-                      <span className="qs-score-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 800 }}>Average Score</span>
-                      <span className="qs-score-value" style={{ fontSize: '24px', fontWeight: 900, color: 'var(--navy)' }}>{compAllScored ? `${compAverage.toFixed(2)}%` : '—'}</span>
+                      <span className="qs-score-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 800 }}>Total Score</span>
+                      <span className="qs-score-value" style={{ fontSize: '24px', fontWeight: 900, color: 'var(--navy)' }}>{compAllScored ? `${compTotal.toFixed(2)} / 20.00` : '—'}</span>
                       <span className="qs-score-caption" style={{ fontSize: '11px', color: 'var(--muted)' }}>{compAllScored ? `${compValues.length} assessment score(s)` : `${compValues.length} of 3 score(s) entered`}</span>
                     </div>
                     <button
@@ -1272,54 +1297,54 @@ export default function AssessmentPage() {
                       <h3 style={{ marginBottom: '6px' }}>Behavioral Events Interview (BEI)</h3>
                       <p className="small" style={{ margin: '0 0 12px', minHeight: '36px' }}>Average BEI score based on panel interview ratings and competency indicators.</p>
                       <div style={{ marginTop: 'auto', padding: '14px', border: '2px solid var(--line)', borderRadius: '18px', background: 'linear-gradient(135deg,#FFFFFF,#F8FCFF)' }}>
-                        <label style={{ margin: '0 0 8px', display: 'block', fontWeight: 'bold' }}>Score</label>
+                        <label style={{ margin: '0 0 8px', display: 'block', fontWeight: 'bold' }}>SCORE (MAX 5)</label>
                         <input
                           type="number"
                           min="0"
-                          max="100"
+                          max="5"
                           step="0.01"
                           value={modalCompScores.bei ?? ''}
                           onChange={e => handleCompScoreChange('bei', e.target.value)}
-                          placeholder="0.00 - 100.00"
+                          placeholder="0.00 - 5.00"
                           style={{ height: '50px', textAlign: 'center', fontFamily: 'var(--font-heading)', fontSize: '24px', fontWeight: 950, border: '2.5px solid var(--blue-600)', background: 'white', boxShadow: '0 8px 18px rgba(2,132,199,.08)', width: '100%', boxSizing: 'border-box', borderRadius: '8px' }}
                         />
-                        <div className="small" style={{ marginTop: '8px', fontWeight: 800 }}>Enter a score from 0.00 to 100.00</div>
+                        <div className="small" style={{ marginTop: '8px', fontWeight: 800 }}>Enter a score from 0.00 to 5.00</div>
                       </div>
                     </div>
                     <div className="qs-card" style={{ border: '1px solid var(--line)', borderRadius: '16px', padding: '16px' }}>
                       <h3 style={{ marginBottom: '6px' }}>Work Sample Test (WST)</h3>
                       <p className="small" style={{ margin: '0 0 12px', minHeight: '36px' }}>Score for the work sample or technical performance test.</p>
                       <div style={{ marginTop: 'auto', padding: '14px', border: '2px solid var(--line)', borderRadius: '18px', background: 'linear-gradient(135deg,#FFFFFF,#F8FCFF)' }}>
-                        <label style={{ margin: '0 0 8px', display: 'block', fontWeight: 'bold' }}>Score</label>
+                        <label style={{ margin: '0 0 8px', display: 'block', fontWeight: 'bold' }}>SCORE (MAX 10)</label>
                         <input
                           type="number"
                           min="0"
-                          max="100"
+                          max="10"
                           step="0.01"
                           value={modalCompScores.wst ?? ''}
                           onChange={e => handleCompScoreChange('wst', e.target.value)}
-                          placeholder="0.00 - 100.00"
+                          placeholder="0.00 - 10.00"
                           style={{ height: '50px', textAlign: 'center', fontFamily: 'var(--font-heading)', fontSize: '24px', fontWeight: 950, border: '2.5px solid var(--blue-600)', background: 'white', boxShadow: '0 8px 18px rgba(2,132,199,.08)', width: '100%', boxSizing: 'border-box', borderRadius: '8px' }}
                         />
-                        <div className="small" style={{ marginTop: '8px', fontWeight: 800 }}>Enter a score from 0.00 to 100.00</div>
+                        <div className="small" style={{ marginTop: '8px', fontWeight: 800 }}>Enter a score from 0.00 to 10.00</div>
                       </div>
                     </div>
                     <div className="qs-card" style={{ border: '1px solid var(--line)', borderRadius: '16px', padding: '16px' }}>
                       <h3 style={{ marginBottom: '6px' }}>Written Examination (WE)</h3>
                       <p className="small" style={{ margin: '0 0 12px', minHeight: '36px' }}>Score for the written examination component.</p>
                       <div style={{ marginTop: 'auto', padding: '14px', border: '2px solid var(--line)', borderRadius: '18px', background: 'linear-gradient(135deg,#FFFFFF,#F8FCFF)' }}>
-                        <label style={{ margin: '0 0 8px', display: 'block', fontWeight: 'bold' }}>Score</label>
+                        <label style={{ margin: '0 0 8px', display: 'block', fontWeight: 'bold' }}>SCORE (MAX 5)</label>
                         <input
                           type="number"
                           min="0"
-                          max="100"
+                          max="5"
                           step="0.01"
                           value={modalCompScores.we ?? ''}
                           onChange={e => handleCompScoreChange('we', e.target.value)}
-                          placeholder="0.00 - 100.00"
+                          placeholder="0.00 - 5.00"
                           style={{ height: '50px', textAlign: 'center', fontFamily: 'var(--font-heading)', fontSize: '24px', fontWeight: 950, border: '2.5px solid var(--blue-600)', background: 'white', boxShadow: '0 8px 18px rgba(2,132,199,.08)', width: '100%', boxSizing: 'border-box', borderRadius: '8px' }}
                         />
-                        <div className="small" style={{ marginTop: '8px', fontWeight: 800 }}>Enter a score from 0.00 to 100.00</div>
+                        <div className="small" style={{ marginTop: '8px', fontWeight: 800 }}>Enter a score from 0.00 to 5.00</div>
                       </div>
                     </div>
                   </div>

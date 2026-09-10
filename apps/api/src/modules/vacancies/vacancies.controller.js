@@ -69,13 +69,17 @@ export async function getVacancies(req, res) {
     const userId = req.user?.id || req.user?.userId;
     let region = req.user?.region || null;
     let division = req.user?.division || null;
+    let userEmail = req.user?.email || null;
+    let userRole = req.user?.role || null;
 
     if (userId) {
-      const userQuery = await pool.query('SELECT region, division FROM users WHERE id = $1', [userId]);
+      const userQuery = await pool.query('SELECT region, division, email, username, role FROM users WHERE id = $1', [userId]);
       const user = userQuery.rows[0];
       if (user) {
         region = user.region || region;
         division = user.division || division;
+        userEmail = user.email || user.username || userEmail;
+        userRole = user.role || userRole;
       }
     }
 
@@ -124,6 +128,7 @@ export async function getVacancies(req, res) {
         v.doc_fetch_preference,
         v.has_fetched_docs,
         v.doc_fetched_at,
+        v.allowed_emails,
         v.posting_start,
         v.posting_end,
         v.salary_grade,
@@ -144,22 +149,41 @@ export async function getVacancies(req, res) {
       ORDER BY v.created_at DESC
     `, queryValues);
 
-    res.json(rows.map(r => ({
-      ...mapVacancy(r),
-      openSlots: r.open_slots ? parseInt(r.open_slots) : 0,
-      totalSlots: r.total_slots ? parseInt(r.total_slots) : 0,
-      unfilledItemNos: r.unfilled_item_nos || '',
-      position: {
-        id: r.position_id,
-        title: r.position_title || r.title,
-        track: r.position_track || 'Teaching',
-        requiredBachelorDegree: r.position_required_bachelor_degree || '',
-        requiredDegreeKeywords: Array.isArray(r.position_required_degree_keywords) ? r.position_required_degree_keywords : (r.position_required_degree_keywords ? r.position_required_degree_keywords.split(',') : []),
-        minYearsExperience: r.position_min_years_experience || 0,
-        minTrainingHours: r.position_min_training_hours || 0,
-        eligibilityRequired: r.position_eligibility_required || ''
+    const normalizedUserEmail = (userEmail || '').trim().toLowerCase();
+    const isStaff = userRole === 'admin' || userRole === 'hr_officer';
+
+    res.json(rows.map(r => {
+      const mapped = mapVacancy(r);
+      let effectiveStatus = mapped.status;
+      let effectiveOpenSlots = r.open_slots ? parseInt(r.open_slots) : 0;
+
+      const allowedList = (mapped.allowedEmails || []).map(e => String(e).trim().toLowerCase());
+      if (allowedList.length > 0) {
+        const isAllowed = Boolean(normalizedUserEmail && allowedList.includes(normalizedUserEmail));
+        if (!isAllowed && !isStaff) {
+          effectiveStatus = 'closed';
+          effectiveOpenSlots = 0;
+        }
       }
-    })));
+
+      return {
+        ...mapped,
+        status: effectiveStatus,
+        openSlots: effectiveOpenSlots,
+        totalSlots: r.total_slots ? parseInt(r.total_slots) : 0,
+        unfilledItemNos: r.unfilled_item_nos || '',
+        position: {
+          id: r.position_id,
+          title: r.position_title || r.title,
+          track: r.position_track || 'Teaching',
+          requiredBachelorDegree: r.position_required_bachelor_degree || '',
+          requiredDegreeKeywords: Array.isArray(r.position_required_degree_keywords) ? r.position_required_degree_keywords : (r.position_required_degree_keywords ? r.position_required_degree_keywords.split(',') : []),
+          minYearsExperience: r.position_min_years_experience || 0,
+          minTrainingHours: r.position_min_training_hours || 0,
+          eligibilityRequired: r.position_eligibility_required || ''
+        }
+      };
+    }));
   } catch (error) {
     console.error('Error fetching vacancies:', error);
     res.status(500).json({ error: error.message || 'Failed to fetch vacancies' });
@@ -230,7 +254,7 @@ export async function createVacancy(req, res) {
 
 export async function toggleVacancyStatus(req, res) {
   const { id } = req.params;
-  const { status, postingStart, postingEnd, docFetchPreference } = req.body;
+  const { status, postingStart, postingEnd, docFetchPreference, allowedEmails } = req.body;
   try {
     const vacCheck = await pool.query('SELECT * FROM vacancies WHERE id = $1', [id]);
     if (vacCheck.rows.length === 0) {
@@ -240,6 +264,18 @@ export async function toggleVacancyStatus(req, res) {
     const fields = [];
     const values = [];
     let idx = 1;
+
+    if (allowedEmails !== undefined) {
+      let sanitizedEmails = [];
+      if (Array.isArray(allowedEmails)) {
+        sanitizedEmails = allowedEmails
+          .map(e => (typeof e === 'string' ? e.trim().toLowerCase() : ''))
+          .filter(e => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e));
+        sanitizedEmails = Array.from(new Set(sanitizedEmails));
+      }
+      fields.push(`allowed_emails = $${idx++}`);
+      values.push(JSON.stringify(sanitizedEmails));
+    }
 
     if (status !== undefined) {
       fields.push(`status = $${idx++}`);
@@ -672,6 +708,31 @@ export async function autocompleteSchools(req, res) {
       schoolId: r.school_id,
       schoolName: r.school_name
     })));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+}
+
+export async function autocompleteApplicantEmails(req, res) {
+  const { q } = req.query;
+  if (!q || !q.trim()) {
+    return res.json([]);
+  }
+  try {
+    const queryTerm = `%${q.trim()}%`;
+    const { rows } = await pool.query(
+      `SELECT DISTINCT 
+         ap.email_address as email,
+         CONCAT_WS(' ', NULLIF(ap.first_name, ''), NULLIF(ap.surname, '')) as name
+       FROM applicants ap
+       WHERE ap.email_address ILIKE $1 
+          OR ap.first_name ILIKE $1 
+          OR ap.surname ILIKE $1
+       ORDER BY ap.email_address ASC
+       LIMIT 10;`,
+      [queryTerm]
+    );
+    res.json(rows.filter(r => r.email && r.email.trim()));
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

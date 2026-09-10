@@ -20,6 +20,10 @@ export async function runMigration() {
       ALTER TABLE vacancies ADD COLUMN IF NOT EXISTS doc_fetched_at TIMESTAMPTZ;
     `);
 
+    await client.query(`
+      ALTER TABLE vacancies ADD COLUMN IF NOT EXISTS allowed_emails JSONB DEFAULT '[]'::jsonb;
+    `);
+
     // Migrate existing vacancies that explicitly have filling_up_status = 'FETCH_NEW' or doc_fetch_preference = 'FETCH_NEW'
     await client.query(`
       UPDATE vacancies 
