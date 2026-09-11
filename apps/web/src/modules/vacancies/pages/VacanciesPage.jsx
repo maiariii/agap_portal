@@ -319,8 +319,6 @@ export default function VacanciesPage() {
       apiFetch(`/api/vacancies/${vac.id}`, {
         method: 'PUT',
         body: JSON.stringify({
-          status: 'open',
-          docFetchPreference: 'RETAIN_OLD',
           allowedEmails: existing
         })
       }).then(() => loadAllData()).catch(console.error);
@@ -405,8 +403,6 @@ export default function VacanciesPage() {
       await apiFetch(`/api/vacancies/${inviteVacancy.id}`, {
         method: 'PUT',
         body: JSON.stringify({
-          status: 'open',
-          docFetchPreference: 'RETAIN_OLD',
           allowedEmails: nextEmails
         })
       });
@@ -455,8 +451,6 @@ export default function VacanciesPage() {
       await apiFetch(`/api/vacancies/${inviteVacancy.id}`, {
         method: 'PUT',
         body: JSON.stringify({
-          status: 'open',
-          docFetchPreference: 'RETAIN_OLD',
           allowedEmails: currentEmails
         })
       });

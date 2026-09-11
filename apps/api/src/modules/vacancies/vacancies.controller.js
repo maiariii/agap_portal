@@ -98,6 +98,11 @@ export async function getVacancies(req, res) {
       }
     }
 
+    // Auto-sync vacancies with no posting schedule to 'for_publication' in database
+    await pool.query(
+      "UPDATE vacancies SET status = 'for_publication' WHERE posting_start IS NULL AND posting_end IS NULL AND status = 'open' AND (filling_up_status IS NULL OR filling_up_status != 'FILLED')"
+    ).catch(console.error);
+
     const posCols = await getPositionCols();
     const queryValues = [];
     let whereClause = '';
