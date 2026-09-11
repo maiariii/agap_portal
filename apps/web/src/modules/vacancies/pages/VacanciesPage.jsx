@@ -225,14 +225,40 @@ export default function VacanciesPage() {
   const getApplicantNameForEmail = (email) => {
     if (!email) return 'Applicant';
     const match = (applications || []).find(a => {
-      const aEmail = a.applicant?.email_address || a.applicant_email_address || a.email_address || a.email || '';
+      const aEmail = a.applicant?.email_address || a.applicant_email_address || a.email_address || a.email || a.applicantObj?.email_address || '';
       return aEmail.toLowerCase() === email.toLowerCase();
     });
     if (match) {
-      return match.applicantName || match.applicant_name || match.applicant?.fullName || match.applicant?.name || email.split('@')[0];
+      return match.applicantName || match.applicant_name || match.applicant?.fullName || match.applicant?.name || match.applicantObj?.name || email.split('@')[0];
     }
     const prefix = email.split('@')[0].replace(/[._-]/g, ' ');
     return prefix.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+  };
+
+  const getSubmittedEmailsForVacancy = (vac) => {
+    if (!vac || !applications) return new Set();
+    const emails = new Set();
+    const vacTitle = (positions.find(p => p.id === vac.positionId)?.title || vac.title || '').trim().toLowerCase();
+    const cleanVacTitle = vacTitle.replace(/\s*\([^)]*\)/g, '').trim();
+
+    (applications || []).forEach(a => {
+      const matchCluster = vac.jobClusterId && a.jobClusterId && String(a.jobClusterId) === String(vac.jobClusterId);
+      const matchVacId = vac.id && a.vacancyId && String(a.vacancyId) === String(vac.id);
+      const matchItem = vac.itemNo && (a.itemNo === vac.itemNo || a.vacancyItemNo === vac.itemNo);
+      const matchPosId = vac.positionId && (a.positionId === vac.positionId || a.positionObj?.id === vac.positionId);
+      
+      const appTitle = (a.positionTitle || a.vacancyTitle || a.vacancy || a.positionObj?.title || '').trim().toLowerCase();
+      const cleanAppTitle = appTitle.replace(/\s*\([^)]*\)/g, '').trim();
+      const matchTitle = Boolean(cleanVacTitle && cleanAppTitle && (cleanVacTitle === cleanAppTitle || cleanVacTitle.startsWith(cleanAppTitle) || cleanAppTitle.startsWith(cleanVacTitle)));
+
+      if (matchCluster || matchVacId || matchItem || matchPosId || matchTitle) {
+        const e = a.applicant?.email_address || a.applicant_email_address || a.email_address || a.email || a.applicantObj?.email_address || '';
+        if (e && e.trim()) {
+          emails.add(e.trim().toLowerCase());
+        }
+      }
+    });
+    return emails;
   };
 
   // Autocomplete search for Invite modal
@@ -245,22 +271,26 @@ export default function VacanciesPage() {
     const term = inviteEmailInput.trim().toLowerCase();
     const delayDebounce = setTimeout(async () => {
       try {
-        const data = await apiFetch(`/api/vacancies/applicants/autocomplete?q=${encodeURIComponent(term)}`);
+        const vacParam = inviteVacancy?.id ? `&vacancyId=${encodeURIComponent(inviteVacancy.id)}` : '';
+        const data = await apiFetch(`/api/vacancies/applicants/autocomplete?q=${encodeURIComponent(term)}${vacParam}`);
         let list = Array.isArray(data) ? data : [];
 
-        // Combine with local applications for instant matching
+        const submittedEmails = inviteVacancy ? getSubmittedEmailsForVacancy(inviteVacancy) : new Set();
+
+        // Combine with local applications for instant matching, excluding already applied
         const localMatches = (applications || [])
           .map(a => ({
-            email: a.applicant?.email_address || a.applicant_email_address || a.email_address || a.email || '',
-            name: a.applicantName || a.applicant_name || a.applicant?.fullName || a.applicant?.name || ''
+            email: a.applicant?.email_address || a.applicant_email_address || a.email_address || a.email || a.applicantObj?.email_address || '',
+            name: a.applicantName || a.applicant_name || a.applicant?.fullName || a.applicant?.name || a.applicantObj?.name || ''
           }))
-          .filter(it => it.email && (it.email.toLowerCase().includes(term) || (it.name && it.name.toLowerCase().includes(term))));
+          .filter(it => it.email && !submittedEmails.has(it.email.toLowerCase()) && (it.email.toLowerCase().includes(term) || (it.name && it.name.toLowerCase().includes(term))));
 
         const merged = new Map();
         [...list, ...localMatches].forEach(item => {
-          if (item.email && !inviteAllowedEmails.includes(item.email.toLowerCase())) {
-            merged.set(item.email.toLowerCase(), {
-              email: item.email.toLowerCase(),
+          const itemEmail = (item.email || '').toLowerCase().trim();
+          if (itemEmail && !inviteAllowedEmails.includes(itemEmail) && !submittedEmails.has(itemEmail)) {
+            merged.set(itemEmail, {
+              email: itemEmail,
               name: item.name || ''
             });
           }
@@ -274,11 +304,28 @@ export default function VacanciesPage() {
       }
     }, 200);
     return () => clearTimeout(delayDebounce);
-  }, [inviteEmailInput, showInviteModal, inviteAllowedEmails, applications]);
+  }, [inviteEmailInput, showInviteModal, inviteAllowedEmails, applications, inviteVacancy]);
 
   const handleOpenInviteModal = (vac) => {
     setInviteVacancy(vac);
-    const existing = Array.isArray(vac.allowedEmails) ? [...vac.allowedEmails] : [];
+    const submittedEmails = getSubmittedEmailsForVacancy(vac);
+    const rawAllowed = Array.isArray(vac.allowedEmails) ? [...vac.allowedEmails] : [];
+    const existing = rawAllowed
+      .map(e => String(e).trim().toLowerCase())
+      .filter(e => !submittedEmails.has(e));
+
+    // Auto-sync removal of submitted applicants back to backend if any were present
+    if (rawAllowed.length !== existing.length && vac.id) {
+      apiFetch(`/api/vacancies/${vac.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          status: 'open',
+          docFetchPreference: 'RETAIN_OLD',
+          allowedEmails: existing
+        })
+      }).then(() => loadAllData()).catch(console.error);
+    }
+
     setInviteAllowedEmails(existing);
     setInviteEmailInput('');
     setInviteEmailError('');
@@ -296,14 +343,19 @@ export default function VacanciesPage() {
     let addedCount = 0;
     let nextEmails = [...inviteAllowedEmails];
     let errorMsg = '';
+    const submittedEmails = inviteVacancy ? getSubmittedEmailsForVacancy(inviteVacancy) : new Set();
 
     for (const p of parts) {
       if (!isValidEmailFormat(p)) {
         errorMsg = `Invalid email format: "${p}". Please enter a valid email address.`;
         break;
       }
+      if (submittedEmails.has(p)) {
+        errorMsg = `Applicant "${p}" has already submitted an application for this vacancy and cannot be re-invited.`;
+        continue;
+      }
       if (nextEmails.includes(p)) {
-        errorMsg = `Email "${p}" is already in the list.`;
+        errorMsg = `Email "${p}" is already in the invitation list.`;
         continue;
       }
       nextEmails.push(p);
@@ -312,6 +364,7 @@ export default function VacanciesPage() {
 
     if (errorMsg && addedCount === 0) {
       setInviteEmailError(errorMsg);
+      setToast({ message: errorMsg, type: 'warning' });
       return;
     }
 
@@ -324,6 +377,13 @@ export default function VacanciesPage() {
   const handleSelectInviteSuggestion = (email) => {
     if (!email) return;
     const cleanEmail = email.trim().toLowerCase();
+    const submittedEmails = inviteVacancy ? getSubmittedEmailsForVacancy(inviteVacancy) : new Set();
+
+    if (submittedEmails.has(cleanEmail)) {
+      setToast({ message: `Applicant "${cleanEmail}" has already submitted an application for this vacancy.`, type: 'warning' });
+      return;
+    }
+
     if (isValidEmailFormat(cleanEmail) && !inviteAllowedEmails.includes(cleanEmail)) {
       setInviteAllowedEmails(prev => [...prev, cleanEmail]);
     }
@@ -371,10 +431,14 @@ export default function VacanciesPage() {
   const handleSaveInviteModal = async () => {
     if (!inviteVacancy) return;
 
-    let currentEmails = [...inviteAllowedEmails];
+    const submittedEmails = getSubmittedEmailsForVacancy(inviteVacancy);
+    let currentEmails = [...inviteAllowedEmails].filter(e => !submittedEmails.has(e.toLowerCase()));
+
     if (inviteEmailInput.trim()) {
       const raw = inviteEmailInput.trim().toLowerCase();
-      if (isValidEmailFormat(raw) && !currentEmails.includes(raw)) {
+      if (submittedEmails.has(raw)) {
+        setToast({ message: `Applicant "${raw}" has already submitted an application for this vacancy.`, type: 'warning' });
+      } else if (isValidEmailFormat(raw) && !currentEmails.includes(raw)) {
         currentEmails.push(raw);
         setInviteAllowedEmails(currentEmails);
         setInviteEmailInput('');
@@ -479,19 +543,32 @@ export default function VacanciesPage() {
     const end = v.postingEnd ? new Date(v.postingEnd.slice(0, 10) + "T23:59:59.999") : null;
     const deadlinePassed = end ? end < today : false;
     const isFilled = v.fillingUpStatus === 'FILLED' || v.filling_up_status === 'FILLED';
-    const isClosedStatus = (v.status || '').toLowerCase() === 'closed';
+    const rawStatus = (v.status || '').toLowerCase();
 
-    // 1. Closed: Item_no was closed manually or met its deadline or is filled
-    if (isClosedStatus || deadlinePassed || isFilled) {
+    // 1. Filled item is always Closed
+    if (isFilled) {
       return 'Closed';
     }
 
-    // 2. For Publication: New added item_no or when starting date is in advance (future)
-    if (!start || start > today || (v.status || '').toLowerCase() === 'for_publication') {
+    // 2. Past deadline is Closed
+    if (deadlinePassed) {
+      return 'Closed';
+    }
+
+    // 3. For Publication: New added item_no (no posting dates set), starting date in advance (future), or explicitly for_publication
+    if (!start || start > today || rawStatus === 'for_publication') {
+      if (rawStatus === 'closed' && start && end) {
+        return 'Closed';
+      }
       return 'For Publication';
     }
 
-    // 3. Open for Application: Item_no is open (posting_start <= today and posting_end >= today or active open status)
+    // 4. Closed: Item was explicitly closed
+    if (rawStatus === 'closed') {
+      return 'Closed';
+    }
+
+    // 5. Open for Application: Active posting window
     return 'Open for Application';
   };
 
@@ -1152,11 +1229,16 @@ export default function VacanciesPage() {
                           <td>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                               <b>{vac.itemNo}</b>
-                              {Array.isArray(vac.allowedEmails) && vac.allowedEmails.length > 0 && (
-                                <span style={{ fontSize: '10px', color: '#4F46E5', background: '#EEF2FF', border: '1px solid #C7D2FE', borderRadius: '4px', padding: '1px 5px', width: 'fit-content', fontWeight: '700' }}>
-                                  👥 Restricted ({vac.allowedEmails.length})
-                                </span>
-                              )}
+                              {Array.isArray(vac.allowedEmails) && vac.allowedEmails.length > 0 && (() => {
+                                const submittedEmails = getSubmittedEmailsForVacancy(vac);
+                                const pendingCount = vac.allowedEmails.filter(e => !submittedEmails.has(String(e).trim().toLowerCase())).length;
+                                if (pendingCount === 0) return null;
+                                return (
+                                  <span style={{ fontSize: '10px', color: '#4F46E5', background: '#EEF2FF', border: '1px solid #C7D2FE', borderRadius: '4px', padding: '1px 5px', width: 'fit-content', fontWeight: '700' }}>
+                                    👥 Restricted ({pendingCount})
+                                  </span>
+                                );
+                              })()}
                             </div>
                           </td>
                           <td>{positions.find(p => p.id === vac.positionId)?.title || vac.title}</td>
@@ -1191,12 +1273,12 @@ export default function VacanciesPage() {
                               >
                                 {postingStatus === 'Open for Application' ? 'Close' : 'Open'}
                               </button>
-                              {postingStatus === 'Closed' && (
+                              {(postingStatus === 'Closed' || postingStatus === 'For Publication') && (
                                 <button
                                   type="button"
                                   className="vac-action"
                                   onClick={() => handleOpenInviteModal(vac)}
-                                  title="Invite specific emails to access this closed vacancy"
+                                  title="Invite specific emails to access this vacancy item"
                                   style={{
                                     whiteSpace: 'nowrap',
                                     background: '#EEF2FF',
@@ -1758,7 +1840,7 @@ export default function VacanciesPage() {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                     <div>
                       <h4 style={{ margin: 0, fontSize: '14px', fontWeight: '800', color: '#0F172A' }}>Invited Applicants</h4>
-                      <span style={{ fontSize: '11.5px', color: '#64748B' }}>Applicants authorized to submit applications for this closed vacancy item</span>
+                      <span style={{ fontSize: '11.5px', color: '#64748B' }}>Applicants authorized to submit applications for this vacancy item</span>
                     </div>
                     <button
                       type="button"

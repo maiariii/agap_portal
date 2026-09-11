@@ -149,6 +149,75 @@ export async function getVacancies(req, res) {
       ORDER BY v.created_at DESC
     `, queryValues);
 
+    // Auto-prune allowed_emails for any applicants who have already submitted an application
+    const vacanciesWithAllowed = rows.filter(r => {
+      if (!r.allowed_emails) return false;
+      if (Array.isArray(r.allowed_emails) && r.allowed_emails.length > 0) return true;
+      if (typeof r.allowed_emails === 'string' && r.allowed_emails !== '[]' && r.allowed_emails.trim() !== '') return true;
+      return false;
+    });
+
+    if (vacanciesWithAllowed.length > 0) {
+      try {
+        const vacIds = vacanciesWithAllowed.map(v => v.id);
+        const { rows: appliedRows } = await pool.query(`
+          SELECT DISTINCT 
+            LOWER(TRIM(ap.email_address)) AS email,
+            v.id AS vacancy_id
+          FROM vacancies v
+          JOIN applications a ON (
+            (v.job_cluster_id IS NOT NULL AND a.job_cluster_id = v.job_cluster_id)
+            OR (v.job_cluster_id IS NULL AND a.job_cluster_id = v.id)
+            OR (a.appointment_item_no IS NOT NULL AND a.appointment_item_no = v.item_no)
+            OR (v.position_id IS NOT NULL AND a.job_cluster_id IN (SELECT jc.id FROM job_clusters jc WHERE jc.position_id = v.position_id))
+            OR (v.title IS NOT NULL AND a.job_cluster_id IN (
+                SELECT jc3.id FROM job_clusters jc3 
+                JOIN positions p3 ON jc3.position_id = p3.id 
+                WHERE LOWER(TRIM(p3.title)) = LOWER(TRIM(v.title)) 
+                   OR v.title ILIKE CONCAT(p3.title, '%')
+                   OR p3.title ILIKE CONCAT(v.title, '%')
+            ))
+          )
+          JOIN applicants ap ON a.applicant_id = ap.id
+          WHERE v.id = ANY($1) 
+            AND ap.email_address IS NOT NULL
+        `, [vacIds]);
+
+        if (appliedRows.length > 0) {
+          const appliedMap = new Map();
+          for (const row of appliedRows) {
+            if (!appliedMap.has(row.vacancy_id)) {
+              appliedMap.set(row.vacancy_id, new Set());
+            }
+            if (row.email) {
+              appliedMap.get(row.vacancy_id).add(row.email.toLowerCase());
+            }
+          }
+
+          for (const r of vacanciesWithAllowed) {
+            if (appliedMap.has(r.id)) {
+              const appliedEmailsSet = appliedMap.get(r.id);
+              let currentEmails = [];
+              if (Array.isArray(r.allowed_emails)) {
+                currentEmails = r.allowed_emails;
+              } else if (typeof r.allowed_emails === 'string') {
+                try { currentEmails = JSON.parse(r.allowed_emails); } catch (e) { currentEmails = []; }
+              }
+              if (Array.isArray(currentEmails) && currentEmails.length > 0) {
+                const pruned = currentEmails.filter(e => !appliedEmailsSet.has(String(e).trim().toLowerCase()));
+                if (pruned.length !== currentEmails.length) {
+                  r.allowed_emails = pruned;
+                  pool.query('UPDATE vacancies SET allowed_emails = $1 WHERE id = $2', [JSON.stringify(pruned), r.id]).catch(console.error);
+                }
+              }
+            }
+          }
+        }
+      } catch (cleanupErr) {
+        console.error('Error auto-cleaning allowed_emails for submitted applications:', cleanupErr);
+      }
+    }
+
     const normalizedUserEmail = (userEmail || '').trim().toLowerCase();
     const isStaff = userRole === 'admin' || userRole === 'hr_officer';
 
@@ -273,6 +342,34 @@ export async function toggleVacancyStatus(req, res) {
           .filter(e => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e));
         sanitizedEmails = Array.from(new Set(sanitizedEmails));
       }
+
+      // Auto-filter out applicants who already submitted an application for this vacancy / cluster
+      try {
+        const { rows: existingApps } = await pool.query(`
+          SELECT DISTINCT LOWER(TRIM(ap.email_address)) AS email
+          FROM vacancies v
+          JOIN applications a ON (
+            (v.job_cluster_id IS NOT NULL AND a.job_cluster_id = v.job_cluster_id)
+            OR (v.job_cluster_id IS NULL AND a.job_cluster_id = v.id)
+            OR (a.appointment_item_no IS NOT NULL AND a.appointment_item_no = v.item_no)
+            OR (v.position_id IS NOT NULL AND a.job_cluster_id IN (SELECT jc.id FROM job_clusters jc WHERE jc.position_id = v.position_id))
+            OR (v.title IS NOT NULL AND a.job_cluster_id IN (
+                SELECT jc3.id FROM job_clusters jc3 
+                JOIN positions p3 ON jc3.position_id = p3.id 
+                WHERE LOWER(TRIM(p3.title)) = LOWER(TRIM(v.title)) 
+                   OR v.title ILIKE CONCAT(p3.title, '%')
+                   OR p3.title ILIKE CONCAT(v.title, '%')
+            ))
+          )
+          JOIN applicants ap ON a.applicant_id = ap.id
+          WHERE v.id = $1 AND ap.email_address IS NOT NULL
+        `, [id]);
+        const submittedEmails = new Set(existingApps.map(a => a.email.toLowerCase()));
+        sanitizedEmails = sanitizedEmails.filter(e => !submittedEmails.has(e));
+      } catch (err) {
+        console.error('Error filtering submitted applicants from allowed_emails:', err);
+      }
+
       fields.push(`allowed_emails = $${idx++}`);
       values.push(JSON.stringify(sanitizedEmails));
     }
@@ -658,7 +755,7 @@ export async function importNosca(req, res) {
           finalSchoolName,
           division,
           region,
-          'closed',
+          'for_publication',
           finalSchoolLevel,
           finalSchoolId,
           jobClusterId
@@ -714,23 +811,52 @@ export async function autocompleteSchools(req, res) {
 }
 
 export async function autocompleteApplicantEmails(req, res) {
-  const { q } = req.query;
+  const { q, vacancyId } = req.query;
   if (!q || !q.trim()) {
     return res.json([]);
   }
   try {
     const queryTerm = `%${q.trim()}%`;
+    let excludeClause = '';
+    const params = [queryTerm];
+
+    if (vacancyId) {
+      params.push(vacancyId);
+      excludeClause = `
+        AND LOWER(TRIM(ap.email_address)) NOT IN (
+          SELECT DISTINCT LOWER(TRIM(ap2.email_address))
+          FROM vacancies v
+          JOIN applications a ON (
+            (v.job_cluster_id IS NOT NULL AND a.job_cluster_id = v.job_cluster_id)
+            OR (v.job_cluster_id IS NULL AND a.job_cluster_id = v.id)
+            OR (a.appointment_item_no IS NOT NULL AND a.appointment_item_no = v.item_no)
+            OR (v.position_id IS NOT NULL AND a.job_cluster_id IN (SELECT jc.id FROM job_clusters jc WHERE jc.position_id = v.position_id))
+            OR (v.title IS NOT NULL AND a.job_cluster_id IN (
+                SELECT jc3.id FROM job_clusters jc3 
+                JOIN positions p3 ON jc3.position_id = p3.id 
+                WHERE LOWER(TRIM(p3.title)) = LOWER(TRIM(v.title)) 
+                   OR v.title ILIKE CONCAT(p3.title, '%')
+                   OR p3.title ILIKE CONCAT(v.title, '%')
+            ))
+          )
+          JOIN applicants ap2 ON a.applicant_id = ap2.id
+          WHERE v.id = $2 AND ap2.email_address IS NOT NULL
+        )
+      `;
+    }
+
     const { rows } = await pool.query(
       `SELECT DISTINCT 
          ap.email_address as email,
          CONCAT_WS(' ', NULLIF(ap.first_name, ''), NULLIF(ap.surname, '')) as name
        FROM applicants ap
-       WHERE ap.email_address ILIKE $1 
+       WHERE (ap.email_address ILIKE $1 
           OR ap.first_name ILIKE $1 
-          OR ap.surname ILIKE $1
+          OR ap.surname ILIKE $1)
+          ${excludeClause}
        ORDER BY ap.email_address ASC
        LIMIT 10;`,
-      [queryTerm]
+      params
     );
     res.json(rows.filter(r => r.email && r.email.trim()));
   } catch (error) {
