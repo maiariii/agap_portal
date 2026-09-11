@@ -1267,7 +1267,7 @@ export default function VacanciesPage() {
                               >
                                 {postingStatus === 'Open for Application' ? 'Close' : 'Open'}
                               </button>
-                              {(postingStatus === 'Closed' || postingStatus === 'For Publication') && (
+                              {postingStatus === 'Closed' && (
                                 <button
                                   type="button"
                                   className="vac-action"
