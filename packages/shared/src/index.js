@@ -129,3 +129,6 @@ export function nullifyPipelineIfDisqualified(app) {
   app.appointmentItemNo = null;
   app.appointmentReferenceCode = null;
 }
+
+export { CollaboratorInviteSchema } from './schemas/collaborators.js';
+

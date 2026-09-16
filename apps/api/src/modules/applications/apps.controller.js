@@ -1713,3 +1713,458 @@ export async function downloadNoticeOfAppointment(req, res) {
     res.status(500).json({ error: error.message });
   }
 }
+
+/* =========================================================================
+   TEACHER HIRING: CAR CSV TEMPLATE, BACKGROUND PARSING & APPOINTMENT WORKFLOW
+   ========================================================================= */
+
+/**
+ * Streams the standard CAR CSV template
+ */
+export async function downloadCarTemplate(req, res) {
+  try {
+    const csvContent = [
+      'Applicant Code,Applicant Name,Item Reference,Education Score,Training Score,Experience Score,PBET/LET Score,Interview Score,Total Rating',
+      'TCHR-2026-001,"Cruz, Maria Santos",T1-NCR-MNL-001,15,10,8,22.5,18,73.5',
+      'TCHR-2026-002,"Reyes, Juan Dela",T1-NCR-MNL-002,14,8.5,10,24,19,75.5',
+      'TCHR-2026-003,"Bautista, Elena Joy",T1-NCR-QC-001,13.5,9,9.5,23,17.5,72.5'
+    ].join('\r\n');
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="DepEd_Teacher_Hiring_CAR_Template.csv"');
+    res.send(csvContent);
+  } catch (err) {
+    console.error('[Teacher Hiring] downloadCarTemplate error:', err);
+    res.status(500).json({ error: 'Failed to download CAR template' });
+  }
+}
+
+/**
+ * Background worker to parse CAR CSV lines and validate strictly
+ */
+async function processCarCsvWorker(batchId, division, csvString) {
+  console.log(`[CAR Worker] Starting background processing for batch ${batchId}...`);
+  try {
+    // 1. Fetch available item codes for validation
+    const itemsRes = await pool.query('SELECT item_code, is_filled FROM teacher_items');
+    const validItemsMap = new Map();
+    itemsRes.rows.forEach(r => validItemsMap.set(r.item_code.trim().toUpperCase(), r.is_filled));
+
+    // 2. Parse lines
+    const lines = csvString.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    if (lines.length < 2) {
+      throw new Error('The uploaded CSV file is empty or missing data rows.');
+    }
+
+    // Parse header
+    const parseCsvLine = (text) => {
+      const result = [];
+      let cur = '';
+      let inQuotes = false;
+      for (let i = 0; i < text.length; i++) {
+        const char = text[i];
+        if (char === '"') {
+          if (inQuotes && text[i + 1] === '"') {
+            cur += '"';
+            i++;
+          } else {
+            inQuotes = !inQuotes;
+          }
+        } else if (char === ',' && !inQuotes) {
+          result.push(cur.trim());
+          cur = '';
+        } else {
+          cur += char;
+        }
+      }
+      result.push(cur.trim());
+      return result;
+    };
+
+    const header = parseCsvLine(lines[0]).map(h => h.toLowerCase().replace(/[^a-z0-9]/g, ''));
+    
+    // Find column indexes
+    const idxCode = header.findIndex(h => h.includes('applicantcode') || h.includes('appcode') || h === 'code');
+    const idxName = header.findIndex(h => h.includes('applicantname') || h.includes('name'));
+    const idxItem = header.findIndex(h => h.includes('itemreference') || h.includes('item') || h.includes('itemcode'));
+    const idxEdu = header.findIndex(h => h.includes('educationscore') || h.includes('education'));
+    const idxTrain = header.findIndex(h => h.includes('trainingscore') || h.includes('training'));
+    const idxExp = header.findIndex(h => h.includes('experiencescore') || h.includes('experience'));
+    const idxPbet = header.findIndex(h => h.includes('pbet') || h.includes('let'));
+    const idxInterview = header.findIndex(h => h.includes('interviewscore') || h.includes('interview'));
+    const idxTotal = header.findIndex(h => h.includes('totalrating') || h.includes('total'));
+
+    if (idxCode === -1 || idxName === -1 || idxItem === -1 || idxTotal === -1) {
+      throw new Error('CSV headers must include at least: Applicant Code, Applicant Name, Item Reference, and Total Rating.');
+    }
+
+    const seenApplicantCodes = new Set();
+    let validCount = 0;
+    let invalidCount = 0;
+
+    for (let i = 1; i < lines.length; i++) {
+      const cols = parseCsvLine(lines[i]);
+      if (cols.length < 4 || cols.every(c => !c)) continue;
+
+      const errors = [];
+      const appCode = (cols[idxCode] || '').trim();
+      const appName = (cols[idxName] || '').trim();
+      const itemRef = (cols[idxItem] || '').trim();
+
+      const parseNum = (val) => {
+        if (val === undefined || val === '') return null;
+        const n = parseFloat(val);
+        return isNaN(n) ? null : n;
+      };
+
+      const edu = idxEdu !== -1 ? parseNum(cols[idxEdu]) : 0;
+      const train = idxTrain !== -1 ? parseNum(cols[idxTrain]) : 0;
+      const exp = idxExp !== -1 ? parseNum(cols[idxExp]) : 0;
+      const pbet = idxPbet !== -1 ? parseNum(cols[idxPbet]) : 0;
+      const interview = idxInterview !== -1 ? parseNum(cols[idxInterview]) : 0;
+      const total = parseNum(cols[idxTotal]);
+
+      // 1. Check required fields
+      if (!appCode) errors.push('Applicant Code is required');
+      if (!appName) errors.push('Applicant Name is required');
+      if (!itemRef) errors.push('Item Reference is required');
+      if (total === null) errors.push('Total Rating is required and must be a number');
+
+      // 2. Uniqueness check in batch
+      if (appCode) {
+        const lowerCode = appCode.toLowerCase();
+        if (seenApplicantCodes.has(lowerCode)) {
+          errors.push(`Duplicate Applicant Code "${appCode}" in upload batch`);
+        } else {
+          seenApplicantCodes.add(lowerCode);
+        }
+      }
+
+      // 3. Score bounds validation
+      if (edu !== null && (edu < 0 || edu > 15)) {
+        errors.push(`Education Score (${edu}) out of bounds (Max 15)`);
+      }
+      if (train !== null && (train < 0 || train > 10)) {
+        errors.push(`Training Score (${train}) out of bounds (Max 10)`);
+      }
+      if (exp !== null && (exp < 0 || exp > 10)) {
+        errors.push(`Experience Score (${exp}) out of bounds (Max 10)`);
+      }
+      if (pbet !== null && (pbet < 0 || pbet > 25)) {
+        errors.push(`PBET/LET Score (${pbet}) out of bounds (Max 25)`);
+      }
+      if (interview !== null && (interview < 0 || interview > 20)) {
+        errors.push(`Interview Score (${interview}) out of bounds (Max 20)`);
+      }
+      if (total !== null && (total < 0 || total > 100)) {
+        errors.push(`Total Rating (${total}) out of bounds (0 - 100)`);
+      }
+
+      // 4. Plantilla item reference check
+      if (itemRef) {
+        const itemKey = itemRef.trim().toUpperCase();
+        if (!validItemsMap.has(itemKey)) {
+          errors.push(`Unrecognized item reference "${itemRef}": item not found in plantilla`);
+        } else if (validItemsMap.get(itemKey) === true) {
+          errors.push(`Item reference "${itemRef}" is already filled`);
+        }
+      }
+
+      const isValid = errors.length === 0;
+      if (isValid) validCount++; else invalidCount++;
+
+      await pool.query(`
+        INSERT INTO car_results (
+          batch_id, applicant_code, applicant_name, item_reference,
+          education_score, training_score, experience_score, pbet_score,
+          interview_score, total_rating, validation_status, validation_errors
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb);
+      `, [
+        batchId,
+        appCode || 'UNKNOWN',
+        appName || 'Unknown Applicant',
+        itemRef || 'UNASSIGNED',
+        edu,
+        train,
+        exp,
+        pbet,
+        interview,
+        total || 0,
+        isValid ? 'valid' : 'invalid',
+        JSON.stringify(errors)
+      ]);
+    }
+
+    // Update batch status to parsed
+    const totalRows = validCount + invalidCount;
+    await pool.query(`
+      UPDATE car_upload_batches
+      SET 
+        status = 'parsed',
+        total_rows = $1,
+        valid_rows = $2,
+        invalid_rows = $3
+      WHERE id = $4;
+    `, [totalRows, validCount, invalidCount, batchId]);
+
+    console.log(`[CAR Worker] Batch ${batchId} parsed: ${totalRows} total (${validCount} valid, ${invalidCount} invalid)`);
+  } catch (workerErr) {
+    console.error(`[CAR Worker Error] Batch ${batchId}:`, workerErr);
+    await pool.query(`
+      UPDATE car_upload_batches
+      SET status = 'error', error_message = $1
+      WHERE id = $2;
+    `, [workerErr.message, batchId]).catch(() => {});
+  }
+}
+
+/**
+ * Initiates background CSV parsing job
+ */
+export async function uploadCarCsvBackground(req, res) {
+  try {
+    const { csvContent, fileName } = req.body;
+    if (!csvContent || typeof csvContent !== 'string' || !csvContent.trim()) {
+      return res.status(400).json({ error: 'No CSV content provided for upload.' });
+    }
+
+    let userId = req.user?.id || req.user?.userId || null;
+    if (userId) {
+      const userCheck = await pool.query('SELECT id FROM users WHERE id = $1', [userId]);
+      if (userCheck.rows.length === 0) userId = null;
+    }
+    const division = req.user?.division || 'SDO Manila';
+
+    const insertBatch = await pool.query(`
+      INSERT INTO car_upload_batches (
+        uploader_id, division, file_name, status
+      ) VALUES ($1, $2, $3, 'processing')
+      RETURNING id, status, created_at;
+    `, [userId, division, fileName || 'CAR_Upload.csv']);
+
+    const batch = insertBatch.rows[0];
+
+    // Trigger asynchronous background worker without blocking HTTP response
+    setTimeout(() => {
+      processCarCsvWorker(batch.id, division, csvContent).catch(err => {
+        console.error('[CAR Background Worker Unhandled Error]', err);
+      });
+    }, 100);
+
+    res.status(202).json({
+      jobId: batch.id,
+      status: 'processing',
+      message: 'CAR CSV upload accepted for background processing.'
+    });
+  } catch (err) {
+    console.error('[Teacher Hiring] uploadCarCsvBackground error:', err);
+    res.status(500).json({ error: err.message || 'Failed to initiate CAR CSV upload' });
+  }
+}
+
+/**
+ * Poll job status
+ */
+export async function getCarJobStatus(req, res) {
+  try {
+    const { jobId } = req.params;
+    const batchRes = await pool.query('SELECT * FROM car_upload_batches WHERE id = $1', [jobId]);
+    if (batchRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Job not found' });
+    }
+
+    const batch = batchRes.rows[0];
+    const progressPct = batch.status === 'processing' ? 65 : 100;
+
+    res.json({
+      jobId: batch.id,
+      status: batch.status,
+      total_rows: batch.total_rows,
+      valid_rows: batch.valid_rows,
+      invalid_rows: batch.invalid_rows,
+      progress_pct: progressPct,
+      error_message: batch.error_message,
+      created_at: batch.created_at
+    });
+  } catch (err) {
+    console.error('[Teacher Hiring] getCarJobStatus error:', err);
+    res.status(500).json({ error: 'Failed to fetch job status' });
+  }
+}
+
+/**
+ * Fetch batch and rows for pre-commit review table
+ */
+export async function getCarBatchReview(req, res) {
+  try {
+    const { batchId } = req.params;
+    const batchRes = await pool.query('SELECT * FROM car_upload_batches WHERE id = $1', [batchId]);
+    if (batchRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Batch not found' });
+    }
+
+    const rowsRes = await pool.query(`
+      SELECT * FROM car_results
+      WHERE batch_id = $1
+      ORDER BY total_rating DESC, applicant_name ASC;
+    `, [batchId]);
+
+    res.json({
+      batch: batchRes.rows[0],
+      rows: rowsRes.rows
+    });
+  } catch (err) {
+    console.error('[Teacher Hiring] getCarBatchReview error:', err);
+    res.status(500).json({ error: 'Failed to fetch batch review' });
+  }
+}
+
+/**
+ * Commit CAR batch (strictly locked if invalid_rows > 0)
+ */
+export async function confirmCarBatch(req, res) {
+  try {
+    const { batchId } = req.params;
+    const batchRes = await pool.query('SELECT * FROM car_upload_batches WHERE id = $1', [batchId]);
+    if (batchRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Batch not found' });
+    }
+
+    const batch = batchRes.rows[0];
+    if (batch.invalid_rows > 0) {
+      return res.status(400).json({
+        error: `Cannot confirm batch with ${batch.invalid_rows} invalid row(s). Please resolve all row errors and re-upload.`
+      });
+    }
+
+    await pool.query(`
+      UPDATE car_upload_batches
+      SET status = 'committed'
+      WHERE id = $1;
+    `, [batchId]);
+
+    res.json({
+      success: true,
+      batchId,
+      status: 'committed',
+      message: 'CAR data successfully committed and ready for plantilla appointment.'
+    });
+  } catch (err) {
+    console.error('[Teacher Hiring] confirmCarBatch error:', err);
+    res.status(500).json({ error: 'Failed to confirm batch' });
+  }
+}
+
+/**
+ * Fetch available (unfilled) Teacher I items for division
+ */
+export async function getTeacherItems(req, res) {
+  try {
+    const userDivision = req.user?.division;
+    let query = `
+      SELECT id, item_code, school_name, division, position_title, is_filled, created_at
+      FROM teacher_items
+      WHERE is_filled = FALSE
+    `;
+    const params = [];
+
+    if (userDivision && !userDivision.toLowerCase().includes('central office') && !userDivision.toLowerCase().includes('bhrod')) {
+      params.push(`%${userDivision}%`);
+      query += ` AND division ILIKE $${params.length}`;
+    }
+
+    query += ` ORDER BY division ASC, school_name ASC, item_code ASC;`;
+
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[Teacher Hiring] getTeacherItems error:', err);
+    res.status(500).json({ error: 'Failed to fetch Teacher I items' });
+  }
+}
+
+/**
+ * Strict 1-to-1 appointment of CAR applicant to Teacher I item
+ */
+export async function appointTeacherItem(req, res) {
+  const client = await pool.connect();
+  try {
+    const { batchId, carResultId, itemId, applicantCode, applicantName } = req.body;
+    if (!itemId || !applicantCode || !applicantName) {
+      return res.status(400).json({ error: 'Missing required appointment parameters (itemId, applicantCode, applicantName).' });
+    }
+
+    let userId = req.user?.id || req.user?.userId || null;
+    if (userId) {
+      const uRes = await client.query('SELECT id FROM users WHERE id = $1', [userId]);
+      if (uRes.rows.length === 0) userId = null;
+    }
+
+    await client.query('BEGIN');
+
+    // 1. Lock item and verify unfilled
+    const itemCheck = await client.query(`
+      SELECT id, item_code, school_name, division, is_filled
+      FROM teacher_items
+      WHERE id = $1
+      FOR UPDATE;
+    `, [itemId]);
+
+    if (itemCheck.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Plantilla item not found.' });
+    }
+
+    const item = itemCheck.rows[0];
+    if (item.is_filled) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: `Plantilla item "${item.item_code}" has already been filled and appointed.` });
+    }
+
+    // 2. Check if applicant is already appointed
+    const apptCheck = await client.query(`
+      SELECT id, item_id
+      FROM teacher_appointments
+      WHERE applicant_code = $1;
+    `, [applicantCode]);
+
+    if (apptCheck.rows.length > 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: `Applicant "${applicantName}" (${applicantCode}) has already been appointed to a plantilla item.` });
+    }
+
+    // 3. Insert appointment record
+    const insertAppt = await client.query(`
+      INSERT INTO teacher_appointments (
+        batch_id, car_result_id, applicant_code, applicant_name, item_id, appointed_by
+      ) VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING id, appointed_at;
+    `, [batchId || null, carResultId || null, applicantCode, applicantName, itemId, userId]);
+
+    // 4. Mark item as filled
+    await client.query(`
+      UPDATE teacher_items
+      SET is_filled = TRUE
+      WHERE id = $1;
+    `, [itemId]);
+
+    await client.query('COMMIT');
+
+    res.json({
+      success: true,
+      appointmentId: insertAppt.rows[0].id,
+      itemCode: item.item_code,
+      schoolName: item.school_name,
+      applicantCode,
+      applicantName,
+      appointedAt: insertAppt.rows[0].appointed_at,
+      message: `Successfully appointed ${applicantName} to Teacher I item ${item.item_code}.`
+    });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[Teacher Hiring] appointTeacherItem error:', err);
+    res.status(500).json({ error: err.message || 'Failed to process appointment' });
+  } finally {
+    client.release();
+  }
+}

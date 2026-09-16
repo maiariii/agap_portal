@@ -8,11 +8,16 @@ import dotenv from 'dotenv';
 import authRouter from './modules/auth/auth.router.js';
 import vacanciesRouter from './modules/vacancies/vacancies.router.js';
 import applicationsRouter from './modules/applications/apps.router.js';
+import reclassRouter from './modules/reclassification/reclass.router.js';
+import collaboratorsRouter from './modules/collaborators/collaborators.router.js';
 import { getPositions } from './modules/vacancies/vacancies.controller.js';
 import { authenticateToken } from './middleware/auth.middleware.js';
 import { errorHandler } from './middleware/error.middleware.js';
 import { runMigration as runAuditLogMigration } from './db/migration_documents_audit_logs.js';
 import { runMigration as runVacanciesMigration } from './db/alter_vacancies_doc_fetch.js';
+import { runMigration as runReclassMigration } from './db/migration_reclassification.js';
+import { runMigration as runCarTeacherHiringMigration } from './db/migration_car_teacher_hiring.js';
+import { runMigration as runCollaboratorsMigration } from './db/migration_collaborators.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -26,6 +31,9 @@ const PORT = process.env.PORT || 5000;
   try {
     await runAuditLogMigration();
     await runVacanciesMigration();
+    await runReclassMigration();
+    await runCarTeacherHiringMigration();
+    await runCollaboratorsMigration();
   } catch (err) {
     console.error('[Server Startup Migration Error]', err.message);
   }
@@ -61,6 +69,8 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use('/api/auth', authRouter);
 app.use('/api/vacancies', vacanciesRouter);
 app.use('/api/applications', applicationsRouter);
+app.use('/api/reclassification', reclassRouter);
+app.use('/api/collaborators', authenticateToken, collaboratorsRouter);
 
 // Positions endpoint (direct path matching frontend)
 app.get('/api/positions', authenticateToken, getPositions);

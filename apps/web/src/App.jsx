@@ -6,6 +6,9 @@ import { useAppData } from './middleware/DataProvider.jsx';
 import { apiFetch } from './config/api.js';
 import { routes } from './config/routes.jsx';
 import agadLogo from './agadlogo.png';
+import ModuleSelectionPage from './modules/dashboard/pages/ModuleSelectionPage.jsx';
+import TeacherHiringModule from './modules/assessment/pages/TeacherHiringModule.jsx';
+import ReclassificationPage from './modules/reclassification/pages/ReclassificationPage.jsx';
 
 const TOUR_STEPS = [
   { view: "home", sel: ".kpis", title: "Headline metrics", body: "These KPI cards give you an at-a-glance summary of the data module you're currently viewing." },
@@ -29,7 +32,8 @@ const viewPaths = {
   vacancies: '/vacancies',
   applications: '/applications',
   qualified: '/assessment',
-  appointment: '/appointment'
+  appointment: '/appointment',
+  settings: '/settings'
 };
 
 export default function App() {
@@ -38,6 +42,19 @@ export default function App() {
   const { loading } = useAppData();
   const navigate = useNavigate();
   const location = useLocation();
+
+  // Module Selection State (SCA I, Teacher Hiring, Reclassification)
+  const [selectedModule, setSelectedModule] = useState(() => {
+    return sessionStorage.getItem('agap_selected_module') || null;
+  });
+
+  const onLogout = () => {
+    sessionStorage.removeItem('agap_selected_module');
+    setSelectedModule(null);
+    handleLogout();
+    setToast({ message: 'Logged out successfully.', type: 'info' });
+    navigate('/');
+  };
 
   // Login Form State
   const [username, setUsername] = useState('');
@@ -137,6 +154,8 @@ export default function App() {
         localStorage.setItem('agap_user', JSON.stringify(data.user));
         setToken(data.token);
         setUser(data.user);
+        setSelectedModule(null);
+        sessionStorage.removeItem('agap_selected_module');
         setToast({ message: `Welcome, ${data.user.fullName || data.user.username || 'HR Officer'}!`, type: 'success' });
         navigate('/dashboard', { replace: true });
       })
@@ -184,6 +203,8 @@ export default function App() {
       localStorage.setItem('agap_user', JSON.stringify(data.user));
       setToken(data.token);
       setUser(data.user);
+      setSelectedModule(null);
+      sessionStorage.removeItem('agap_selected_module');
       setToast({ message: `Welcome back, ${data.user.first_name || data.user.username || 'HR Officer'}!`, type: 'success' });
       navigate('/dashboard');
     } catch (err) {
@@ -781,6 +802,40 @@ export default function App() {
     );
   }
 
+  // Post-Login Module Selection Router
+  if (!selectedModule) {
+    return (
+      <ModuleSelectionPage
+        onSelectModule={(mod) => {
+          setSelectedModule(mod);
+          sessionStorage.setItem('agap_selected_module', mod);
+        }}
+      />
+    );
+  }
+
+  if (selectedModule === 'teacher_hiring') {
+    return (
+      <TeacherHiringModule
+        onBack={() => {
+          setSelectedModule(null);
+          sessionStorage.removeItem('agap_selected_module');
+        }}
+      />
+    );
+  }
+
+  if (selectedModule === 'reclassification') {
+    return (
+      <ReclassificationPage
+        onBack={() => {
+          setSelectedModule(null);
+          sessionStorage.removeItem('agap_selected_module');
+        }}
+      />
+    );
+  }
+
   return (
     <div className="app">
       {/* GUIDED ONBOARDING TOUR DOM HIGHLIGHTS */}
@@ -845,8 +900,23 @@ export default function App() {
             <span className="nav-icon">★</span>
             <span className="nav-label">Appointment</span>
           </button>
+          <button className={location.pathname === '/settings' ? 'active' : ''} onClick={() => navigate('/settings')} title="Settings & Collaborators">
+            <span className="nav-icon">⚙</span>
+            <span className="nav-label">Settings</span>
+          </button>
           <div className="nav-divider"></div>
-          <button onClick={() => { handleLogout(); setToast({ message: 'Logged out successfully.', type: 'info' }); navigate('/'); }} title="Log Out" style={{ background: 'rgba(185, 28, 28, 0.2)', color: '#FCA5A5' }}>
+          <button 
+            onClick={() => {
+              setSelectedModule(null);
+              sessionStorage.removeItem('agap_selected_module');
+            }} 
+            title="Switch Module"
+            style={{ background: 'rgba(59, 130, 246, 0.2)', color: '#93C5FD' }}
+          >
+            <span className="nav-icon">⮌</span>
+            <span className="nav-label">Switch Module</span>
+          </button>
+          <button onClick={onLogout} title="Log Out" style={{ background: 'rgba(185, 28, 28, 0.2)', color: '#FCA5A5' }}>
             <span className="nav-icon">✕</span>
             <span className="nav-label">Log Out</span>
           </button>
@@ -858,7 +928,7 @@ export default function App() {
           <div className="page-title">
             <div className="eyebrow">DEPARTMENT OF EDUCATION | HUMAN RESOURCE AND ORGANIZATIONAL DEVELOPMENT AND INFRASTRUCTURE</div>
             <h1>AGAP Portal</h1>
-            <p>Agile Gateway for Appointments and Placements</p>
+            <p>Agile Gateway for Appointments and Placements · SCA I Module</p>
           </div>
 
           {user && (

@@ -7,7 +7,8 @@
   "scripts": {
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
-    "db:seed": "node src/db/seed.js"
+    "db:seed": "node src/db/seed.js",
+    "db:introspect": "drizzle-kit introspect:pg --config=drizzle.config.cjs && node src/db/post_introspect.js"
   },
   "dependencies": {
     "@agap/shared": "*",
@@ -16,6 +17,7 @@
     "cors": "^2.8.5",
     "docxtemplater": "^3.69.0",
     "dotenv": "^16.4.5",
+    "drizzle-orm": "^0.30.0",
     "exceljs": "^4.4.0",
     "express": "^4.19.2",
     "jsonwebtoken": "^9.0.2",
@@ -24,6 +26,7 @@
     "pizzip": "^3.2.0"
   },
   "devDependencies": {
+    "drizzle-kit": "^0.20.0",
     "nodemon": "^3.1.4"
   }
 }
