@@ -316,8 +316,284 @@ export default function TeacherHiringModule({ onBack }) {
       color: 'var(--text)',
       display: 'flex',
       flexDirection: 'column',
+      position: 'relative',
+      overflowX: 'hidden',
       transition: 'background-color 0.25s ease, color 0.25s ease'
     }}>
+      {/* Dynamic Animated Background Styles & Keyframes */}
+      <style>{`
+        @keyframes floatItemSlow1 {
+          0%, 100% { transform: translate3d(0, 0, 0) rotate(0deg); }
+          35% { transform: translate3d(24px, -36px, 0) rotate(4deg); }
+          70% { transform: translate3d(-18px, -18px, 0) rotate(-3deg); }
+        }
+        @keyframes floatItemSlow2 {
+          0%, 100% { transform: translate3d(0, 0, 0) rotate(0deg); }
+          40% { transform: translate3d(-30px, 32px, 0) rotate(-5deg); }
+          75% { transform: translate3d(22px, 16px, 0) rotate(3deg); }
+        }
+        @keyframes floatItemSlow3 {
+          0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+          50% { transform: translate3d(28px, -28px, 0) scale(1.06); }
+        }
+        @keyframes floatItemSlow4 {
+          0%, 100% { transform: translate3d(0, 0, 0) rotate(0deg); }
+          45% { transform: translate3d(-24px, -32px, 0) rotate(6deg); }
+          80% { transform: translate3d(16px, -12px, 0) rotate(-2deg); }
+        }
+        @keyframes orbDrift1 {
+          0%, 100% { transform: translate3d(0, 0, 0) scale(1); opacity: 0.22; }
+          50% { transform: translate3d(60px, -45px, 0) scale(1.22); opacity: 0.38; }
+        }
+        @keyframes orbDrift2 {
+          0%, 100% { transform: translate3d(0, 0, 0) scale(1); opacity: 0.18; }
+          50% { transform: translate3d(-50px, 40px, 0) scale(1.28); opacity: 0.32; }
+        }
+        @keyframes orbDrift3 {
+          0%, 100% { transform: translate3d(0, 0, 0) scale(1); opacity: 0.14; }
+          50% { transform: translate3d(40px, 50px, 0) scale(1.18); opacity: 0.28; }
+        }
+        @keyframes ringSpinSlow {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+        @keyframes gridPan {
+          0% { background-position: 0 0; }
+          100% { background-position: 80px 80px; }
+        }
+      `}</style>
+
+      {/* Dynamic Ambient Background Layer with Moving Items & Glowing Mesh */}
+      <div style={{
+        position: 'fixed',
+        inset: 0,
+        pointerEvents: 'none',
+        zIndex: 0,
+        overflow: 'hidden'
+      }}>
+        {/* Animated Background Mesh Orbs */}
+        <div style={{
+          position: 'absolute',
+          top: '-12%',
+          right: '-6%',
+          width: '650px',
+          height: '650px',
+          borderRadius: '50%',
+          background: isDark
+            ? 'radial-gradient(circle, rgba(16, 185, 129, 0.28) 0%, rgba(5, 150, 105, 0.08) 45%, transparent 70%)'
+            : 'radial-gradient(circle, rgba(16, 185, 129, 0.18) 0%, rgba(52, 211, 153, 0.06) 50%, transparent 70%)',
+          filter: 'blur(75px)',
+          animation: 'orbDrift1 22s ease-in-out infinite',
+          willChange: 'transform, opacity'
+        }} />
+
+        <div style={{
+          position: 'absolute',
+          top: '35%',
+          left: '-8%',
+          width: '580px',
+          height: '580px',
+          borderRadius: '50%',
+          background: isDark
+            ? 'radial-gradient(circle, rgba(14, 165, 233, 0.22) 0%, rgba(2, 132, 199, 0.06) 50%, transparent 70%)'
+            : 'radial-gradient(circle, rgba(56, 189, 248, 0.15) 0%, rgba(14, 165, 233, 0.05) 50%, transparent 70%)',
+          filter: 'blur(80px)',
+          animation: 'orbDrift2 26s ease-in-out infinite',
+          willChange: 'transform, opacity'
+        }} />
+
+        <div style={{
+          position: 'absolute',
+          bottom: '-10%',
+          right: '12%',
+          width: '600px',
+          height: '600px',
+          borderRadius: '50%',
+          background: isDark
+            ? 'radial-gradient(circle, rgba(99, 102, 241, 0.20) 0%, rgba(79, 70, 229, 0.05) 50%, transparent 70%)'
+            : 'radial-gradient(circle, rgba(129, 140, 248, 0.14) 0%, rgba(99, 102, 241, 0.04) 50%, transparent 70%)',
+          filter: 'blur(90px)',
+          animation: 'orbDrift3 28s ease-in-out infinite',
+          willChange: 'transform, opacity'
+        }} />
+
+        {/* Ambient Animated Dot Grid Pattern */}
+        <div style={{
+          position: 'absolute',
+          inset: 0,
+          backgroundImage: isDark
+            ? 'radial-gradient(rgba(255, 255, 255, 0.06) 1.2px, transparent 1.2px)'
+            : 'radial-gradient(rgba(15, 23, 42, 0.045) 1.2px, transparent 1.2px)',
+          backgroundSize: '32px 32px',
+          animation: 'gridPan 90s linear infinite',
+          opacity: 0.8
+        }} />
+
+        {/* Moving Floating Element 1: CAR Pipeline Badge (Top-Right) */}
+        <div style={{
+          position: 'absolute',
+          top: '14%',
+          right: '4%',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          padding: '8px 14px',
+          borderRadius: '999px',
+          background: isDark ? 'rgba(15, 23, 42, 0.55)' : 'rgba(255, 255, 255, 0.65)',
+          backdropFilter: 'blur(12px)',
+          border: isDark ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(16, 185, 129, 0.25)',
+          boxShadow: isDark ? '0 10px 25px rgba(0, 0, 0, 0.35)' : '0 8px 20px rgba(16, 185, 129, 0.1)',
+          animation: 'floatItemSlow1 24s ease-in-out infinite',
+          opacity: 0.85
+        }}>
+          <span style={{
+            width: '8px',
+            height: '8px',
+            borderRadius: '50%',
+            background: '#10b981',
+            boxShadow: '0 0 10px #10b981'
+          }} />
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+          <span style={{ fontSize: '11px', fontWeight: 750, color: isDark ? '#6ee7b7' : '#047857', letterSpacing: '0.03em' }}>
+            CAR Automated Evaluator
+          </span>
+        </div>
+
+        {/* Moving Floating Element 2: DO 007 s. 2023 Guidelines Pill (Mid-Left) */}
+        <div style={{
+          position: 'absolute',
+          top: '46%',
+          left: '2.5%',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          padding: '8px 14px',
+          borderRadius: '999px',
+          background: isDark ? 'rgba(15, 23, 42, 0.55)' : 'rgba(255, 255, 255, 0.65)',
+          backdropFilter: 'blur(12px)',
+          border: isDark ? '1px solid rgba(14, 165, 233, 0.3)' : '1px solid rgba(14, 165, 233, 0.25)',
+          boxShadow: isDark ? '0 10px 25px rgba(0, 0, 0, 0.35)' : '0 8px 20px rgba(14, 165, 233, 0.1)',
+          animation: 'floatItemSlow2 28s ease-in-out infinite',
+          animationDelay: '-6s',
+          opacity: 0.82
+        }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#0ea5e9" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+            <polyline points="14 2 14 8 20 8" />
+            <line x1="16" y1="13" x2="8" y2="13" />
+            <line x1="16" y1="17" x2="8" y2="17" />
+          </svg>
+          <span style={{ fontSize: '11px', fontWeight: 750, color: isDark ? '#7dd3fc' : '#0369a1', letterSpacing: '0.03em' }}>
+            DepEd Order No. 007, s. 2023
+          </span>
+        </div>
+
+        {/* Moving Floating Element 3: Teacher I Plantilla Badge (Bottom-Right) */}
+        <div style={{
+          position: 'absolute',
+          bottom: '18%',
+          right: '3%',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          padding: '8px 14px',
+          borderRadius: '999px',
+          background: isDark ? 'rgba(15, 23, 42, 0.55)' : 'rgba(255, 255, 255, 0.65)',
+          backdropFilter: 'blur(12px)',
+          border: isDark ? '1px solid rgba(99, 102, 241, 0.3)' : '1px solid rgba(99, 102, 241, 0.25)',
+          boxShadow: isDark ? '0 10px 25px rgba(0, 0, 0, 0.35)' : '0 8px 20px rgba(99, 102, 241, 0.1)',
+          animation: 'floatItemSlow4 30s ease-in-out infinite',
+          animationDelay: '-12s',
+          opacity: 0.8
+        }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 21h18" />
+            <path d="M5 21V7l8-4 8 4v14" />
+            <path d="M9 10a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v11H9z" />
+          </svg>
+          <span style={{ fontSize: '11px', fontWeight: 750, color: isDark ? '#a5b4fc' : '#4338ca', letterSpacing: '0.03em' }}>
+            Teacher I Plantilla Allocation
+          </span>
+        </div>
+
+        {/* Moving Floating Element 4: RQA Merit Benchmark (Bottom-Left) */}
+        <div style={{
+          position: 'absolute',
+          bottom: '28%',
+          left: '3.5%',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          padding: '7px 13px',
+          borderRadius: '999px',
+          background: isDark ? 'rgba(15, 23, 42, 0.55)' : 'rgba(255, 255, 255, 0.65)',
+          backdropFilter: 'blur(12px)',
+          border: isDark ? '1px solid rgba(245, 158, 11, 0.3)' : '1px solid rgba(245, 158, 11, 0.25)',
+          boxShadow: isDark ? '0 10px 25px rgba(0, 0, 0, 0.35)' : '0 8px 20px rgba(245, 158, 11, 0.1)',
+          animation: 'floatItemSlow3 26s ease-in-out infinite',
+          animationDelay: '-16s',
+          opacity: 0.78
+        }}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="8" r="7" />
+            <polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88" />
+          </svg>
+          <span style={{ fontSize: '11px', fontWeight: 750, color: isDark ? '#fcd34d' : '#b45309', letterSpacing: '0.03em' }}>
+            RQA 50.00 Passing Merit
+          </span>
+        </div>
+
+        {/* Subtle Decorative Rotating Geometric Node (Upper-Right Ambient) */}
+        <div style={{
+          position: 'absolute',
+          top: '22%',
+          right: '18%',
+          width: '120px',
+          height: '120px',
+          borderRadius: '50%',
+          border: isDark ? '1.5px dashed rgba(16, 185, 129, 0.22)' : '1.5px dashed rgba(16, 185, 129, 0.18)',
+          animation: 'ringSpinSlow 60s linear infinite',
+          opacity: 0.6
+        }}>
+          <div style={{
+            position: 'absolute',
+            top: '-4px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            width: '8px',
+            height: '8px',
+            borderRadius: '50%',
+            background: '#10b981'
+          }} />
+        </div>
+
+        {/* Subtle Decorative Rotating Geometric Node (Lower-Left Ambient) */}
+        <div style={{
+          position: 'absolute',
+          bottom: '12%',
+          left: '16%',
+          width: '90px',
+          height: '90px',
+          borderRadius: '50%',
+          border: isDark ? '1.5px dashed rgba(14, 165, 233, 0.2)' : '1.5px dashed rgba(14, 165, 233, 0.16)',
+          animation: 'ringSpinSlow 45s linear infinite reverse',
+          opacity: 0.55
+        }}>
+          <div style={{
+            position: 'absolute',
+            bottom: '-4px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            width: '7px',
+            height: '7px',
+            borderRadius: '50%',
+            background: '#0ea5e9'
+          }} />
+        </div>
+      </div>
+
       {/* Top Bar */}
       <header style={{
         background: 'var(--card)',
@@ -439,7 +715,7 @@ export default function TeacherHiringModule({ onBack }) {
       </header>
 
       {/* Main Container */}
-      <main style={{ maxWidth: '1400px', margin: '0 auto', padding: '24px 28px 60px', width: '100%' }}>
+      <main style={{ maxWidth: '1400px', margin: '0 auto', padding: '24px 28px 60px', width: '100%', position: 'relative', zIndex: 1 }}>
         {/* Step Completion Calculation */}
         {(() => {
           const isStep1Done = Boolean(batchId);
