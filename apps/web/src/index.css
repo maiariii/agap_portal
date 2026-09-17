@@ -17,6 +17,8 @@
   --glass-border: #e2e8f0;
   --glass-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
 
+  --primary: #0284c7;
+  --primary-hover: #0369a1;
   --navy: #08315f;
   --blue: #0284c7;
   --blue-600: #2563eb;
@@ -92,6 +94,8 @@
   --glass-border: rgba(51, 65, 85, 0.7);
   --glass-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
 
+  --primary: #0284c7;
+  --primary-hover: #38bdf8;
   --navy: #93c5fd;
   --blue: #38bdf8;
   --blue-600: #3b82f6;

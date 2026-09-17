@@ -1752,7 +1752,7 @@ export default function VacanciesPage() {
                         height: '38px',
                         borderRadius: '10px',
                         border: 'none',
-                        background: 'var(--primary)',
+                        background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
                         color: '#FFFFFF',
                         fontWeight: '700',
                         fontSize: '12px',
@@ -1761,7 +1761,7 @@ export default function VacanciesPage() {
                         alignItems: 'center',
                         gap: '4px',
                         whiteSpace: 'nowrap',
-                        boxShadow: '0 2px 6px rgba(0, 0, 0, 0.15)',
+                        boxShadow: '0 2px 8px rgba(2, 132, 199, 0.35)',
                         flexShrink: 0
                       }}
                     >
@@ -1844,7 +1844,7 @@ export default function VacanciesPage() {
                         padding: '6px 14px',
                         borderRadius: '8px',
                         border: 'none',
-                        background: 'var(--primary)',
+                        background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
                         color: '#FFFFFF',
                         fontWeight: '700',
                         fontSize: '12px',
@@ -1852,7 +1852,7 @@ export default function VacanciesPage() {
                         display: 'inline-flex',
                         alignItems: 'center',
                         gap: '6px',
-                        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.15)'
+                        boxShadow: '0 2px 6px rgba(2, 132, 199, 0.3)'
                       }}
                     >
                       <span>+</span>
@@ -1976,11 +1976,12 @@ export default function VacanciesPage() {
                           padding: '8px 18px',
                           borderRadius: '10px',
                           border: 'none',
-                          background: 'var(--primary)',
+                          background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
                           color: '#FFFFFF',
                           fontWeight: '800',
                           fontSize: '12.5px',
-                          cursor: 'pointer'
+                          cursor: 'pointer',
+                          boxShadow: '0 2px 6px rgba(2, 132, 199, 0.3)'
                         }}
                       >
                         + Add Applicant to Invite
