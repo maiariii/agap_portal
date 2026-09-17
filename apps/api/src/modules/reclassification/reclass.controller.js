@@ -380,9 +380,16 @@ export async function getIncumbents(req, res) {
       SELECT 
         g.id,
         g.employee_id,
+        g.plantilla_item_number,
         g.full_name,
         g.current_position,
+        g.salary_grade,
+        g.region,
+        g.division,
+        g.uacs_oper_dsc,
         g.station_division,
+        g.org_cd,
+        g.remarks,
         g.stage_of_reclassification,
         g.reclass_position,
         g.created_at,
@@ -412,16 +419,21 @@ export async function getIncumbents(req, res) {
 
     if (division) {
       params.push(`%${division}%`);
-      query += ` AND g.station_division ILIKE $${params.length}`;
+      query += ` AND (g.station_division ILIKE $${params.length} OR g.division ILIKE $${params.length})`;
     }
 
     if (search) {
       params.push(`%${search}%`);
       query += ` AND (
         g.employee_id ILIKE $${params.length} OR
+        g.plantilla_item_number ILIKE $${params.length} OR
         g.full_name ILIKE $${params.length} OR
         g.current_position ILIKE $${params.length} OR
-        g.station_division ILIKE $${params.length}
+        g.station_division ILIKE $${params.length} OR
+        g.division ILIKE $${params.length} OR
+        g.region ILIKE $${params.length} OR
+        g.uacs_oper_dsc ILIKE $${params.length} OR
+        g.remarks ILIKE $${params.length}
       )`;
     }
 
@@ -442,9 +454,16 @@ export async function getIncumbents(req, res) {
       return {
         id: row.id,
         employee_id: row.employee_id,
+        plantilla_item_number: row.plantilla_item_number,
         full_name: row.full_name,
         current_position: row.current_position,
+        salary_grade: row.salary_grade,
+        region: row.region,
+        division: row.division,
+        uacs_oper_dsc: row.uacs_oper_dsc,
         station_division: row.station_division,
+        org_cd: row.org_cd,
+        remarks: row.remarks,
         stage_of_reclassification: row.stage_of_reclassification,
         reclass_position: row.reclass_position,
         created_at: row.created_at,

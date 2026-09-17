@@ -8,7 +8,7 @@ import HqBackground from '../../../components/HqBackground.jsx';
 import ThemeToggle from '../../../components/ThemeToggle.jsx';
 import { useTheme } from '../../../middleware/ThemeProvider.jsx';
 
-const RECLASS_STAGES = ['For Review', 'Endorsed', 'Approved', 'Denied'];
+const RECLASS_STAGES = ['For Review', 'Endorsed', 'Approved', 'Denied', 'Unfilled / Vacant', 'Abolition'];
 const RECLASS_POSITIONS_OPTIONS = ['School Counselor I', 'School Counselor II', 'School Counselor III', 'School Counselor IV'];
 
 export default function ReclassificationPage({ onBack }) {
@@ -31,6 +31,7 @@ export default function ReclassificationPage({ onBack }) {
   const [incumbentSearchTerm, setIncumbentSearchTerm] = useState('');
   const [incumbentStageFilter, setIncumbentStageFilter] = useState('');
   const [incumbentPositionFilter, setIncumbentPositionFilter] = useState('');
+  const [incumbentRegionFilter, setIncumbentRegionFilter] = useState('');
   const [updatingStageId, setUpdatingStageId] = useState(null);
   const [updatingPosition, setUpdatingPosition] = useState(false);
   const [currentPageIncumbents, setCurrentPageIncumbents] = useState(1);
@@ -397,6 +398,11 @@ export default function ReclassificationPage({ onBack }) {
     }
   };
 
+  // Distinct regions from imported dataset
+  const distinctRegions = useMemo(() => {
+    return Array.from(new Set(incumbents.map(i => i.region).filter(Boolean))).sort();
+  }, [incumbents]);
+
   // Filtered incumbents
   const filteredIncumbents = useMemo(() => {
     return incumbents.filter((inc) => {
@@ -404,20 +410,28 @@ export default function ReclassificationPage({ onBack }) {
       const matchSearch =
         !incumbentSearchTerm ||
         inc.full_name?.toLowerCase().includes(q) ||
+        inc.plantilla_item_number?.toLowerCase().includes(q) ||
         inc.employee_id?.toLowerCase().includes(q) ||
         inc.current_position?.toLowerCase().includes(q) ||
-        inc.station_division?.toLowerCase().includes(q);
+        inc.station_division?.toLowerCase().includes(q) ||
+        inc.division?.toLowerCase().includes(q) ||
+        inc.region?.toLowerCase().includes(q) ||
+        inc.uacs_oper_dsc?.toLowerCase().includes(q) ||
+        inc.remarks?.toLowerCase().includes(q) ||
+        inc.reclass_position?.toLowerCase().includes(q) ||
+        (inc.salary_grade && `sg ${inc.salary_grade}`.includes(q));
 
       const matchStage = !incumbentStageFilter || inc.stage_of_reclassification === incumbentStageFilter;
+      const matchRegion = !incumbentRegionFilter || inc.region === incumbentRegionFilter;
       const matchPosition = !incumbentPositionFilter || (
         incumbentPositionFilter === 'UNASSIGNED'
           ? !inc.reclass_position
           : inc.reclass_position === incumbentPositionFilter
       );
 
-      return matchSearch && matchStage && matchPosition;
+      return matchSearch && matchStage && matchRegion && matchPosition;
     });
-  }, [incumbents, incumbentSearchTerm, incumbentStageFilter, incumbentPositionFilter]);
+  }, [incumbents, incumbentSearchTerm, incumbentStageFilter, incumbentRegionFilter, incumbentPositionFilter]);
 
   // KPI Metrics for Incumbents
   const incumbentMetrics = useMemo(() => {
@@ -426,7 +440,8 @@ export default function ReclassificationPage({ onBack }) {
     const endorsed = incumbents.filter((i) => i.stage_of_reclassification === 'Endorsed').length;
     const approved = incumbents.filter((i) => i.stage_of_reclassification === 'Approved').length;
     const denied = incumbents.filter((i) => i.stage_of_reclassification === 'Denied').length;
-    return { total, forReview, endorsed, approved, denied };
+    const vacant = incumbents.filter((i) => i.stage_of_reclassification === 'Unfilled / Vacant' || i.full_name === '#N/A').length;
+    return { total, forReview, endorsed, approved, denied, vacant };
   }, [incumbents]);
 
   // Paged incumbents
@@ -471,6 +486,20 @@ export default function ReclassificationPage({ onBack }) {
           text: isDark ? '#f87171' : '#991B1B',
           border: isDark ? 'rgba(239, 68, 68, 0.4)' : '#FECACA',
           icon: '✕'
+        };
+      case 'Unfilled / Vacant':
+        return {
+          bg: isDark ? 'rgba(71, 85, 105, 0.25)' : '#F1F5F9',
+          text: isDark ? '#94a3b8' : '#475569',
+          border: isDark ? 'rgba(100, 116, 139, 0.4)' : '#CBD5E1',
+          icon: '○'
+        };
+      case 'Abolition':
+        return {
+          bg: isDark ? 'rgba(153, 27, 27, 0.25)' : '#FEF2F2',
+          text: isDark ? '#fca5a5' : '#991B1B',
+          border: isDark ? 'rgba(239, 68, 68, 0.4)' : '#F87171',
+          icon: '⚠'
         };
       case 'For Review':
       default:
@@ -965,10 +994,10 @@ export default function ReclassificationPage({ onBack }) {
             minWidth: '280px'
           }}>
             {/* Search Input */}
-            <div style={{ position: 'relative', width: '300px', minWidth: '220px' }}>
+            <div style={{ position: 'relative', width: '320px', minWidth: '240px' }}>
               <input
                 type="text"
-                placeholder="Search name, ID, position, division..."
+                placeholder="Search name, item no, region, division, station..."
                 value={incumbentSearchTerm}
                 onChange={e => setIncumbentSearchTerm(e.target.value)}
                 style={{
@@ -1018,6 +1047,43 @@ export default function ReclassificationPage({ onBack }) {
                 </button>
               )}
             </div>
+
+            {/* Region Filter */}
+            {distinctRegions.length > 0 && (
+              <div style={{ position: 'relative' }}>
+                <select
+                  value={incumbentRegionFilter}
+                  onChange={e => setIncumbentRegionFilter(e.target.value)}
+                  style={{
+                    padding: '8px 28px 8px 12px',
+                    borderRadius: '9px',
+                    border: incumbentRegionFilter
+                      ? (isDark ? '1.5px solid #38bdf8' : '1.5px solid #0284c7')
+                      : (isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid var(--input-border, var(--line))'),
+                    fontSize: '12.5px',
+                    fontWeight: incumbentRegionFilter ? 700 : 500,
+                    background: incumbentRegionFilter
+                      ? (isDark ? 'rgba(2, 132, 199, 0.25)' : '#e0f2fe')
+                      : 'var(--input-bg)',
+                    color: incumbentRegionFilter
+                      ? (isDark ? '#7dd3fc' : '#0369a1')
+                      : 'var(--input-text, var(--text))',
+                    cursor: 'pointer',
+                    outline: 'none',
+                    appearance: 'none',
+                    WebkitAppearance: 'none'
+                  }}
+                >
+                  <option value="" style={{ background: 'var(--card)', color: 'var(--text)' }}>All Regions ({distinctRegions.length})</option>
+                  {distinctRegions.map(r => (
+                    <option key={r} value={r} style={{ background: 'var(--card)', color: 'var(--text)' }}>{r}</option>
+                  ))}
+                </select>
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={incumbentRegionFilter ? (isDark ? '#7dd3fc' : '#0284c7') : 'var(--text-secondary, #64748b)'} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ position: 'absolute', right: '10px', top: '12px', pointerEvents: 'none' }}>
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </div>
+            )}
 
             {/* Stage Filter */}
             <div style={{ position: 'relative' }}>
@@ -1091,13 +1157,14 @@ export default function ReclassificationPage({ onBack }) {
             </div>
 
             {/* Active Filters Reset Button */}
-            {(incumbentSearchTerm || incumbentStageFilter || incumbentPositionFilter) && (
+            {(incumbentSearchTerm || incumbentStageFilter || incumbentPositionFilter || incumbentRegionFilter) && (
               <button
                 type="button"
                 onClick={() => {
                   setIncumbentSearchTerm('');
                   setIncumbentStageFilter('');
                   setIncumbentPositionFilter('');
+                  setIncumbentRegionFilter('');
                 }}
                 style={{
                   background: isDark ? 'rgba(30, 41, 59, 0.6)' : 'var(--card-subtle)',
@@ -1218,26 +1285,27 @@ export default function ReclassificationPage({ onBack }) {
                   textTransform: 'uppercase',
                   letterSpacing: '0.04em'
                 }}>
-                  <th style={{ padding: '12px 16px', width: '64px', minWidth: '64px', whiteSpace: 'nowrap' }}>No.</th>
-                  <th style={{ padding: '12px 16px', minWidth: '180px', whiteSpace: 'nowrap' }}>Personnel Name & ID</th>
-                  <th style={{ padding: '12px 16px', minWidth: '150px', whiteSpace: 'nowrap' }}>Current Position</th>
-                  <th style={{ padding: '12px 16px', minWidth: '140px', whiteSpace: 'nowrap' }}>Station / Division</th>
-                  <th style={{ padding: '12px 16px', minWidth: '170px', whiteSpace: 'nowrap' }}>Stage of Reclassification</th>
-                  <th style={{ padding: '12px 16px', minWidth: '160px', whiteSpace: 'nowrap' }}>Target Reclass Position</th>
-                  <th style={{ padding: '12px 16px', minWidth: '200px', whiteSpace: 'nowrap' }}>Credentials Overview</th>
-                  <th style={{ padding: '12px 16px', textAlign: 'right', minWidth: '120px', whiteSpace: 'nowrap' }}>Actions</th>
+                  <th style={{ padding: '12px 16px', width: '50px', minWidth: '50px', whiteSpace: 'nowrap' }}>No.</th>
+                  <th style={{ padding: '12px 16px', minWidth: '220px', whiteSpace: 'nowrap' }}>Plantilla Item & Incumbent</th>
+                  <th style={{ padding: '12px 16px', minWidth: '160px', whiteSpace: 'nowrap' }}>Current Position & SG</th>
+                  <th style={{ padding: '12px 16px', minWidth: '170px', whiteSpace: 'nowrap' }}>Station & Division</th>
+                  <th style={{ padding: '12px 16px', minWidth: '140px', whiteSpace: 'nowrap' }}>Region</th>
+                  <th style={{ padding: '12px 16px', minWidth: '160px', whiteSpace: 'nowrap' }}>Stage of Reclassification</th>
+                  <th style={{ padding: '12px 16px', minWidth: '170px', whiteSpace: 'nowrap' }}>Target Position & Remarks</th>
+                  <th style={{ padding: '12px 16px', minWidth: '180px', whiteSpace: 'nowrap' }}>Credentials Overview</th>
+                  <th style={{ padding: '12px 16px', textAlign: 'right', minWidth: '110px', whiteSpace: 'nowrap' }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {loadingIncumbents ? (
                   <tr>
-                    <td colSpan="8" style={{ textAlign: 'center', padding: '40px', color: 'var(--text-secondary, #94a3b8)' }}>
+                    <td colSpan="9" style={{ textAlign: 'center', padding: '40px', color: 'var(--text-secondary, #94a3b8)' }}>
                       Loading incumbent guidance counselors...
                     </td>
                   </tr>
                 ) : pagedIncumbents.length === 0 ? (
                   <tr>
-                    <td colSpan="8" style={{ textAlign: 'center', padding: '40px', color: 'var(--text-secondary, #94a3b8)' }}>
+                    <td colSpan="9" style={{ textAlign: 'center', padding: '40px', color: 'var(--text-secondary, #94a3b8)' }}>
                       No incumbent guidance counselors found matching your criteria.
                     </td>
                   </tr>
@@ -1265,16 +1333,40 @@ export default function ReclassificationPage({ onBack }) {
                           {rowNum}
                         </td>
                         <td style={{ padding: '14px 16px' }}>
-                          <div style={{ fontWeight: 750, color: 'var(--text)' }}>{inc.full_name}</div>
-                          <div style={{ fontSize: '11px', color: 'var(--text-secondary, #94a3b8)', fontFamily: 'monospace' }}>
-                            {inc.employee_id}
+                          <div style={{ fontWeight: 750, color: inc.full_name === '#N/A' ? 'var(--muted)' : 'var(--text)' }}>
+                            {inc.full_name === '#N/A' ? 'Unfilled / Vacant Item' : inc.full_name}
+                          </div>
+                          <div style={{ fontSize: '11px', color: 'var(--text-secondary, #94a3b8)', fontFamily: 'monospace', marginTop: '2px' }}>
+                            {inc.plantilla_item_number || inc.employee_id}
                           </div>
                         </td>
                         <td style={{ padding: '14px 16px' }}>
                           <div style={{ fontWeight: 700, color: 'var(--text)' }}>{inc.current_position}</div>
+                          {inc.salary_grade && (
+                            <span style={{
+                              fontSize: '10.5px',
+                              fontWeight: 700,
+                              color: isDark ? '#93c5fd' : '#1e40af',
+                              background: isDark ? 'rgba(30, 58, 138, 0.3)' : '#eff6ff',
+                              padding: '1.5px 6px',
+                              borderRadius: '4px',
+                              display: 'inline-block',
+                              marginTop: '3px'
+                            }}>
+                              SG {inc.salary_grade}
+                            </span>
+                          )}
                         </td>
-                        <td style={{ padding: '14px 16px', color: 'var(--text-secondary, #94a3b8)' }}>
-                          {inc.station_division}
+                        <td style={{ padding: '14px 16px' }}>
+                          <div style={{ fontWeight: 650, color: 'var(--text)' }}>{inc.station_division || inc.division}</div>
+                          {inc.uacs_oper_dsc && inc.uacs_oper_dsc !== inc.division && (
+                            <div style={{ fontSize: '11px', color: 'var(--text-secondary, #94a3b8)', marginTop: '2px' }}>
+                              {inc.uacs_oper_dsc}
+                            </div>
+                          )}
+                        </td>
+                        <td style={{ padding: '14px 16px', color: 'var(--text-secondary, #94a3b8)', fontSize: '12px', fontWeight: 600 }}>
+                          {inc.region || '—'}
                         </td>
                         <td style={{ padding: '14px 16px' }} onClick={e => e.stopPropagation()}>
                           <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
@@ -1306,25 +1398,41 @@ export default function ReclassificationPage({ onBack }) {
                           </div>
                         </td>
                         <td style={{ padding: '14px 16px' }}>
-                          {inc.reclass_position ? (
-                            <span style={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              padding: '4px 10px',
-                              borderRadius: '8px',
-                              background: isDark ? 'rgba(6, 78, 59, 0.35)' : '#ecfdf5',
-                              color: isDark ? '#6ee7b7' : '#047857',
-                              border: isDark ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #a7f3d0',
-                              fontSize: '12px',
-                              fontWeight: 750
-                            }}>
-                              {inc.reclass_position}
-                            </span>
-                          ) : (
-                            <span style={{ color: 'var(--text-secondary, #94a3b8)', fontSize: '12px', fontStyle: 'italic' }}>
-                              — Unassigned
-                            </span>
-                          )}
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                            {inc.reclass_position ? (
+                              <span style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                padding: '3px 8px',
+                                borderRadius: '6px',
+                                background: isDark ? 'rgba(6, 78, 59, 0.35)' : '#ecfdf5',
+                                color: isDark ? '#6ee7b7' : '#047857',
+                                border: isDark ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #a7f3d0',
+                                fontSize: '11.5px',
+                                fontWeight: 750,
+                                width: 'fit-content'
+                              }}>
+                                {inc.reclass_position}
+                              </span>
+                            ) : (
+                              <span style={{ color: 'var(--text-secondary, #94a3b8)', fontSize: '12px', fontStyle: 'italic' }}>
+                                — Unassigned
+                              </span>
+                            )}
+                            {inc.remarks && (
+                              <span style={{
+                                fontSize: '10.5px',
+                                fontWeight: 700,
+                                padding: '2px 6px',
+                                borderRadius: '4px',
+                                background: isDark ? 'rgba(51, 65, 85, 0.4)' : '#f1f5f9',
+                                color: isDark ? '#cbd5e1' : '#475569',
+                                width: 'fit-content'
+                              }}>
+                                {inc.remarks}
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td style={{ padding: '10px 16px', verticalAlign: 'middle' }}>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
