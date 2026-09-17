@@ -87,6 +87,8 @@ export default function SettingsPage() {
     });
   };
 
+  const handleInvite = handleSubmit;
+
   // Handle initiate remove (triggers passcode layer)
   const handleDeleteCollaborator = (collab) => {
     setAuthModal({
@@ -369,7 +371,7 @@ export default function SettingsPage() {
             </div>
           )}
 
-          <form onSubmit={handleInvite} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
               <div>
                 <label style={{ display: 'block', fontSize: '11px', fontWeight: 800, color: isDark ? '#cbd5e1' : '#475569', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '6px' }}>
