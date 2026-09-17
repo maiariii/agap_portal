@@ -562,3 +562,36 @@ export const vacancies = pgTable("vacancies", {
 		vacanciesItemNoKey: unique("vacancies_item_no_key").on(table.itemNo),
 	}
 });
+
+export const incumbentGuidanceCounselors = pgTable("incumbent_guidance_counselors", {
+	id: serial("id").primaryKey().notNull(),
+	employeeId: text("employee_id").notNull(),
+	fullName: varchar("full_name", { length: 255 }).notNull(),
+	currentPosition: varchar("current_position", { length: 255 }).notNull(),
+	stationDivision: varchar("station_division", { length: 255 }).notNull(),
+	stageOfReclassification: varchar("stage_of_reclassification", { length: 100 }).default('For Review').notNull(),
+	reclassPosition: varchar("reclass_position", { length: 100 }),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow(),
+},
+(table) => {
+	return {
+		incumbentCounselorsEmployeeIdKey: unique("incumbent_guidance_counselors_employee_id_key").on(table.employeeId),
+	}
+});
+
+export const incumbentAssessmentData = pgTable("incumbent_assessment_data", {
+	id: serial("id").primaryKey().notNull(),
+	employeeId: text("employee_id").notNull().references(() => incumbentGuidanceCounselors.employeeId, { onDelete: "cascade" }),
+	education: text("education"),
+	yearsExperience: numeric("years_experience", { precision: 5, scale: 2 }),
+	hoursOfTraining: numeric("hours_of_training", { precision: 6, scale: 2 }),
+	eligibility: text("eligibility"),
+	documents: text("documents"),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow(),
+},
+(table) => {
+	return {
+		incumbentAssessmentDataEmployeeIdKey: unique("incumbent_assessment_data_employee_id_key").on(table.employeeId),
+	}
+});

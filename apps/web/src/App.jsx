@@ -6,6 +6,7 @@ import { useAppData } from './middleware/DataProvider.jsx';
 import { apiFetch } from './config/api.js';
 import { routes } from './config/routes.jsx';
 import agadLogo from './agadlogo.png';
+import PasscodePinInput from './components/PasscodePinInput.jsx';
 import ModuleSelectionPage from './modules/dashboard/pages/ModuleSelectionPage.jsx';
 import TeacherHiringModule from './modules/assessment/pages/TeacherHiringModule.jsx';
 import ReclassificationPage from './modules/reclassification/pages/ReclassificationPage.jsx';
@@ -534,7 +535,12 @@ export default function App() {
                 <div className="form-group">
                   <label htmlFor="username">Username / Email</label>
                   <div className="form-group-input-wrapper">
-                    <span className="input-icon">👤</span>
+                    <span className="input-icon">
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--muted)' }}>
+                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                        <circle cx="12" cy="7" r="4" />
+                      </svg>
+                    </span>
                     <input
                       id="username"
                       type="text"
@@ -545,42 +551,115 @@ export default function App() {
                     />
                   </div>
                 </div>
-                <div className="form-group">
-                  <label htmlFor="password">{usePasscodeMode ? 'Secure Passcode' : 'Account Password'}</label>
-                  <div className="form-group-input-wrapper">
-                    <span className="input-icon">{usePasscodeMode ? '🔑' : '🔒'}</span>
-                    <input
-                      id="password"
-                      type="password"
+
+                {usePasscodeMode ? (
+                  <div className="form-group">
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                      <label style={{ margin: 0, color: 'var(--text)' }}>Secure Passcode</label>
+                      <span style={{
+                        fontSize: '10px',
+                        fontWeight: 800,
+                        padding: '2px 7px',
+                        borderRadius: '5px',
+                        background: 'rgba(37, 99, 235, 0.12)',
+                        color: 'var(--blue-600, #2563eb)',
+                        letterSpacing: '0.04em'
+                      }}>
+                        6-DIGIT PIN
+                      </span>
+                    </div>
+
+                    <PasscodePinInput
                       value={password}
-                      onChange={e => setPassword(e.target.value)}
-                      placeholder={usePasscodeMode ? '••••••' : '••••••••'}
-                      required
+                      onChange={setPassword}
+                      autoFocus={true}
                     />
+
+                    <div style={{ textAlign: 'center', marginTop: '12px' }}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setUsePasscodeMode(false);
+                          setPassword('');
+                        }}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: 'var(--blue-600)',
+                          fontSize: '11px',
+                          fontWeight: '800',
+                          letterSpacing: '0.8px',
+                          textTransform: 'uppercase',
+                          cursor: 'pointer',
+                          padding: '4px 8px',
+                          transition: 'opacity 0.2s',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px'
+                        }}
+                        onMouseOver={e => e.currentTarget.style.opacity = '0.8'}
+                        onMouseOut={e => e.currentTarget.style.opacity = '1'}
+                      >
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="15 18 9 12 15 6" />
+                        </svg>
+                        Switch to Account Password
+                      </button>
+                    </div>
                   </div>
-                  <div style={{ textAlign: 'center', marginTop: '10px' }}>
-                    <button
-                      type="button"
-                      onClick={() => setUsePasscodeMode(!usePasscodeMode)}
-                      style={{
-                        background: 'none',
-                        border: 'none',
-                        color: 'var(--blue-600)',
-                        fontSize: '11px',
-                        fontWeight: '800',
-                        letterSpacing: '0.8px',
-                        textTransform: 'uppercase',
-                        cursor: 'pointer',
-                        padding: '4px 8px',
-                        transition: 'opacity 0.2s'
-                      }}
-                      onMouseOver={e => e.currentTarget.style.opacity = '0.8'}
-                      onMouseOut={e => e.currentTarget.style.opacity = '1'}
-                    >
-                      {usePasscodeMode ? 'SWITCH TO ACCOUNT PASSWORD' : 'SWITCH TO SECURE PASSCODE'}
-                    </button>
+                ) : (
+                  <div className="form-group">
+                    <label htmlFor="password">Account Password</label>
+                    <div className="form-group-input-wrapper">
+                      <span className="input-icon">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--muted)' }}>
+                          <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                          <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                        </svg>
+                      </span>
+                      <input
+                        id="password"
+                        type="password"
+                        value={password}
+                        onChange={e => setPassword(e.target.value)}
+                        placeholder="••••••••"
+                        required
+                      />
+                    </div>
+                    <div style={{ textAlign: 'center', marginTop: '10px' }}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setUsePasscodeMode(true);
+                          setPassword('');
+                        }}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: 'var(--blue-600)',
+                          fontSize: '11px',
+                          fontWeight: '800',
+                          letterSpacing: '0.8px',
+                          textTransform: 'uppercase',
+                          cursor: 'pointer',
+                          padding: '4px 8px',
+                          transition: 'opacity 0.2s',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px'
+                        }}
+                        onMouseOver={e => e.currentTarget.style.opacity = '0.8'}
+                        onMouseOut={e => e.currentTarget.style.opacity = '1'}
+                      >
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                          <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                        </svg>
+                        Switch to Secure Passcode
+                      </button>
+                    </div>
                   </div>
-                </div>
+                )}
                 {loginError && <div className="login-error">{loginError}</div>}
                 <button type="submit" className="login-btn">Sign In</button>
               </form>
@@ -599,9 +678,9 @@ export default function App() {
 
         {/* REGISTER MODAL */}
         {showRegister && (
-          <div className="modal open" style={{ zIndex: 100001, left: 0, background: 'rgba(15, 23, 42, 0.45)', backdropFilter: 'blur(16px)' }}>
-            <div className="modal-box" style={{ width: 'min(520px, 96vw)', maxHeight: '90vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: 0, borderRadius: '28px', background: 'white', border: '1px solid rgba(15, 23, 42, 0.08)', borderTop: '6px solid #0284c7', boxShadow: '0 24px 60px rgba(0, 0, 0, 0.15)', backdropFilter: 'none' }}>
-              <div className="modal-head" style={{ padding: '24px 32px 18px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'white', flexShrink: 0 }}>
+          <div className="modal open" style={{ zIndex: 100001, left: 0, background: 'rgba(15, 23, 42, 0.55)', backdropFilter: 'blur(16px)' }}>
+            <div className="modal-box" style={{ width: 'min(520px, 96vw)', maxHeight: '90vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: 0, borderRadius: '28px', background: 'var(--modal-bg)', border: '1px solid var(--line)', borderTop: '6px solid var(--blue)', boxShadow: '0 24px 60px rgba(0, 0, 0, 0.25)', backdropFilter: 'none' }}>
+              <div className="modal-head" style={{ padding: '24px 32px 18px', borderBottom: '1px solid var(--line)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--modal-head-bg)', flexShrink: 0 }}>
                 <h2 style={{ margin: 0, fontSize: '24px', fontWeight: '850', color: 'var(--navy)', fontFamily: 'var(--font-heading)', letterSpacing: '-0.5px' }}>Create Account</h2>
                 <button
                   className="secondary"
@@ -609,16 +688,14 @@ export default function App() {
                   style={{
                     borderRadius: '12px',
                     padding: '8px 16px',
-                    background: '#f1f5f9',
-                    border: '1px solid #e2e8f0',
-                    color: '#475569',
+                    background: 'var(--button-secondary-bg)',
+                    border: '1px solid var(--line)',
+                    color: 'var(--button-secondary-text)',
                     fontWeight: '700',
                     fontSize: '13px',
                     cursor: 'pointer',
                     transition: 'all 0.2s'
                   }}
-                  onMouseOver={e => e.target.style.background = '#e2e8f0'}
-                  onMouseOut={e => e.target.style.background = '#f1f5f9'}
                 >
                   Cancel
                 </button>
@@ -644,7 +721,7 @@ export default function App() {
                             onChange={e => setRegFirstName(e.target.value)}
                             placeholder="Juan"
                             required
-                            style={{ padding: '12px 14px 12px 42px', borderRadius: '12px', border: '1.5px solid rgba(8, 49, 95, 0.15)', background: '#fff', color: 'var(--text)', fontSize: '13.5px' }}
+                            style={{ padding: '12px 14px 12px 42px', borderRadius: '12px', border: '1.5px solid var(--input-border)', background: 'var(--input-bg)', color: 'var(--input-text)', fontSize: '13.5px' }}
                           />
                         </div>
                       </div>
@@ -658,7 +735,7 @@ export default function App() {
                             onChange={e => setRegLastName(e.target.value)}
                             placeholder="Dela Cruz"
                             required
-                            style={{ padding: '12px 14px 12px 42px', borderRadius: '12px', border: '1.5px solid rgba(8, 49, 95, 0.15)', background: '#fff', color: 'var(--text)', fontSize: '13.5px' }}
+                            style={{ padding: '12px 14px 12px 42px', borderRadius: '12px', border: '1.5px solid var(--input-border)', background: 'var(--input-bg)', color: 'var(--input-text)', fontSize: '13.5px' }}
                           />
                         </div>
                       </div>
@@ -676,7 +753,7 @@ export default function App() {
                               setRegDivision('');
                             }}
                             required
-                            style={{ padding: '12px 14px 12px 42px', borderRadius: '12px', border: '1.5px solid rgba(8, 49, 95, 0.15)', background: '#fff', color: 'var(--text)', fontSize: '13.5px', width: '100%', height: '47px' }}
+                            style={{ padding: '12px 14px 12px 42px', borderRadius: '12px', border: '1.5px solid var(--input-border)', background: 'var(--input-bg)', color: 'var(--input-text)', fontSize: '13.5px', width: '100%', height: '47px' }}
                           >
                             <option value="">Select Region</option>
                             {regions.map(r => (
@@ -694,7 +771,7 @@ export default function App() {
                             onChange={e => setRegDivision(e.target.value)}
                             required
                             disabled={!regRegion}
-                            style={{ padding: '12px 14px 12px 42px', borderRadius: '12px', border: '1.5px solid rgba(8, 49, 95, 0.15)', background: regRegion ? '#fff' : '#f1f5f9', color: 'var(--text)', fontSize: '13.5px', width: '100%', height: '47px' }}
+                            style={{ padding: '12px 14px 12px 42px', borderRadius: '12px', border: '1.5px solid var(--input-border)', background: regRegion ? 'var(--input-bg)' : 'var(--card-subtle)', color: 'var(--input-text)', fontSize: '13.5px', width: '100%', height: '47px' }}
                           >
                             <option value="">{regRegion ? 'Select Division' : 'Select region first'}</option>
                             {(divisionsByRegion[regRegion] || []).map(d => (
@@ -713,7 +790,7 @@ export default function App() {
                           type="text"
                           value="HRMO"
                           disabled
-                          style={{ padding: '12px 14px 12px 42px', borderRadius: '12px', border: '1.5px solid rgba(15, 23, 42, 0.08)', background: '#f8fafc', color: '#64748b', cursor: 'not-allowed', fontSize: '13.5px', width: '100%' }}
+                          style={{ padding: '12px 14px 12px 42px', borderRadius: '12px', border: '1.5px solid var(--line)', background: 'var(--card-subtle)', color: 'var(--muted)', cursor: 'not-allowed', fontSize: '13.5px', width: '100%' }}
                         />
                       </div>
                     </div>
@@ -728,7 +805,7 @@ export default function App() {
                           onChange={e => setRegEmail(e.target.value)}
                           placeholder="your.email@deped.gov.ph"
                           required
-                          style={{ padding: '12px 14px 12px 42px', borderRadius: '12px', border: '1.5px solid rgba(8, 49, 95, 0.15)', background: '#fff', color: 'var(--text)', fontSize: '13.5px', width: '100%' }}
+                          style={{ padding: '12px 14px 12px 42px', borderRadius: '12px', border: '1.5px solid var(--input-border)', background: 'var(--input-bg)', color: 'var(--input-text)', fontSize: '13.5px', width: '100%' }}
                         />
                       </div>
                     </div>
@@ -744,7 +821,7 @@ export default function App() {
                             onChange={e => setRegPassword(e.target.value)}
                             placeholder="Min 6 chars"
                             required
-                            style={{ padding: '12px 14px 12px 42px', borderRadius: '12px', border: '1.5px solid rgba(8, 49, 95, 0.15)', background: '#fff', color: 'var(--text)', fontSize: '13.5px' }}
+                            style={{ padding: '12px 14px 12px 42px', borderRadius: '12px', border: '1.5px solid var(--input-border)', background: 'var(--input-bg)', color: 'var(--input-text)', fontSize: '13.5px' }}
                           />
                         </div>
                       </div>
@@ -758,27 +835,26 @@ export default function App() {
                             onChange={e => setRegConfirm(e.target.value)}
                             placeholder="Repeat password"
                             required
-                            style={{ padding: '12px 14px 12px 42px', borderRadius: '12px', border: '1.5px solid rgba(8, 49, 95, 0.15)', background: '#fff', color: 'var(--text)', fontSize: '13.5px' }}
+                            style={{ padding: '12px 14px 12px 42px', borderRadius: '12px', border: '1.5px solid var(--input-border)', background: 'var(--input-bg)', color: 'var(--input-text)', fontSize: '13.5px' }}
                           />
                         </div>
                       </div>
                     </div>
 
                     <div className="form-group" style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                      <label style={{ color: 'var(--navy)', fontWeight: 750, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px' }}>Passcode (for confirming decisions)</label>
-                      <div className="form-group-input-wrapper">
-                        <span className="input-icon">🔑</span>
-                        <input
-                          type="text"
-                          inputMode="numeric"
-                          maxLength={6}
-                          value={regPasscode}
-                          onChange={e => setRegPasscode(e.target.value.replace(/\D/g, ''))}
-                          placeholder="6-digit passcode"
-                          required
-                          style={{ padding: '12px 14px 12px 42px', borderRadius: '12px', border: '1.5px solid rgba(8, 49, 95, 0.15)', background: '#fff', color: 'var(--text)', fontSize: '13.5px', width: '100%' }}
-                        />
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <label style={{ color: 'var(--navy)', fontWeight: 750, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px', margin: 0 }}>
+                          Passcode (for confirming decisions)
+                        </label>
+                        <span style={{ fontSize: '10px', fontWeight: 800, color: 'var(--blue-600)', background: 'rgba(37, 99, 235, 0.1)', padding: '2px 6px', borderRadius: '4px' }}>
+                          6-DIGIT PIN
+                        </span>
                       </div>
+                      <PasscodePinInput
+                        value={regPasscode}
+                        onChange={setRegPasscode}
+                        autoFocus={false}
+                      />
                     </div>
 
                     {regError && (
@@ -875,7 +951,7 @@ export default function App() {
 
       <aside className="sidebar">
         <div className="brand" aria-label="AGAP Portal" style={{ display: 'flex', justifyContent: 'center', padding: '15px 0', height: 'auto' }}>
-          <img src={agadLogo} alt="AGAP Logo" style={{ width: '180px', height: 'auto', objectFit: 'contain', filter: 'drop-shadow(0 0 6px rgba(255, 255, 255, 0.75)) drop-shadow(0 0 2px rgba(255, 255, 255, 0.9))' }} />
+          <img src={agadLogo} alt="AGAP Logo" className="brand-logo-img" />
         </div>
         <nav className="nav">
           <button className={location.pathname === '/dashboard' ? 'active' : ''} onClick={() => navigate('/dashboard')} title="Home">
@@ -911,12 +987,12 @@ export default function App() {
               sessionStorage.removeItem('agap_selected_module');
             }} 
             title="Switch Module"
-            style={{ background: 'rgba(59, 130, 246, 0.2)', color: '#93C5FD' }}
+            className="nav-btn-module"
           >
             <span className="nav-icon">⮌</span>
             <span className="nav-label">Switch Module</span>
           </button>
-          <button onClick={onLogout} title="Log Out" style={{ background: 'rgba(185, 28, 28, 0.2)', color: '#FCA5A5' }}>
+          <button onClick={onLogout} title="Log Out" className="nav-btn-logout">
             <span className="nav-icon">✕</span>
             <span className="nav-label">Log Out</span>
           </button>
@@ -931,21 +1007,26 @@ export default function App() {
             <p>Agile Gateway for Appointments and Placements · SCA I Module</p>
           </div>
 
-          {user && (
-            <div className="user-profile-card" title="Account Holder">
-              <span style={{ fontSize: '15px' }}>👤</span>
-              <div className="user-info-box">
-                <span className="user-full-name" title={user.firstName || user.lastName ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : (user.fullName || user.username)}>
-                  {user.firstName || user.lastName 
-                    ? `${user.firstName || ''} ${user.lastName || ''}`.trim() 
-                    : (user.fullName || user.username || 'HR Officer')}
-                </span>
-                <span className="user-location-text" title={`${user.region || 'Region'}${user.division ? ' • ' + user.division : ''}`}>
-                  📍 {user.region || 'Region'}{user.division ? ` • ${user.division}` : ''}
-                </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            {user && (
+              <div className="user-profile-card" title="Account Holder">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--blue)', flexShrink: 0 }}>
+                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                  <circle cx="12" cy="7" r="4" />
+                </svg>
+                <div className="user-info-box">
+                  <span className="user-full-name" title={user.firstName || user.lastName ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : (user.fullName || user.username)}>
+                    {user.firstName || user.lastName 
+                      ? `${user.firstName || ''} ${user.lastName || ''}`.trim() 
+                      : (user.fullName || user.username || 'HR Officer')}
+                  </span>
+                  <span className="user-location-text" title={[user.region, user.division].filter(Boolean).join(' • ') || 'Central Office'}>
+                    {[user.region, user.division].filter(Boolean).join(' • ') || 'Central Office'}
+                  </span>
+                </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </section>
 
         <main>

@@ -2004,9 +2004,16 @@ export async function getCarBatchReview(req, res) {
     }
 
     const rowsRes = await pool.query(`
-      SELECT * FROM car_results
-      WHERE batch_id = $1
-      ORDER BY total_rating DESC, applicant_name ASC;
+      SELECT cr.*,
+             CASE WHEN ta.id IS NOT NULL THEN TRUE ELSE FALSE END AS is_appointed,
+             ti.item_code AS appointed_item_code,
+             ti.school_name AS appointed_school_name,
+             ta.appointed_at
+      FROM car_results cr
+      LEFT JOIN teacher_appointments ta ON cr.applicant_code = ta.applicant_code
+      LEFT JOIN teacher_items ti ON ta.item_id = ti.id
+      WHERE cr.batch_id = $1
+      ORDER BY (CASE WHEN ta.id IS NOT NULL THEN 1 ELSE 0 END) ASC, cr.total_rating DESC, cr.applicant_name ASC;
     `, [batchId]);
 
     res.json({
@@ -2056,24 +2063,26 @@ export async function confirmCarBatch(req, res) {
 }
 
 /**
- * Fetch available (unfilled) Teacher I items for division
+ * Fetch Teacher I items (available and filled status)
  */
 export async function getTeacherItems(req, res) {
   try {
     const userDivision = req.user?.division;
     let query = `
-      SELECT id, item_code, school_name, division, position_title, is_filled, created_at
-      FROM teacher_items
-      WHERE is_filled = FALSE
+      SELECT ti.id, ti.item_code, ti.school_name, ti.division, ti.position_title, ti.is_filled, ti.created_at,
+             ta.applicant_name AS appointed_to_name, ta.applicant_code AS appointed_to_code, ta.appointed_at
+      FROM teacher_items ti
+      LEFT JOIN teacher_appointments ta ON ti.id = ta.item_id
+      WHERE 1=1
     `;
     const params = [];
 
     if (userDivision && !userDivision.toLowerCase().includes('central office') && !userDivision.toLowerCase().includes('bhrod')) {
       params.push(`%${userDivision}%`);
-      query += ` AND division ILIKE $${params.length}`;
+      query += ` AND ti.division ILIKE $${params.length}`;
     }
 
-    query += ` ORDER BY division ASC, school_name ASC, item_code ASC;`;
+    query += ` ORDER BY ti.is_filled ASC, ti.division ASC, ti.school_name ASC, ti.item_code ASC;`;
 
     const result = await pool.query(query, params);
     res.json(result.rows);

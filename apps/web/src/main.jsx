@@ -1,6 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
+import { ThemeProvider } from './middleware/ThemeProvider.jsx';
 import { AuthProvider } from './middleware/AuthProvider.jsx';
 import { ToastProvider } from './middleware/ToastProvider.jsx';
 import { DataProvider } from './middleware/DataProvider.jsx';
@@ -10,13 +11,15 @@ import './index.css';
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <BrowserRouter basename={import.meta.env.BASE_URL}>
-      <AuthProvider>
-        <ToastProvider>
-          <DataProvider>
-            <App />
-          </DataProvider>
-        </ToastProvider>
-      </AuthProvider>
+      <ThemeProvider>
+        <AuthProvider>
+          <ToastProvider>
+            <DataProvider>
+              <App />
+            </DataProvider>
+          </ToastProvider>
+        </AuthProvider>
+      </ThemeProvider>
     </BrowserRouter>
   </React.StrictMode>
 );

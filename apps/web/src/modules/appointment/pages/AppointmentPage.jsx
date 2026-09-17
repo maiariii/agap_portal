@@ -674,11 +674,11 @@ export default function AppointmentPage() {
 
             <div className="modal-body" style={{ marginTop: '20px', display: 'grid', gridTemplateColumns: '320px 1fr', gap: '20px', alignItems: 'start' }}>
               {/* Document Checklist Sidebar */}
-              <div style={{ border: '1px solid var(--line)', borderRadius: '12px', overflow: 'hidden', background: '#F8FAFC' }}>
-                <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)', background: 'white' }}>
-                  <h4 style={{ margin: 0, color: 'var(--navy)', fontSize: '14px' }}>Document Checklist</h4>
+              <div style={{ border: '1px solid var(--line)', borderRadius: '12px', overflow: 'hidden', background: 'var(--card-subtle)' }}>
+                <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)', background: 'var(--card-subtle)' }}>
+                  <h4 style={{ margin: 0, color: 'var(--text)', fontSize: '14px' }}>Document Checklist</h4>
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', background: 'white' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', background: 'var(--card)' }}>
                   {[
                     { key: 'letter_of_intent', label: 'Letter of Intent', required: true },
                     { key: 'pds', label: 'Personal Data Sheet', required: true },
@@ -705,19 +705,19 @@ export default function AppointmentPage() {
                         style={{
                           padding: '12px 16px',
                           cursor: 'pointer',
-                          backgroundColor: isSelected ? 'var(--blue-50)' : 'white',
-                          borderLeft: isSelected ? '4px solid var(--blue-600)' : '4px solid transparent',
-                          borderBottom: '1px solid #F1F5F9',
+                          backgroundColor: isSelected ? 'var(--dropdown-hover)' : 'var(--card)',
+                          borderLeft: isSelected ? '4px solid var(--primary)' : '4px solid transparent',
+                          borderBottom: '1px solid var(--line)',
                           transition: 'all 0.15s ease',
                           display: 'flex',
                           flexDirection: 'column',
                           gap: '2px'
                         }}
                       >
-                        <div style={{ fontWeight: 'bold', fontSize: '13px', color: isSelected ? 'var(--blue-800)' : 'var(--navy)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <div style={{ fontWeight: 'bold', fontSize: '13px', color: isSelected ? 'var(--primary)' : 'var(--text)', display: 'flex', alignItems: 'center', gap: '4px' }}>
                           {doc.label} {doc.required && <span style={{ color: '#EF4444' }}>*</span>} {isUploaded ? '✓' : ''}
                         </div>
-                        <div style={{ fontSize: '11px', color: isSelected ? 'var(--blue-600)' : '#64748B' }}>
+                        <div style={{ fontSize: '11px', color: isSelected ? 'var(--primary)' : 'var(--text-secondary)' }}>
                           {isUploaded ? 'View Uploaded Document' : 'No document uploaded'}
                         </div>
                       </div>

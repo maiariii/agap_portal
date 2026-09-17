@@ -26,13 +26,15 @@ export default function FullScreenDocViewer({
   selectedDocKey,
   setSelectedDocKey,
   availableDocs = [],
-  DOC_REQUIREMENTS = []
+  DOC_REQUIREMENTS = [],
+  url,
+  title
 }) {
   const [iframeLoading, setIframeLoading] = useState(true);
 
   useEffect(() => {
     setIframeLoading(true);
-  }, [selectedDocKey]);
+  }, [selectedDocKey, url]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -46,17 +48,22 @@ export default function FullScreenDocViewer({
 
   if (!isOpen) return null;
 
+  const isDirectUrl = !!url;
   const currentDocInfo = availableDocs.find(d => d.key === selectedDocKey);
-  const existsInAzure = !!currentDocInfo?.existsInAzure;
-  const filename = currentDocInfo?.filename || '';
-  const isPdf = filename.toLowerCase().endsWith('.pdf');
+  const existsInAzure = isDirectUrl ? true : !!currentDocInfo?.existsInAzure;
+  const filename = isDirectUrl ? (title || 'Document.pdf') : (currentDocInfo?.filename || '');
+  const isPdf = isDirectUrl
+    ? (!filename.toLowerCase().endsWith('.xlsx') && !filename.toLowerCase().endsWith('.docx') && !filename.toLowerCase().endsWith('.doc'))
+    : filename.toLowerCase().endsWith('.pdf');
   const token = localStorage.getItem('agap_token');
   const apiHost = import.meta.env.VITE_API_URL || window.location.origin;
   const isValidApp = applicationId && applicationId !== 'undefined' && applicationId !== 'null' && applicationId !== 'invalid';
   const isValidKey = selectedDocKey && selectedDocKey !== 'undefined' && selectedDocKey !== 'invalid';
-  const documentUrl = (isValidApp && isValidKey) 
-    ? `${apiHost}/api/applications/${applicationId}/documents/${selectedDocKey}/download?token=${token}&dpi=98`
-    : '';
+  const documentUrl = isDirectUrl
+    ? url
+    : ((isValidApp && isValidKey) 
+      ? `${apiHost}/api/applications/${applicationId}/documents/${selectedDocKey}/download?token=${token}&dpi=98`
+      : '');
 
   const docList = DOC_REQUIREMENTS.length > 0 
     ? DOC_REQUIREMENTS 
@@ -104,55 +111,58 @@ export default function FullScreenDocViewer({
           </div>
           <div>
             <div style={{ fontSize: '15px', fontWeight: '700', color: '#F8FAFC', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              {DOC_LABELS[selectedDocKey] || selectedDocKey}
+              {isDirectUrl ? (title || 'Document Preview') : (DOC_LABELS[selectedDocKey] || selectedDocKey)}
               {existsInAzure && (
                 <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '12px', backgroundColor: 'rgba(34, 197, 94, 0.2)', color: '#4ADE80', fontWeight: '600' }}>
-                  ✓ Uploaded
+                  ✓ {isDirectUrl ? 'Verified' : 'Uploaded'}
                 </span>
               )}
             </div>
             <div style={{ fontSize: '12px', color: '#94A3B8' }}>
-              {applicantName ? `Applicant: ${applicantName}` : 'Document Viewer'}
+              {applicantName ? `Personnel / Applicant: ${applicantName}` : 'Document Viewer'}
             </div>
           </div>
         </div>
 
-        {/* Center: Document Switcher Dropdown */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <span style={{ fontSize: '13px', color: '#94A3B8', fontWeight: '500' }}>Switch Document:</span>
-          <select
-            value={selectedDocKey}
-            onChange={(e) => setSelectedDocKey(e.target.value)}
-            style={{
-              backgroundColor: '#0F172A',
-              color: '#F8FAFC',
-              border: '1px solid #475569',
-              borderRadius: '8px',
-              padding: '8px 14px',
-              fontSize: '13px',
-              fontWeight: '600',
-              cursor: 'pointer',
-              outline: 'none'
-            }}
-          >
-            {docList.map((doc) => {
-              const info = availableDocs.find(d => d.key === doc.key);
-              return (
-                <option key={doc.key} value={doc.key}>
-                  {info?.existsInAzure ? '✓ ' : '  '}{doc.label || DOC_LABELS[doc.key] || doc.key}
-                </option>
-              );
-            })}
-          </select>
-        </div>
+        {/* Center: Document Switcher Dropdown (for application mode) */}
+        {!isDirectUrl && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <span style={{ fontSize: '13px', color: '#94A3B8', fontWeight: '500' }}>Switch Document:</span>
+            <select
+              value={selectedDocKey}
+              onChange={(e) => setSelectedDocKey(e.target.value)}
+              style={{
+                backgroundColor: '#0F172A',
+                color: '#F8FAFC',
+                border: '1px solid #475569',
+                borderRadius: '8px',
+                padding: '8px 14px',
+                fontSize: '13px',
+                fontWeight: '600',
+                cursor: 'pointer',
+                outline: 'none'
+              }}
+            >
+              {docList.map((doc) => {
+                const info = availableDocs.find(d => d.key === doc.key);
+                return (
+                  <option key={doc.key} value={doc.key}>
+                    {info?.existsInAzure ? '✓ ' : '  '}{doc.label || DOC_LABELS[doc.key] || doc.key}
+                  </option>
+                );
+              })}
+            </select>
+          </div>
+        )}
 
         {/* Right: Download & Exit Full Screen buttons */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           {existsInAzure && (
             <a
-              href={`${apiHost}/api/applications/${applicationId}/documents/${selectedDocKey}/download?token=${token}`}
+              href={isDirectUrl ? url : `${apiHost}/api/applications/${applicationId}/documents/${selectedDocKey}/download?token=${token}`}
               target="_blank"
               rel="noreferrer"
+              download={filename}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',

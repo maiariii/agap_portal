@@ -139,10 +139,10 @@ function NOSCAItemEditor({
                   top: '100%',
                   left: 0,
                   right: 0,
-                  background: 'white',
+                  background: 'var(--dropdown-bg)',
                   border: '1px solid var(--line)',
                   borderRadius: '6px',
-                  boxShadow: '0 4px 8px rgba(0, 0, 0, 0.1)',
+                  boxShadow: '0 4px 8px rgba(0, 0, 0, 0.15)',
                   zIndex: 999,
                   maxHeight: '120px',
                   overflowY: 'auto',
@@ -160,9 +160,10 @@ function NOSCAItemEditor({
                         fontSize: '11px',
                         cursor: 'pointer',
                         userSelect: 'none',
-                        borderBottom: '1px solid #F1F5F9'
+                        color: 'var(--text)',
+                        borderBottom: '1px solid var(--line)'
                       }}
-                      onMouseEnter={(e) => e.currentTarget.style.background = '#F8FAFC'}
+                      onMouseEnter={(e) => e.currentTarget.style.background = 'var(--dropdown-hover)'}
                       onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                     >
                       <span style={{ pointerEvents: 'none' }}>
@@ -1380,44 +1381,44 @@ export default function VacanciesPage() {
       {/* MODAL: STEP 1 - REOPEN DOCUMENT POLICY SELECTION */}
       {showDocPolicyModal && calVacancy && (
         <div className="modal open" style={{ backdropFilter: 'blur(6px)', background: 'rgba(15, 23, 42, 0.55)', zIndex: 100000 }}>
-          <div className="modal-box" style={{ width: 'min(640px, 94vw)', maxHeight: '90vh', display: 'flex', flexDirection: 'column', borderRadius: '24px', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)', border: '1px solid rgba(226, 232, 240, 0.8)', overflow: 'hidden', padding: 0 }}>
+          <div className="modal-box" style={{ width: 'min(640px, 94vw)', maxHeight: '90vh', display: 'flex', flexDirection: 'column', borderRadius: '24px', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)', border: '1px solid var(--line)', overflow: 'hidden', padding: 0 }}>
             {/* Modal Header */}
-            <div className="modal-head" style={{ padding: '18px 24px', background: 'linear-gradient(180deg, #FFFFFF 0%, #F8FAFC 100%)', borderBottom: '1px solid #E2E8F0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+            <div className="modal-head" style={{ padding: '18px 24px', background: 'var(--modal-bg, var(--card))', borderBottom: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <span style={{ fontSize: '20px' }}>📂</span>
                 <div>
-                  <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '800', color: '#0F172A', fontFamily: 'var(--font-heading)' }}>Reopen Vacancy — Document Policy</h3>
-                  <span style={{ fontSize: '11px', color: '#64748B', fontWeight: '600' }}>Step 1 of 2: Configure applicant document rules</span>
+                  <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '800', color: 'var(--text)', fontFamily: 'var(--font-heading)' }}>Reopen Vacancy — Document Policy</h3>
+                  <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: '600' }}>Step 1 of 2: Configure applicant document rules</span>
                 </div>
               </div>
               <button 
                 type="button" 
                 onClick={() => setShowDocPolicyModal(false)}
-                style={{ background: '#F1F5F9', border: '1px solid #CBD5E1', borderRadius: '50%', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#475569', fontWeight: '800', fontSize: '14px', transition: 'all 0.15s' }}
+                style={{ background: 'var(--card-subtle)', border: '1px solid var(--line)', borderRadius: '50%', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--text)', fontWeight: '800', fontSize: '14px', transition: 'all 0.15s' }}
               >
                 ✕
               </button>
             </div>
 
             {/* Modal Content - Scrollable Body */}
-            <div style={{ padding: '20px 24px', background: '#FFFFFF', overflowY: 'auto', flex: 1 }}>
+            <div style={{ padding: '20px 24px', background: 'var(--modal-bg, var(--card))', overflowY: 'auto', flex: 1 }}>
               {/* Position Context Card */}
-              <div style={{ background: 'linear-gradient(135deg, #F8FAFC 0%, #F1F5F9 100%)', border: '1px solid #E2E8F0', borderRadius: '16px', padding: '14px 18px', marginBottom: '18px', textAlign: 'left' }}>
-                <div style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: '800', color: '#64748B', marginBottom: '4px' }}>Target Vacancy Item</div>
-                <h4 style={{ margin: 0, fontSize: '14.5px', fontWeight: '800', color: '#0F172A', lineHeight: 1.3 }}>{calVacancy.title || 'Vacancy Item'}</h4>
+              <div style={{ background: 'var(--card-subtle)', border: '1px solid var(--line)', borderRadius: '16px', padding: '14px 18px', marginBottom: '18px', textAlign: 'left' }}>
+                <div style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: '800', color: 'var(--text-secondary)', marginBottom: '4px' }}>Target Vacancy Item</div>
+                <h4 style={{ margin: 0, fontSize: '14.5px', fontWeight: '800', color: 'var(--text)', lineHeight: 1.3 }}>{calVacancy.title || 'Vacancy Item'}</h4>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '6px' }}>
-                  <span style={{ background: '#E2E8F0', color: '#334155', fontSize: '11px', fontWeight: '700', padding: '2px 8px', borderRadius: '6px', fontFamily: 'monospace' }}>
+                  <span style={{ background: 'var(--card-solid)', color: 'var(--text)', fontSize: '11px', fontWeight: '700', padding: '2px 8px', borderRadius: '6px', fontFamily: 'monospace', border: '1px solid var(--line)' }}>
                     {calVacancy.itemNo}
                   </span>
-                  <span style={{ fontSize: '12px', color: '#64748B', fontWeight: '600' }}>
-                    Division: <strong style={{ color: '#1E293B' }}>{calVacancy.division || 'SDO'}</strong>
+                  <span style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: '600' }}>
+                    Division: <strong style={{ color: 'var(--text)' }}>{calVacancy.division || 'SDO'}</strong>
                   </span>
                 </div>
               </div>
 
               {/* Selection Section */}
               <div style={{ textAlign: 'left' }}>
-                <label style={{ fontSize: '11px', fontWeight: '800', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '10px', display: 'block' }}>
+                <label style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '10px', display: 'block' }}>
                   Select Applicant Document Fetching Policy
                 </label>
                 
@@ -1433,9 +1434,9 @@ export default function VacanciesPage() {
                       cursor: 'pointer',
                       padding: '14px 16px',
                       borderRadius: '16px',
-                      background: calDocPolicy === 'FETCH_NEW' ? 'linear-gradient(135deg, #ECFDF5 0%, #F0FDF4 100%)' : '#FFFFFF',
-                      border: calDocPolicy === 'FETCH_NEW' ? '2px solid #10B981' : '1.5px solid #E2E8F0',
-                      boxShadow: calDocPolicy === 'FETCH_NEW' ? '0 4px 14px -2px rgba(16, 185, 129, 0.15)' : '0 1px 3px rgba(0,0,0,0.03)',
+                      background: calDocPolicy === 'FETCH_NEW' ? 'var(--card-subtle)' : 'var(--card)',
+                      border: calDocPolicy === 'FETCH_NEW' ? '2px solid #10B981' : '1.5px solid var(--line)',
+                      boxShadow: calDocPolicy === 'FETCH_NEW' ? '0 4px 14px -2px rgba(16, 185, 129, 0.15)' : 'none',
                       transition: 'all 0.2s ease'
                     }}
                   >
@@ -1447,12 +1448,12 @@ export default function VacanciesPage() {
                       onChange={() => setCalDocPolicy('FETCH_NEW')} 
                       style={{ width: '18px', height: '18px', accentColor: '#10B981', cursor: 'pointer', margin: 0 }} 
                     />
-                    <div style={{ width: '38px', height: '38px', borderRadius: '12px', background: calDocPolicy === 'FETCH_NEW' ? '#D1FAE5' : '#F1F5F9', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px' }}>
+                    <div style={{ width: '38px', height: '38px', borderRadius: '12px', background: calDocPolicy === 'FETCH_NEW' ? 'rgba(16, 185, 129, 0.2)' : 'var(--card-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px' }}>
                       🟢
                     </div>
                     <div>
-                      <b style={{ display: 'block', fontSize: '13.5px', color: '#0F172A', fontWeight: '800', lineHeight: 1.2 }}>Option A — Fetch New Documents</b>
-                      <span style={{ fontSize: '11.5px', color: '#64748B', fontWeight: '500', lineHeight: 1.4, display: 'block', marginTop: '3px' }}>
+                      <b style={{ display: 'block', fontSize: '13.5px', color: 'var(--text)', fontWeight: '800', lineHeight: 1.2 }}>Option A — Fetch New Documents</b>
+                      <span style={{ fontSize: '11.5px', color: 'var(--text-secondary)', fontWeight: '500', lineHeight: 1.4, display: 'block', marginTop: '3px' }}>
                         Fetch the applicant's latest documents from new uploads. These newly fetched documents will become the current documents and remain retained even if the item is closed again.
                       </span>
                     </div>
@@ -1469,9 +1470,9 @@ export default function VacanciesPage() {
                       cursor: 'pointer',
                       padding: '14px 16px',
                       borderRadius: '16px',
-                      background: calDocPolicy === 'RETAIN_OLD' ? 'linear-gradient(135deg, #FFFBEB 0%, #FEF3C7 100%)' : '#FFFFFF',
-                      border: calDocPolicy === 'RETAIN_OLD' ? '2px solid #D97706' : '1.5px solid #E2E8F0',
-                      boxShadow: calDocPolicy === 'RETAIN_OLD' ? '0 4px 14px -2px rgba(217, 119, 6, 0.15)' : '0 1px 3px rgba(0,0,0,0.03)',
+                      background: calDocPolicy === 'RETAIN_OLD' ? 'var(--card-subtle)' : 'var(--card)',
+                      border: calDocPolicy === 'RETAIN_OLD' ? '2px solid #D97706' : '1.5px solid var(--line)',
+                      boxShadow: calDocPolicy === 'RETAIN_OLD' ? '0 4px 14px -2px rgba(217, 119, 6, 0.15)' : 'none',
                       transition: 'all 0.2s ease'
                     }}
                   >
@@ -1483,12 +1484,12 @@ export default function VacanciesPage() {
                       onChange={() => setCalDocPolicy('RETAIN_OLD')} 
                       style={{ width: '18px', height: '18px', accentColor: '#D97706', cursor: 'pointer', margin: 0 }} 
                     />
-                    <div style={{ width: '38px', height: '38px', borderRadius: '12px', background: calDocPolicy === 'RETAIN_OLD' ? '#FDE68A' : '#F1F5F9', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px' }}>
+                    <div style={{ width: '38px', height: '38px', borderRadius: '12px', background: calDocPolicy === 'RETAIN_OLD' ? 'rgba(217, 119, 6, 0.2)' : 'var(--card-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px' }}>
                       🔒
                     </div>
                     <div>
-                      <b style={{ display: 'block', fontSize: '13.5px', color: '#0F172A', fontWeight: '800', lineHeight: 1.2 }}>Option B — Retain Current Files</b>
-                      <span style={{ fontSize: '11.5px', color: '#64748B', fontWeight: '500', lineHeight: 1.4, display: 'block', marginTop: '3px' }}>
+                      <b style={{ display: 'block', fontSize: '13.5px', color: 'var(--text)', fontWeight: '800', lineHeight: 1.2 }}>Option B — Retain Current Files</b>
+                      <span style={{ fontSize: '11.5px', color: 'var(--text-secondary)', fontWeight: '500', lineHeight: 1.4, display: 'block', marginTop: '3px' }}>
                         Do not fetch from new uploads. Keep the currently stored documents unchanged without importing newer versions.
                       </span>
                     </div>
@@ -1498,11 +1499,11 @@ export default function VacanciesPage() {
             </div>
 
             {/* Modal Footer Actions - Pinned at bottom */}
-            <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '12px', padding: '16px 24px', borderTop: '1px solid #E2E8F0', background: '#F8FAFC', flexShrink: 0 }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '12px', padding: '16px 24px', borderTop: '1px solid var(--line)', background: 'var(--modal-bg, var(--card))', flexShrink: 0 }}>
               <button 
                 type="button" 
                 onClick={() => setShowDocPolicyModal(false)}
-                style={{ padding: '9px 16px', borderRadius: '10px', border: '1.5px solid #CBD5E1', background: '#FFFFFF', color: '#475569', fontWeight: '700', fontSize: '12.5px', cursor: 'pointer', transition: 'all 0.15s' }}
+                style={{ padding: '9px 16px', borderRadius: '10px', border: '1.5px solid var(--line)', background: 'var(--card-subtle)', color: 'var(--text)', fontWeight: '700', fontSize: '12.5px', cursor: 'pointer', transition: 'all 0.15s' }}
               >
                 Cancel
               </button>
@@ -1522,43 +1523,43 @@ export default function VacanciesPage() {
       {/* MODAL: INVITE SPECIFIC EMAILS TO CLOSED VACANCY */}
       {showInviteModal && inviteVacancy && (
         <div className="modal open" style={{ backdropFilter: 'blur(6px)', background: 'rgba(15, 23, 42, 0.55)', zIndex: 100000 }}>
-          <div className="modal-box" style={{ width: 'min(860px, 96vw)', minHeight: 'min(500px, 85vh)', maxHeight: '92vh', display: 'flex', flexDirection: 'column', borderRadius: '24px', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)', border: '1px solid rgba(226, 232, 240, 0.8)', overflow: 'hidden', padding: 0 }}>
+          <div className="modal-box" style={{ width: 'min(860px, 96vw)', minHeight: 'min(500px, 85vh)', maxHeight: '92vh', display: 'flex', flexDirection: 'column', borderRadius: '24px', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)', border: '1px solid var(--line)', overflow: 'hidden', padding: 0, background: 'var(--modal-bg, var(--card))' }}>
             {/* Modal Header */}
-            <div className="modal-head" style={{ padding: '18px 28px', background: 'linear-gradient(180deg, #FFFFFF 0%, #F8FAFC 100%)', borderBottom: '1px solid #E2E8F0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+            <div className="modal-head" style={{ padding: '18px 28px', background: 'var(--modal-bg, var(--card))', borderBottom: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <span style={{ fontSize: '20px' }}>✉️</span>
                 <div>
-                  <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '800', color: '#0F172A', fontFamily: 'var(--font-heading)' }}>Invite Applicants to Vacancy</h3>
-                  <span style={{ fontSize: '11px', color: '#64748B', fontWeight: '600' }}>Restrict access & application submissions exclusively to authorized emails</span>
+                  <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '800', color: 'var(--text)', fontFamily: 'var(--font-heading)' }}>Invite Applicants to Vacancy</h3>
+                  <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: '600' }}>Restrict access & application submissions exclusively to authorized emails</span>
                 </div>
               </div>
               <button 
                 type="button" 
                 onClick={() => setShowInviteModal(false)}
-                style={{ background: '#F1F5F9', border: '1px solid #CBD5E1', borderRadius: '50%', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#475569', fontWeight: '800', fontSize: '14px', transition: 'all 0.15s' }}
+                style={{ background: 'var(--card-subtle)', border: '1px solid var(--line)', borderRadius: '50%', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--text)', fontWeight: '800', fontSize: '14px', transition: 'all 0.15s' }}
               >
                 ✕
               </button>
             </div>
 
             {/* Modal Content - Scrollable Body */}
-            <div style={{ padding: '20px 28px', background: '#FFFFFF', overflowY: 'auto', flex: 1 }}>
+            <div style={{ padding: '20px 28px', background: 'var(--modal-bg, var(--card))', overflowY: 'auto', flex: 1 }}>
               {/* Target Item Context Card */}
-              <div style={{ background: 'linear-gradient(135deg, #F8FAFC 0%, #F1F5F9 100%)', border: '1px solid #E2E8F0', borderRadius: '16px', padding: '14px 18px', marginBottom: '16px', textAlign: 'left' }}>
-                <div style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: '800', color: '#64748B', marginBottom: '4px' }}>Target Vacancy Item</div>
-                <h4 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: '#0F172A', lineHeight: 1.3 }}>{inviteVacancy.title || 'Vacancy Item'}</h4>
+              <div style={{ background: 'var(--card-subtle)', border: '1px solid var(--line)', borderRadius: '16px', padding: '14px 18px', marginBottom: '16px', textAlign: 'left' }}>
+                <div style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: '800', color: 'var(--text-secondary)', marginBottom: '4px' }}>Target Vacancy Item</div>
+                <h4 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: 'var(--text)', lineHeight: 1.3 }}>{inviteVacancy.title || 'Vacancy Item'}</h4>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '6px' }}>
-                  <span style={{ background: '#E2E8F0', color: '#334155', fontSize: '11.5px', fontWeight: '700', padding: '3px 10px', borderRadius: '6px', fontFamily: 'monospace' }}>
+                  <span style={{ background: 'var(--card-solid)', color: 'var(--text)', fontSize: '11.5px', fontWeight: '700', padding: '3px 10px', borderRadius: '6px', fontFamily: 'monospace', border: '1px solid var(--line)' }}>
                     {inviteVacancy.itemNo}
                   </span>
-                  <span style={{ fontSize: '12px', color: '#64748B', fontWeight: '600' }}>
-                    Division: <strong style={{ color: '#1E293B' }}>{inviteVacancy.division || 'SDO'}</strong>
+                  <span style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: '600' }}>
+                    Division: <strong style={{ color: 'var(--text)' }}>{inviteVacancy.division || 'SDO'}</strong>
                   </span>
                 </div>
               </div>
 
               {/* Navigation Tab Bar */}
-              <div style={{ display: 'flex', gap: '8px', borderBottom: '1.5px solid #E2E8F0', marginBottom: '18px', paddingBottom: '2px' }}>
+              <div style={{ display: 'flex', gap: '8px', borderBottom: '1.5px solid var(--line)', marginBottom: '18px', paddingBottom: '2px' }}>
                 <button
                   type="button"
                   onClick={() => setInviteModalTab('config')}
@@ -1566,9 +1567,9 @@ export default function VacanciesPage() {
                     padding: '8px 16px',
                     borderRadius: '8px 8px 0 0',
                     border: 'none',
-                    borderBottom: inviteModalTab === 'config' ? '3px solid #4F46E5' : '3px solid transparent',
-                    background: inviteModalTab === 'config' ? '#EEF2FF' : 'transparent',
-                    color: inviteModalTab === 'config' ? '#4338CA' : '#64748B',
+                    borderBottom: inviteModalTab === 'config' ? '3px solid var(--primary)' : '3px solid transparent',
+                    background: inviteModalTab === 'config' ? 'var(--card-subtle)' : 'transparent',
+                    color: inviteModalTab === 'config' ? 'var(--primary)' : 'var(--text-secondary)',
                     fontWeight: '800',
                     fontSize: '13px',
                     cursor: 'pointer',
@@ -1588,9 +1589,9 @@ export default function VacanciesPage() {
                     padding: '8px 16px',
                     borderRadius: '8px 8px 0 0',
                     border: 'none',
-                    borderBottom: inviteModalTab === 'invitations' ? '3px solid #4F46E5' : '3px solid transparent',
-                    background: inviteModalTab === 'invitations' ? '#EEF2FF' : 'transparent',
-                    color: inviteModalTab === 'invitations' ? '#4338CA' : '#64748B',
+                    borderBottom: inviteModalTab === 'invitations' ? '3px solid var(--primary)' : '3px solid transparent',
+                    background: inviteModalTab === 'invitations' ? 'var(--card-subtle)' : 'transparent',
+                    color: inviteModalTab === 'invitations' ? 'var(--primary)' : 'var(--text-secondary)',
                     fontWeight: '800',
                     fontSize: '13px',
                     cursor: 'pointer',
@@ -1606,8 +1607,8 @@ export default function VacanciesPage() {
                     fontSize: '10.5px',
                     padding: '1px 7px',
                     borderRadius: '10px',
-                    background: inviteModalTab === 'invitations' ? '#4F46E5' : '#E2E8F0',
-                    color: inviteModalTab === 'invitations' ? '#FFFFFF' : '#475569',
+                    background: inviteModalTab === 'invitations' ? 'var(--primary)' : 'var(--card-subtle)',
+                    color: inviteModalTab === 'invitations' ? '#FFFFFF' : 'var(--text-secondary)',
                     fontWeight: '900'
                   }}>
                     {inviteAllowedEmails.length}
@@ -1620,24 +1621,24 @@ export default function VacanciesPage() {
                 <div
                   style={{
                     padding: '18px 20px',
-                    background: 'linear-gradient(135deg, #EEF2FF 0%, #E0E7FF 100%)',
+                    background: 'var(--card-subtle)',
                     borderRadius: '16px',
-                    border: '1.5px solid #C7D2FE',
+                    border: '1.5px solid var(--line)',
                     display: 'flex',
                     flexDirection: 'column',
                     gap: '12px'
                   }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <label style={{ fontSize: '11px', fontWeight: '800', color: '#4338CA', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>
+                    <label style={{ fontSize: '11px', fontWeight: '800', color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>
                       Authorized Email Allowlist
                     </label>
-                    <span style={{ fontSize: '11px', fontWeight: '700', color: inviteAllowedEmails.length > 0 ? '#4F46E5' : '#94A3B8' }}>
+                    <span style={{ fontSize: '11px', fontWeight: '700', color: inviteAllowedEmails.length > 0 ? 'var(--primary)' : 'var(--text-secondary)' }}>
                       {inviteAllowedEmails.length} email{inviteAllowedEmails.length === 1 ? '' : 's'} authorized
                     </span>
                   </div>
 
-                  <p style={{ margin: 0, fontSize: '12px', color: '#475569', lineHeight: 1.4 }}>
+                  <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
                     Enter the email address of applicants you wish to grant access to. Only invited applicants will be able to view and submit applications for this item.
                   </p>
 
@@ -1672,10 +1673,10 @@ export default function VacanciesPage() {
                           height: '38px',
                           padding: '0 12px',
                           borderRadius: '10px',
-                          border: inviteEmailError ? '1.5px solid #EF4444' : '1.5px solid #CBD5E1',
+                          border: inviteEmailError ? '1.5px solid #EF4444' : '1.5px solid var(--input-border)',
                           fontSize: '12.5px',
-                          background: '#FFFFFF',
-                          color: '#0F172A',
+                          background: 'var(--input-bg)',
+                          color: 'var(--input-text)',
                           outline: 'none',
                           boxSizing: 'border-box'
                         }}
@@ -1689,17 +1690,17 @@ export default function VacanciesPage() {
                             top: '100%',
                             left: 0,
                             right: 0,
-                            background: '#FFFFFF',
-                            border: '1.5px solid #C7D2FE',
+                            background: 'var(--dropdown-bg)',
+                            border: '1.5px solid var(--line)',
                             borderRadius: '10px',
-                            boxShadow: '0 10px 25px -5px rgba(79, 70, 229, 0.25), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
+                            boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.25)',
                             zIndex: 999999,
                             maxHeight: '160px',
                             overflowY: 'auto',
                             marginTop: '4px'
                           }}
                         >
-                          <div style={{ padding: '6px 12px 4px', fontSize: '10px', fontWeight: '800', color: '#6366F1', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '1px solid #F1F5F9', background: '#F8FAFC' }}>
+                          <div style={{ padding: '6px 12px 4px', fontSize: '10px', fontWeight: '800', color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '1px solid var(--line)', background: 'var(--card-subtle)' }}>
                             Matching Applicants ({inviteSuggestions.length})
                           </div>
                           {inviteSuggestions.map((sug) => (
@@ -1711,28 +1712,28 @@ export default function VacanciesPage() {
                                 fontSize: '12px',
                                 cursor: 'pointer',
                                 userSelect: 'none',
-                                borderBottom: '1px solid #F8FAFC',
+                                borderBottom: '1px solid var(--line)',
                                 display: 'flex',
                                 alignItems: 'center',
                                 justifyContent: 'space-between',
                                 gap: '8px',
                                 transition: 'background 0.15s ease'
                               }}
-                              onMouseEnter={(e) => e.currentTarget.style.background = '#EEF2FF'}
+                              onMouseEnter={(e) => e.currentTarget.style.background = 'var(--dropdown-hover)'}
                               onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                             >
                               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
                                 <span style={{ fontSize: '14px', flexShrink: 0 }}>👤</span>
                                 <div style={{ overflow: 'hidden' }}>
-                                  <b style={{ color: '#1E293B', fontSize: '12px', fontFamily: 'monospace', display: 'block', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>{sug.email}</b>
+                                  <b style={{ color: 'var(--text)', fontSize: '12px', fontFamily: 'monospace', display: 'block', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>{sug.email}</b>
                                   {sug.name && (
-                                    <span style={{ display: 'block', fontSize: '10.5px', color: '#64748B', fontWeight: '600', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                                    <span style={{ display: 'block', fontSize: '10.5px', color: 'var(--text-secondary)', fontWeight: '600', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
                                       {sug.name}
                                     </span>
                                   )}
                                 </div>
                               </div>
-                              <span style={{ fontSize: '10.5px', color: '#4F46E5', fontWeight: '800', background: '#E0E7FF', padding: '2px 8px', borderRadius: '6px', flexShrink: 0 }}>
+                              <span style={{ fontSize: '10.5px', color: 'var(--primary)', fontWeight: '800', background: 'var(--card-subtle)', padding: '2px 8px', borderRadius: '6px', flexShrink: 0 }}>
                                 + Select
                               </span>
                             </div>
@@ -1751,7 +1752,7 @@ export default function VacanciesPage() {
                         height: '38px',
                         borderRadius: '10px',
                         border: 'none',
-                        background: '#4F46E5',
+                        background: 'var(--primary)',
                         color: '#FFFFFF',
                         fontWeight: '700',
                         fontSize: '12px',
@@ -1760,7 +1761,7 @@ export default function VacanciesPage() {
                         alignItems: 'center',
                         gap: '4px',
                         whiteSpace: 'nowrap',
-                        boxShadow: '0 2px 6px rgba(79, 70, 229, 0.25)',
+                        boxShadow: '0 2px 6px rgba(0, 0, 0, 0.15)',
                         flexShrink: 0
                       }}
                     >
@@ -1777,7 +1778,7 @@ export default function VacanciesPage() {
 
                   {/* Chip List */}
                   {inviteAllowedEmails.length > 0 ? (
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', maxHeight: '140px', overflowY: 'auto', padding: '8px', background: '#FFFFFF', borderRadius: '10px', border: '1px solid #C7D2FE' }}>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', maxHeight: '140px', overflowY: 'auto', padding: '8px', background: 'var(--card)', borderRadius: '10px', border: '1px solid var(--line)' }}>
                       {inviteAllowedEmails.map((email) => (
                         <span
                           key={email}
@@ -1786,9 +1787,9 @@ export default function VacanciesPage() {
                             alignItems: 'center',
                             gap: '6px',
                             padding: '4px 10px',
-                            background: '#EEF2FF',
-                            border: '1px solid #C7D2FE',
-                            color: '#3730A3',
+                            background: 'var(--card-subtle)',
+                            border: '1px solid var(--line)',
+                            color: 'var(--text)',
                             borderRadius: '16px',
                             fontSize: '12px',
                             fontWeight: '700',
@@ -1804,7 +1805,7 @@ export default function VacanciesPage() {
                             style={{
                               background: 'transparent',
                               border: 'none',
-                              color: '#6366F1',
+                              color: 'var(--text-secondary)',
                               cursor: 'pointer',
                               fontWeight: '900',
                               fontSize: '14px',
@@ -1821,7 +1822,7 @@ export default function VacanciesPage() {
                       ))}
                     </div>
                   ) : (
-                    <div style={{ fontSize: '12px', color: '#64748B', fontStyle: 'italic', padding: '8px', background: '#FFFFFF', borderRadius: '10px', border: '1px dashed #CBD5E1', textAlign: 'center' }}>
+                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)', fontStyle: 'italic', padding: '8px', background: 'var(--card)', borderRadius: '10px', border: '1px dashed var(--line)', textAlign: 'center' }}>
                       No emails invited yet. Enter applicant emails above and click "Add Email".
                     </div>
                   )}
@@ -1833,8 +1834,8 @@ export default function VacanciesPage() {
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                     <div>
-                      <h4 style={{ margin: 0, fontSize: '14px', fontWeight: '800', color: '#0F172A' }}>Invited Applicants</h4>
-                      <span style={{ fontSize: '11.5px', color: '#64748B' }}>Applicants authorized to submit applications for this vacancy item</span>
+                      <h4 style={{ margin: 0, fontSize: '14px', fontWeight: '800', color: 'var(--text)' }}>Invited Applicants</h4>
+                      <span style={{ fontSize: '11.5px', color: 'var(--text-secondary)' }}>Applicants authorized to submit applications for this vacancy item</span>
                     </div>
                     <button
                       type="button"
@@ -1843,7 +1844,7 @@ export default function VacanciesPage() {
                         padding: '6px 14px',
                         borderRadius: '8px',
                         border: 'none',
-                        background: '#4F46E5',
+                        background: 'var(--primary)',
                         color: '#FFFFFF',
                         fontWeight: '700',
                         fontSize: '12px',
@@ -1851,7 +1852,7 @@ export default function VacanciesPage() {
                         display: 'inline-flex',
                         alignItems: 'center',
                         gap: '6px',
-                        boxShadow: '0 2px 4px rgba(79, 70, 229, 0.2)'
+                        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.15)'
                       }}
                     >
                       <span>+</span>
@@ -1860,15 +1861,15 @@ export default function VacanciesPage() {
                   </div>
 
                   {inviteAllowedEmails.length > 0 ? (
-                    <div style={{ border: '1px solid #E2E8F0', borderRadius: '14px', overflowX: 'auto', background: '#FFFFFF', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}>
+                    <div style={{ border: '1px solid var(--table-border)', borderRadius: '14px', overflowX: 'auto', background: 'var(--table-bg)', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}>
                       <table style={{ width: '100%', minWidth: '680px', borderCollapse: 'collapse', textAlign: 'left', fontSize: '12.5px' }}>
                         <thead>
-                          <tr style={{ background: '#F8FAFC', borderBottom: '1px solid #E2E8F0' }}>
-                            <th style={{ padding: '10px 14px', fontWeight: '800', color: '#475569', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em', width: '22%' }}>Applicant</th>
-                            <th style={{ padding: '10px 14px', fontWeight: '800', color: '#475569', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em', width: '28%' }}>Email Address</th>
-                            <th style={{ padding: '10px 14px', fontWeight: '800', color: '#475569', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em', width: '12%' }}>Status</th>
-                            <th style={{ padding: '10px 14px', fontWeight: '800', color: '#475569', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em', width: '16%' }}>Date Invited</th>
-                            <th style={{ padding: '10px 14px', fontWeight: '800', color: '#475569', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em', width: '22%', textAlign: 'right' }}>Actions</th>
+                          <tr style={{ background: 'var(--table-th-bg)', borderBottom: '1px solid var(--table-border)' }}>
+                            <th style={{ padding: '10px 14px', fontWeight: '800', color: 'var(--text-secondary)', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em', width: '22%' }}>Applicant</th>
+                            <th style={{ padding: '10px 14px', fontWeight: '800', color: 'var(--text-secondary)', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em', width: '28%' }}>Email Address</th>
+                            <th style={{ padding: '10px 14px', fontWeight: '800', color: 'var(--text-secondary)', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em', width: '12%' }}>Status</th>
+                            <th style={{ padding: '10px 14px', fontWeight: '800', color: 'var(--text-secondary)', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em', width: '16%' }}>Date Invited</th>
+                            <th style={{ padding: '10px 14px', fontWeight: '800', color: 'var(--text-secondary)', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em', width: '22%', textAlign: 'right' }}>Actions</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1878,24 +1879,24 @@ export default function VacanciesPage() {
                               ? new Date(inviteVacancy.updatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
                               : 'Today';
                             return (
-                              <tr key={email} style={{ borderBottom: '1px solid #F1F5F9' }}>
-                                <td style={{ padding: '12px 14px', fontWeight: '700', color: '#0F172A' }}>
+                              <tr key={email} style={{ borderBottom: '1px solid var(--table-border)' }}>
+                                <td style={{ padding: '12px 14px', fontWeight: '700', color: 'var(--text)' }}>
                                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                    <div style={{ width: '26px', height: '26px', borderRadius: '50%', background: '#EEF2FF', color: '#4F46E5', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: '800', flexShrink: 0 }}>
+                                    <div style={{ width: '26px', height: '26px', borderRadius: '50%', background: 'var(--card-subtle)', color: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: '800', flexShrink: 0 }}>
                                       {applicantName.charAt(0).toUpperCase()}
                                     </div>
                                     <span style={{ whiteSpace: 'nowrap' }}>{applicantName}</span>
                                   </div>
                                 </td>
-                                <td style={{ padding: '12px 14px', fontFamily: 'monospace', color: '#334155', fontSize: '12px' }}>
+                                <td style={{ padding: '12px 14px', fontFamily: 'monospace', color: 'var(--text)', fontSize: '12px' }}>
                                   {email}
                                 </td>
                                 <td style={{ padding: '12px 14px' }}>
-                                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', fontWeight: '800', color: '#059669', background: '#D1FAE5', padding: '3px 8px', borderRadius: '12px' }}>
+                                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', fontWeight: '800', color: '#059669', background: 'rgba(16, 185, 129, 0.15)', padding: '3px 8px', borderRadius: '12px' }}>
                                     ● Active
                                   </span>
                                 </td>
-                                <td style={{ padding: '12px 14px', color: '#64748B', fontSize: '12px', whiteSpace: 'nowrap' }}>
+                                <td style={{ padding: '12px 14px', color: 'var(--text-secondary)', fontSize: '12px', whiteSpace: 'nowrap' }}>
                                   {dateStr}
                                 </td>
                                 <td style={{ padding: '12px 14px', textAlign: 'right' }}>
@@ -1910,9 +1911,9 @@ export default function VacanciesPage() {
                                       style={{
                                         padding: '5px 10px',
                                         borderRadius: '7px',
-                                        border: '1px solid #C7D2FE',
-                                        background: '#EEF2FF',
-                                        color: '#4338CA',
+                                        border: '1px solid var(--line)',
+                                        background: 'var(--card-subtle)',
+                                        color: 'var(--primary)',
                                         fontSize: '11px',
                                         fontWeight: '700',
                                         cursor: 'pointer',
@@ -1936,9 +1937,9 @@ export default function VacanciesPage() {
                                       style={{
                                         padding: '5px 10px',
                                         borderRadius: '7px',
-                                        border: '1px solid #FECACA',
-                                        background: '#FEF2F2',
-                                        color: '#DC2626',
+                                        border: '1px solid rgba(239, 68, 68, 0.4)',
+                                        background: 'rgba(239, 68, 68, 0.15)',
+                                        color: '#EF4444',
                                         fontSize: '11px',
                                         fontWeight: '700',
                                         cursor: 'pointer',
@@ -1961,10 +1962,10 @@ export default function VacanciesPage() {
                       </table>
                     </div>
                   ) : (
-                    <div style={{ padding: '32px 20px', textAlign: 'center', background: '#F8FAFC', border: '1.5px dashed #CBD5E1', borderRadius: '16px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
+                    <div style={{ padding: '32px 20px', textAlign: 'center', background: 'var(--card-subtle)', border: '1.5px dashed var(--line)', borderRadius: '16px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
                       <span style={{ fontSize: '28px' }}>📬</span>
-                      <b style={{ color: '#0F172A', fontSize: '14px' }}>No Invitations Configured</b>
-                      <p style={{ margin: 0, color: '#64748B', fontSize: '12.5px', maxWidth: '380px' }}>
+                      <b style={{ color: 'var(--text)', fontSize: '14px' }}>No Invitations Configured</b>
+                      <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '12.5px', maxWidth: '380px' }}>
                         There are currently no applicants invited to access this vacancy item. Switch to the Invite Applicants tab to add applicant email addresses.
                       </p>
                       <button
@@ -1975,7 +1976,7 @@ export default function VacanciesPage() {
                           padding: '8px 18px',
                           borderRadius: '10px',
                           border: 'none',
-                          background: '#4F46E5',
+                          background: 'var(--primary)',
                           color: '#FFFFFF',
                           fontWeight: '800',
                           fontSize: '12.5px',
@@ -1991,11 +1992,11 @@ export default function VacanciesPage() {
             </div>
 
             {/* Modal Footer Actions */}
-            <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '12px', padding: '16px 28px', borderTop: '1px solid #E2E8F0', background: '#F8FAFC', flexShrink: 0 }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '12px', padding: '16px 28px', borderTop: '1px solid var(--line)', background: 'var(--modal-bg, var(--card))', flexShrink: 0 }}>
               <button 
                 type="button" 
                 onClick={() => setShowInviteModal(false)}
-                style={{ padding: '9px 16px', borderRadius: '10px', border: '1.5px solid #CBD5E1', background: '#FFFFFF', color: '#475569', fontWeight: '700', fontSize: '12.5px', cursor: 'pointer', transition: 'all 0.15s' }}
+                style={{ padding: '9px 16px', borderRadius: '10px', border: '1.5px solid var(--line)', background: 'var(--card-subtle)', color: 'var(--text)', fontWeight: '700', fontSize: '12.5px', cursor: 'pointer', transition: 'all 0.15s' }}
               >
                 Close
               </button>
@@ -2025,25 +2026,25 @@ export default function VacanciesPage() {
       {/* MODAL: REVOKE INVITATION CONFIRMATION */}
       {showRevokeConfirmModal && revokeConfirmEmail && (
         <div className="modal open" style={{ zIndex: 100003, left: 0, background: 'rgba(15, 23, 42, 0.45)', backdropFilter: 'blur(16px)' }}>
-          <div className="modal-box" style={{ width: 'min(480px, 94vw)', padding: '24px 30px', borderRadius: '24px', background: 'white', borderTop: '6px solid #EF4444', boxShadow: '0 24px 60px rgba(0, 0, 0, 0.18)' }}>
+          <div className="modal-box" style={{ width: 'min(480px, 94vw)', padding: '24px 30px', borderRadius: '24px', background: 'var(--modal-bg, var(--card))', border: '1px solid var(--line)', borderTop: '6px solid #EF4444', boxShadow: '0 24px 60px rgba(0, 0, 0, 0.18)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px' }}>
-              <div style={{ width: '40px', height: '40px', borderRadius: '12px', background: '#FEF2F2', color: '#EF4444', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px' }}>
+              <div style={{ width: '40px', height: '40px', borderRadius: '12px', background: 'rgba(239, 68, 68, 0.15)', color: '#EF4444', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px' }}>
                 ⚠️
               </div>
               <div>
-                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '800', color: '#0F172A', fontFamily: 'var(--font-heading)' }}>Revoke invitation?</h3>
-                <span style={{ fontSize: '12px', color: '#64748B', fontWeight: '600' }}>Confirm removal of access permissions</span>
+                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '800', color: 'var(--text)', fontFamily: 'var(--font-heading)' }}>Revoke invitation?</h3>
+                <span style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: '600' }}>Confirm removal of access permissions</span>
               </div>
             </div>
 
-            <p style={{ margin: '0 0 14px', fontSize: '13.5px', color: '#334155', lineHeight: '1.5' }}>
+            <p style={{ margin: '0 0 14px', fontSize: '13.5px', color: 'var(--text-secondary)', lineHeight: '1.5' }}>
               You are about to remove this applicant’s invitation to access this item. They will no longer be able to access it using this invitation.
             </p>
 
-            <div style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '12px', padding: '12px 16px', marginBottom: '20px' }}>
-              <div style={{ fontSize: '11px', fontWeight: '800', textTransform: 'uppercase', color: '#64748B', marginBottom: '2px' }}>Target Applicant</div>
-              <div style={{ fontWeight: '800', color: '#0F172A', fontSize: '13.5px' }}>{getApplicantNameForEmail(revokeConfirmEmail)}</div>
-              <div style={{ fontFamily: 'monospace', fontSize: '12px', color: '#6366F1' }}>{revokeConfirmEmail}</div>
+            <div style={{ background: 'var(--card-subtle)', border: '1px solid var(--line)', borderRadius: '12px', padding: '12px 16px', marginBottom: '20px' }}>
+              <div style={{ fontSize: '11px', fontWeight: '800', textTransform: 'uppercase', color: 'var(--text-secondary)', marginBottom: '2px' }}>Target Applicant</div>
+              <div style={{ fontWeight: '800', color: 'var(--text)', fontSize: '13.5px' }}>{getApplicantNameForEmail(revokeConfirmEmail)}</div>
+              <div style={{ fontFamily: 'monospace', fontSize: '12px', color: 'var(--primary)' }}>{revokeConfirmEmail}</div>
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
@@ -2086,25 +2087,25 @@ export default function VacanciesPage() {
       {/* MODAL: RESEND INVITATION CONFIRMATION */}
       {showResendConfirmModal && resendConfirmEmail && (
         <div className="modal open" style={{ zIndex: 100003, left: 0, background: 'rgba(15, 23, 42, 0.45)', backdropFilter: 'blur(16px)' }}>
-          <div className="modal-box" style={{ width: 'min(480px, 94vw)', padding: '24px 30px', borderRadius: '24px', background: 'white', borderTop: '6px solid #4F46E5', boxShadow: '0 24px 60px rgba(0, 0, 0, 0.18)' }}>
+          <div className="modal-box" style={{ width: 'min(480px, 94vw)', padding: '24px 30px', borderRadius: '24px', background: 'var(--modal-bg, var(--card))', border: '1px solid var(--line)', borderTop: '6px solid var(--primary)', boxShadow: '0 24px 60px rgba(0, 0, 0, 0.18)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px' }}>
-              <div style={{ width: '40px', height: '40px', borderRadius: '12px', background: '#EEF2FF', color: '#4F46E5', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px' }}>
+              <div style={{ width: '40px', height: '40px', borderRadius: '12px', background: 'var(--card-subtle)', color: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px' }}>
                 ✉️
               </div>
               <div>
-                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '800', color: '#0F172A', fontFamily: 'var(--font-heading)' }}>Resend invitation?</h3>
-                <span style={{ fontSize: '12px', color: '#64748B', fontWeight: '600' }}>Re-send invitation notification & access instructions</span>
+                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '800', color: 'var(--text)', fontFamily: 'var(--font-heading)' }}>Resend invitation?</h3>
+                <span style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: '600' }}>Re-send invitation notification & access instructions</span>
               </div>
             </div>
 
-            <p style={{ margin: '0 0 14px', fontSize: '13.5px', color: '#334155', lineHeight: '1.5' }}>
+            <p style={{ margin: '0 0 14px', fontSize: '13.5px', color: 'var(--text-secondary)', lineHeight: '1.5' }}>
               You are about to resend the invitation email to this applicant, allowing them to access and apply for this closed vacancy item.
             </p>
 
-            <div style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '12px', padding: '12px 16px', marginBottom: '20px' }}>
-              <div style={{ fontSize: '11px', fontWeight: '800', textTransform: 'uppercase', color: '#64748B', marginBottom: '2px' }}>Target Applicant</div>
-              <div style={{ fontWeight: '800', color: '#0F172A', fontSize: '13.5px' }}>{getApplicantNameForEmail(resendConfirmEmail)}</div>
-              <div style={{ fontFamily: 'monospace', fontSize: '12px', color: '#4F46E5' }}>{resendConfirmEmail}</div>
+            <div style={{ background: 'var(--card-subtle)', border: '1px solid var(--line)', borderRadius: '12px', padding: '12px 16px', marginBottom: '20px' }}>
+              <div style={{ fontSize: '11px', fontWeight: '800', textTransform: 'uppercase', color: 'var(--text-secondary)', marginBottom: '2px' }}>Target Applicant</div>
+              <div style={{ fontWeight: '800', color: 'var(--text)', fontSize: '13.5px' }}>{getApplicantNameForEmail(resendConfirmEmail)}</div>
+              <div style={{ fontFamily: 'monospace', fontSize: '12px', color: 'var(--primary)' }}>{resendConfirmEmail}</div>
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
@@ -2222,8 +2223,8 @@ export default function VacanciesPage() {
                 paddingBottom: '12px',
                 paddingLeft: '24px',
                 paddingRight: '24px',
-                background: 'white',
-                borderBottom: '1px solid #E2E8F0',
+                background: 'var(--modal-bg, var(--card))',
+                borderBottom: '1px solid var(--line)',
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center'
@@ -2287,13 +2288,7 @@ export default function VacanciesPage() {
                   </aside>
 
                   <section className="posting-calendar-panel">
-                    <div className="posting-card-head">
-                      <div className="position-detail-eyebrow">Posting Calendar</div>
-                      <h4>Set Posting Schedule</h4>
-                      <p>Choose the posting start date and deadline for <b>{calVacancy.itemNo}</b>.</p>
-                    </div>
-
-                    <div className="cal-fields" style={{ display: 'flex', alignItems: 'center', gap: '10px', background: '#F8FCFF', border: '2.5px solid var(--line)', borderRadius: '18px', padding: '10px' }}>
+                    <div className="cal-field-row" style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '14px' }}>
                       <button
                         type="button"
                         className={`cal-field ${calField === 'start' ? 'active' : ''}`}
@@ -2302,17 +2297,17 @@ export default function VacanciesPage() {
                           flex: 1,
                           padding: '10px',
                           borderRadius: '12px',
-                          border: calField === 'start' ? '2.5px solid var(--blue)' : '1.5px solid var(--line)',
-                          background: 'white',
+                          border: calField === 'start' ? '2.5px solid var(--primary)' : '1.5px solid var(--line)',
+                          background: 'var(--card-subtle)',
                           textAlign: 'left',
                           cursor: 'pointer',
                           transition: 'all 0.15s ease'
                         }}
                       >
-                        <span className="cf-label" style={{ display: 'block', fontSize: '9px', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: '800' }}>Start date</span>
-                        <span className="cf-value" style={{ fontSize: '14px', fontWeight: '900', color: 'var(--navy)' }}>{formatBtnDate(calStart)}</span>
+                        <span className="cf-label" style={{ display: 'block', fontSize: '9px', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: '800' }}>Start date</span>
+                        <span className="cf-value" style={{ fontSize: '14px', fontWeight: '900', color: 'var(--text)' }}>{formatBtnDate(calStart)}</span>
                       </button>
-                      <span className="cal-arrow" style={{ fontSize: '20px', color: 'var(--muted)' }}>→</span>
+                      <span className="cal-arrow" style={{ fontSize: '20px', color: 'var(--text-secondary)' }}>→</span>
                       <button
                         type="button"
                         className={`cal-field ${calField === 'end' ? 'active' : ''}`}
@@ -2321,33 +2316,33 @@ export default function VacanciesPage() {
                           flex: 1,
                           padding: '10px',
                           borderRadius: '12px',
-                          border: calField === 'end' ? '2.5px solid var(--blue)' : '1.5px solid var(--line)',
-                          background: 'white',
+                          border: calField === 'end' ? '2.5px solid var(--primary)' : '1.5px solid var(--line)',
+                          background: 'var(--card-subtle)',
                           textAlign: 'left',
                           cursor: 'pointer',
                           transition: 'all 0.15s ease'
                         }}
                       >
-                        <span className="cf-label" style={{ display: 'block', fontSize: '9px', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: '800' }}>Deadline</span>
-                        <span className="cf-value" style={{ fontSize: '14px', fontWeight: '900', color: 'var(--navy)' }}>{formatBtnDate(calEnd)}</span>
+                        <span className="cf-label" style={{ display: 'block', fontSize: '9px', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: '800' }}>Deadline</span>
+                        <span className="cf-value" style={{ fontSize: '14px', fontWeight: '900', color: 'var(--text)' }}>{formatBtnDate(calEnd)}</span>
                       </button>
                     </div>
 
-                    <div style={{ border: '2px solid var(--line)', borderRadius: '18px', padding: '16px', background: 'white' }}>
+                    <div style={{ border: '2px solid var(--line)', borderRadius: '18px', padding: '16px', background: 'var(--card)' }}>
                       <div className="cal-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                        <button className="cal-nav" onClick={() => calShift(-1)} style={{ padding: '4px 10px', fontSize: '18px', fontWeight: 'bold', background: 'var(--blue-100)', color: 'var(--blue)', borderRadius: '8px', border: 'none', cursor: 'pointer' }}>‹</button>
+                        <button className="cal-nav" onClick={() => calShift(-1)} style={{ padding: '4px 10px', fontSize: '18px', fontWeight: 'bold', background: 'var(--card-subtle)', color: 'var(--primary)', borderRadius: '8px', border: '1px solid var(--line)', cursor: 'pointer' }}>‹</button>
                         <div style={{ display: 'flex', gap: '6px' }}>
                           <select
                             value={calMonth}
                             onChange={e => setCalMonth(Number(e.target.value))}
-                            style={{ padding: '6px 12px', borderRadius: '10px', border: '1.5px solid var(--line)', fontWeight: '800', background: '#F8FCFF', color: 'var(--navy)' }}
+                            style={{ padding: '6px 12px', borderRadius: '10px', border: '1.5px solid var(--input-border)', fontWeight: '800', background: 'var(--input-bg)', color: 'var(--input-text)' }}
                           >
                             {monthNames.map((m, idx) => <option key={idx} value={idx}>{m}</option>)}
                           </select>
                           <select
                             value={calYear}
                             onChange={e => setCalYear(Number(e.target.value))}
-                            style={{ padding: '6px 12px', borderRadius: '10px', border: '1.5px solid var(--line)', fontWeight: '800', background: '#F8FCFF', color: 'var(--navy)' }}
+                            style={{ padding: '6px 12px', borderRadius: '10px', border: '1.5px solid var(--line)', fontWeight: '800', background: 'var(--card-subtle)', color: 'var(--text)' }}
                           >
                             {yearOpts.map(y => <option key={y} value={y}>{y}</option>)}
                           </select>
@@ -2421,16 +2416,16 @@ export default function VacanciesPage() {
                 </div>
 
                 {showManualFields ? (
-                  <div className="nosca-scan manual-form" style={{ minHeight: '300px', border: '2px solid var(--line)', borderRadius: '18px', padding: '24px 20px', background: 'white', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                    <h3 style={{ fontFamily: 'var(--font-heading)', color: 'var(--navy)', margin: 0, fontSize: '16px', fontWeight: 'bold' }}>Add Vacancy Manually</h3>
+                  <div className="nosca-scan manual-form" style={{ minHeight: '300px', border: '2px solid var(--line)', borderRadius: '18px', padding: '24px 20px', background: 'var(--card)', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                    <h3 style={{ fontFamily: 'var(--font-heading)', color: 'var(--text)', margin: 0, fontSize: '16px', fontWeight: 'bold' }}>Add Vacancy Manually</h3>
                     
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
                       <div>
-                        <label style={{ display: 'block', fontSize: '10.5px', fontWeight: 'bold', textTransform: 'uppercase', color: 'var(--navy)', marginBottom: '4px' }}>Position Title</label>
+                        <label style={{ display: 'block', fontSize: '10.5px', fontWeight: 'bold', textTransform: 'uppercase', color: 'var(--text-secondary)', marginBottom: '4px' }}>Position Title</label>
                         <select
                           value={manualPositionId}
                           onChange={e => setManualPositionId(e.target.value)}
-                          style={{ width: '100%', height: '38px', padding: '0 8px', borderRadius: '8px', border: '1.5px solid var(--blue)', background: 'white', color: 'var(--navy)', fontSize: '12px', boxSizing: 'border-box' }}
+                          style={{ width: '100%', height: '38px', padding: '0 8px', borderRadius: '8px', border: '1.5px solid var(--input-border)', background: 'var(--input-bg)', color: 'var(--input-text)', fontSize: '12px', boxSizing: 'border-box' }}
                         >
                           <option value="">Select Position...</option>
                           {positions.map(p => (
@@ -2440,20 +2435,20 @@ export default function VacanciesPage() {
                       </div>
 
                       <div>
-                        <label style={{ display: 'block', fontSize: '10.5px', fontWeight: 'bold', textTransform: 'uppercase', color: 'var(--navy)', marginBottom: '4px' }}>Item Number</label>
+                        <label style={{ display: 'block', fontSize: '10.5px', fontWeight: 'bold', textTransform: 'uppercase', color: 'var(--text-secondary)', marginBottom: '4px' }}>Item Number</label>
                         <input
                           type="text"
                           placeholder="e.g. SCA1-00000-2026"
                           value={manualItemNo}
                           onChange={e => setManualItemNo(e.target.value.toUpperCase())}
-                          style={{ width: '100%', height: '38px', padding: '0 12px', borderRadius: '8px', border: '1.5px solid var(--line)', background: 'white', color: 'var(--navy)', fontSize: '12px', boxSizing: 'border-box' }}
+                          style={{ width: '100%', height: '38px', padding: '0 12px', borderRadius: '8px', border: '1.5px solid var(--input-border)', background: 'var(--input-bg)', color: 'var(--input-text)', fontSize: '12px', boxSizing: 'border-box' }}
                         />
                       </div>
                     </div>
 
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
                       <div>
-                        <label style={{ display: 'block', fontSize: '10.5px', fontWeight: 'bold', textTransform: 'uppercase', color: 'var(--navy)', marginBottom: '4px' }}>School Level</label>
+                        <label style={{ display: 'block', fontSize: '10.5px', fontWeight: 'bold', textTransform: 'uppercase', color: 'var(--text-secondary)', marginBottom: '4px' }}>School Level</label>
                         <select
                           value={manualSchoolLevel || ''}
                           onChange={(e) => {
@@ -2462,7 +2457,7 @@ export default function VacanciesPage() {
                             setManualSchoolName('');
                             setManualSchoolSearchQuery('');
                           }}
-                          style={{ width: '100%', height: '38px', padding: '0 8px', borderRadius: '8px', border: '1.5px solid var(--line)', background: 'white', color: 'var(--navy)', fontSize: '12px', boxSizing: 'border-box' }}
+                          style={{ width: '100%', height: '38px', padding: '0 8px', borderRadius: '8px', border: '1.5px solid var(--input-border)', background: 'var(--input-bg)', color: 'var(--input-text)', fontSize: '12px', boxSizing: 'border-box' }}
                         >
                           <option value="">Select School Level</option>
                           <option value="ES">ES</option>
@@ -2473,7 +2468,7 @@ export default function VacanciesPage() {
 
                       {manualSchoolLevel === 'JHS' && (
                         <div style={{ position: 'relative' }}>
-                          <label style={{ display: 'block', fontSize: '10.5px', fontWeight: 'bold', textTransform: 'uppercase', color: 'var(--navy)', marginBottom: '4px' }}>School ID & Name</label>
+                          <label style={{ display: 'block', fontSize: '10.5px', fontWeight: 'bold', textTransform: 'uppercase', color: 'var(--text-secondary)', marginBottom: '4px' }}>School ID & Name</label>
                           <input
                             type="text"
                             value={manualSchoolSearchQuery || ''}
@@ -2487,7 +2482,9 @@ export default function VacanciesPage() {
                               width: '100%',
                               padding: '0 12px',
                               borderRadius: '8px',
-                              border: '1px solid var(--line)',
+                              border: '1.5px solid var(--input-border)',
+                              background: 'var(--input-bg)',
+                              color: 'var(--input-text)',
                               fontSize: '12px',
                               height: '38px',
                               boxSizing: 'border-box'
@@ -2499,10 +2496,10 @@ export default function VacanciesPage() {
                               top: '100%',
                               left: 0,
                               right: 0,
-                              background: 'white',
+                              background: 'var(--dropdown-bg)',
                               border: '1px solid var(--line)',
                               borderRadius: '8px',
-                              boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
+                              boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
                               zIndex: 9999,
                               maxHeight: '150px',
                               overflowY: 'auto',
@@ -2522,9 +2519,10 @@ export default function VacanciesPage() {
                                     fontSize: '11.5px',
                                     cursor: 'pointer',
                                     userSelect: 'none',
-                                    borderBottom: '1px solid #F1F5F9'
+                                    color: 'var(--text)',
+                                    borderBottom: '1px solid var(--line)'
                                   }}
-                                  onMouseEnter={(e) => e.currentTarget.style.background = '#F8FAFC'}
+                                  onMouseEnter={(e) => e.currentTarget.style.background = 'var(--dropdown-hover)'}
                                   onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                                 >
                                   <span style={{ pointerEvents: 'none' }}>
@@ -2560,7 +2558,7 @@ export default function VacanciesPage() {
                     </div>
                   </div>
                 ) : (
-                  <div className="nosca-scan" style={{ minHeight: '300px', border: '2px solid var(--line)', borderRadius: '18px', padding: '16px', background: 'white', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                  <div className="nosca-scan" style={{ minHeight: '300px', border: '2px solid var(--line)', borderRadius: '18px', padding: '16px', background: 'var(--card)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
                   {noscaScanning ? (
                     <div className="nosca-empty" style={{ height: '100%', minHeight: '230px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', color: 'var(--muted)', fontWeight: '700', fontSize: '13px', gap: '4px' }}>
                       <p>Scanning document metadata...</p>
@@ -2570,8 +2568,8 @@ export default function VacanciesPage() {
                       <div>
                         <div className="scan-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', gap: '10px' }}>
                           <div>
-                            <h3 style={{ fontFamily: 'var(--font-heading)', color: 'var(--navy)', margin: 0, fontSize: '15px' }}>Detected Items</h3>
-                            <span className="scan-badge" style={{ fontSize: '11px', fontWeight: '900', color: 'var(--blue-600)' }}>
+                            <h3 style={{ fontFamily: 'var(--font-heading)', color: 'var(--text)', margin: 0, fontSize: '15px' }}>Detected Items</h3>
+                            <span className="scan-badge" style={{ fontSize: '11px', fontWeight: '900', color: 'var(--primary)' }}>
                               {selectedNoscaItemNos.length} of {detectedItems.length} selected
                             </span>
                           </div>
@@ -2580,12 +2578,12 @@ export default function VacanciesPage() {
                             <button className="secondary" style={{ padding: '4px 8px', fontSize: '11px', minHeight: 'auto', borderRadius: '8px' }} onClick={() => setSelectedNoscaItemNos([])}>Deselect All</button>
                           </div>
                         </div>
-                        <div style={{ background: '#fff', border: '1px solid var(--line)', borderRadius: '12px', maxHeight: '220px', overflowY: 'auto' }}>
+                        <div style={{ background: 'var(--card-subtle)', border: '1px solid var(--line)', borderRadius: '12px', maxHeight: '220px', overflowY: 'auto' }}>
                           {detectedItems.map((it, idx) => {
                             const isChecked = selectedNoscaItemNos.includes(it.itemNo);
                             const isInvalid = !isValidItemNo(it.itemNo);
                             return (
-                              <div key={idx} className="scan-item" style={{ display: 'grid', gridTemplateColumns: '22px 1fr', gap: '10px', alignItems: 'start', padding: '10px 12px', borderBottom: idx < detectedItems.length - 1 ? '1px solid #E2E8F0' : 'none', background: isInvalid ? '#FFFDFD' : 'white' }}>
+                              <div key={idx} className="scan-item" style={{ display: 'grid', gridTemplateColumns: '22px 1fr', gap: '10px', alignItems: 'start', padding: '10px 12px', borderBottom: idx < detectedItems.length - 1 ? '1px solid var(--line)' : 'none', background: isInvalid ? 'var(--card-subtle)' : 'var(--card)' }}>
                                 <input
                                   type="checkbox"
                                   checked={isChecked}
@@ -2842,12 +2840,12 @@ export default function VacanciesPage() {
                   value={closeReason}
                   onChange={e => setCloseReason(e.target.value)}
                   style={{
-                    background: 'white',
-                    border: '1.5px solid #D7EEF8',
+                    background: 'var(--input-bg)',
+                    border: '1.5px solid var(--input-border)',
                     height: '42px',
                     borderRadius: '10px',
                     fontSize: '13px',
-                    color: closeReason ? 'var(--text)' : '#94A3B8'
+                    color: closeReason ? 'var(--input-text)' : 'var(--text-secondary)'
                   }}
                 >
                   <option value="">Select a reason...</option>
@@ -2871,14 +2869,14 @@ export default function VacanciesPage() {
                     onChange={e => setCloseReasonOther(e.target.value)}
                     placeholder="Specify the reason (max 150 characters)."
                     maxLength="150"
-                    style={{ marginTop: '8px', border: '1.5px solid #D7EEF8', borderRadius: '10px', minHeight: '60px' }}
+                    style={{ marginTop: '8px', border: '1.5px solid var(--input-border)', background: 'var(--input-bg)', color: 'var(--input-text)', borderRadius: '10px', minHeight: '60px' }}
                   />
                 )}
               </div>
 
               <div>
                 <label style={{
-                  color: '#991B1B',
+                  color: '#EF4444',
                   fontWeight: '900',
                   fontSize: '11px',
                   letterSpacing: '0.06em',
@@ -2896,8 +2894,9 @@ export default function VacanciesPage() {
                     }
                   }}
                   style={{
-                    background: 'white',
-                    border: '1.5px solid #D7EEF8',
+                    background: 'var(--input-bg)',
+                    border: '1.5px solid var(--input-border)',
+                    color: 'var(--input-text)',
                     height: '42px',
                     borderRadius: '10px',
                     fontSize: '13px'
@@ -2922,7 +2921,7 @@ export default function VacanciesPage() {
       {/* MODAL: DELETE VACANCY CONFIRMATION */}
       {showDeleteConfirmModal && deleteConfirmVac && (
         <div className="modal open" style={{ zIndex: 100003, left: 0, background: 'rgba(15, 23, 42, 0.45)', backdropFilter: 'blur(16px)' }}>
-          <div className="modal-box" style={{ width: 'min(480px, 94vw)', padding: '24px 32px', borderRadius: '24px', background: 'white', borderTop: '6px solid #EF4444', boxShadow: '0 24px 60px rgba(0, 0, 0, 0.15)' }}>
+          <div className="modal-box" style={{ width: 'min(480px, 94vw)', padding: '24px 32px', borderRadius: '24px', background: 'var(--modal-bg, var(--card))', border: '1px solid var(--line)', borderTop: '6px solid #EF4444', boxShadow: '0 24px 60px rgba(0, 0, 0, 0.15)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
               <span style={{ fontSize: '32px' }}>⚠️</span>
               <h3 style={{ margin: 0, fontSize: '20px', fontWeight: 900, fontFamily: 'var(--font-heading)', color: '#EF4444' }}>Delete Vacancy Posting</h3>
@@ -2935,7 +2934,7 @@ export default function VacanciesPage() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginBottom: '20px' }}>
               <div>
                 <label style={{
-                  color: '#991B1B',
+                  color: '#EF4444',
                   fontWeight: '900',
                   fontSize: '11px',
                   letterSpacing: '0.06em',
@@ -2954,8 +2953,9 @@ export default function VacanciesPage() {
                     }
                   }}
                   style={{
-                    background: 'white',
-                    border: '1.5px solid #D7EEF8',
+                    background: 'var(--input-bg)',
+                    border: '1.5px solid var(--input-border)',
+                    color: 'var(--input-text)',
                     height: '42px',
                     borderRadius: '10px',
                     fontSize: '13px',

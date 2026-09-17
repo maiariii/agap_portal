@@ -1248,8 +1248,8 @@ export default function AssessmentPage() {
                         <div className="qs-card" key={area.key} style={{ border: '1px solid var(--line)', borderRadius: '16px', padding: '16px', position: 'relative' }}>
                           <h3 style={{ marginBottom: '6px' }}>{area.label}</h3>
                           <p className="small" style={{ margin: '0 0 12px', minHeight: '36px' }}>{area.description}</p>
-                          <div style={{ marginTop: 'auto', padding: '14px', border: '2px solid var(--line)', borderRadius: '18px', background: 'linear-gradient(135deg,#FFFFFF,#F8FCFF)' }}>
-                            <label style={{ margin: '0 0 8px', display: 'block', fontWeight: 'bold' }}>Score</label>
+                          <div style={{ marginTop: 'auto', padding: '14px', border: '2px solid var(--line)', borderRadius: '18px', background: 'var(--card-subtle)' }}>
+                            <label style={{ margin: '0 0 8px', display: 'block', fontWeight: 'bold', color: 'var(--text)' }}>Score</label>
                             <input
                               type="number"
                               min="0"
@@ -1258,7 +1258,7 @@ export default function AssessmentPage() {
                               value={modalAreaScores[area.key] ?? ''}
                               onChange={e => handleAreaScoreChange(area.key, e.target.value)}
                               placeholder={area.max !== undefined ? `0.00 - ${area.max.toFixed(2)}` : "0.00 - 100.00"}
-                              style={{ height: '50px', textAlign: 'center', fontFamily: 'var(--font-heading)', fontSize: '24px', fontWeight: 950, border: '2.5px solid var(--blue-600)', background: 'white', boxShadow: '0 8px 18px rgba(2,132,199,.08)', width: '100%', boxSizing: 'border-box', borderRadius: '8px' }}
+                              style={{ height: '50px', textAlign: 'center', fontFamily: 'var(--font-heading)', fontSize: '24px', fontWeight: 950, border: '2.5px solid var(--primary)', background: 'var(--input-bg)', color: 'var(--input-text)', boxShadow: '0 8px 18px rgba(2,132,199,.08)', width: '100%', boxSizing: 'border-box', borderRadius: '8px' }}
                             />
                             <div className="small" style={{ marginTop: '8px', fontWeight: 800 }}>Enter a score from 0.00 to {area.max !== undefined ? area.max.toFixed(2) : "100.00"}</div>
                           </div>
@@ -1279,7 +1279,7 @@ export default function AssessmentPage() {
                   <div className="qs-matrix-summary" style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
                     <div className={`qs-score-card ${compAllScored ? compTone.color : ''}`} style={{ padding: '12px 20px', border: '2px solid var(--line)', borderRadius: '16px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
                       <span className="qs-score-label" style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 800 }}>Total Score</span>
-                      <span className="qs-score-value" style={{ fontSize: '24px', fontWeight: 900, color: 'var(--navy)' }}>{compAllScored ? `${compTotal.toFixed(2)} / 20.00` : '—'}</span>
+                      <span className="qs-score-value" style={{ fontSize: '24px', fontWeight: 900, color: 'var(--text)' }}>{compAllScored ? `${compTotal.toFixed(2)} / 20.00` : '—'}</span>
                       <span className="qs-score-caption" style={{ fontSize: '11px', color: 'var(--muted)' }}>{compAllScored ? `${compValues.length} assessment score(s)` : `${compValues.length} of 3 score(s) entered`}</span>
                     </div>
                     <button
@@ -1296,8 +1296,8 @@ export default function AssessmentPage() {
                     <div className="qs-card" style={{ border: '1px solid var(--line)', borderRadius: '16px', padding: '16px' }}>
                       <h3 style={{ marginBottom: '6px' }}>Behavioral Events Interview (BEI)</h3>
                       <p className="small" style={{ margin: '0 0 12px', minHeight: '36px' }}>Average BEI score based on panel interview ratings and competency indicators.</p>
-                      <div style={{ marginTop: 'auto', padding: '14px', border: '2px solid var(--line)', borderRadius: '18px', background: 'linear-gradient(135deg,#FFFFFF,#F8FCFF)' }}>
-                        <label style={{ margin: '0 0 8px', display: 'block', fontWeight: 'bold' }}>SCORE (MAX 5)</label>
+                      <div style={{ marginTop: 'auto', padding: '14px', border: '2px solid var(--line)', borderRadius: '18px', background: 'var(--card-subtle)' }}>
+                        <label style={{ margin: '0 0 8px', display: 'block', fontWeight: 'bold', color: 'var(--text)' }}>SCORE (MAX 5)</label>
                         <input
                           type="number"
                           min="0"
@@ -1306,7 +1306,7 @@ export default function AssessmentPage() {
                           value={modalCompScores.bei ?? ''}
                           onChange={e => handleCompScoreChange('bei', e.target.value)}
                           placeholder="0.00 - 5.00"
-                          style={{ height: '50px', textAlign: 'center', fontFamily: 'var(--font-heading)', fontSize: '24px', fontWeight: 950, border: '2.5px solid var(--blue-600)', background: 'white', boxShadow: '0 8px 18px rgba(2,132,199,.08)', width: '100%', boxSizing: 'border-box', borderRadius: '8px' }}
+                          style={{ height: '50px', textAlign: 'center', fontFamily: 'var(--font-heading)', fontSize: '24px', fontWeight: 950, border: '2.5px solid var(--primary)', background: 'var(--input-bg)', color: 'var(--input-text)', boxShadow: '0 8px 18px rgba(2,132,199,.08)', width: '100%', boxSizing: 'border-box', borderRadius: '8px' }}
                         />
                         <div className="small" style={{ marginTop: '8px', fontWeight: 800 }}>Enter a score from 0.00 to 5.00</div>
                       </div>
@@ -1314,8 +1314,8 @@ export default function AssessmentPage() {
                     <div className="qs-card" style={{ border: '1px solid var(--line)', borderRadius: '16px', padding: '16px' }}>
                       <h3 style={{ marginBottom: '6px' }}>Work Sample Test (WST)</h3>
                       <p className="small" style={{ margin: '0 0 12px', minHeight: '36px' }}>Score for the work sample or technical performance test.</p>
-                      <div style={{ marginTop: 'auto', padding: '14px', border: '2px solid var(--line)', borderRadius: '18px', background: 'linear-gradient(135deg,#FFFFFF,#F8FCFF)' }}>
-                        <label style={{ margin: '0 0 8px', display: 'block', fontWeight: 'bold' }}>SCORE (MAX 10)</label>
+                      <div style={{ marginTop: 'auto', padding: '14px', border: '2px solid var(--line)', borderRadius: '18px', background: 'var(--card-subtle)' }}>
+                        <label style={{ margin: '0 0 8px', display: 'block', fontWeight: 'bold', color: 'var(--text)' }}>SCORE (MAX 10)</label>
                         <input
                           type="number"
                           min="0"
@@ -1324,7 +1324,7 @@ export default function AssessmentPage() {
                           value={modalCompScores.wst ?? ''}
                           onChange={e => handleCompScoreChange('wst', e.target.value)}
                           placeholder="0.00 - 10.00"
-                          style={{ height: '50px', textAlign: 'center', fontFamily: 'var(--font-heading)', fontSize: '24px', fontWeight: 950, border: '2.5px solid var(--blue-600)', background: 'white', boxShadow: '0 8px 18px rgba(2,132,199,.08)', width: '100%', boxSizing: 'border-box', borderRadius: '8px' }}
+                          style={{ height: '50px', textAlign: 'center', fontFamily: 'var(--font-heading)', fontSize: '24px', fontWeight: 950, border: '2.5px solid var(--primary)', background: 'var(--input-bg)', color: 'var(--input-text)', boxShadow: '0 8px 18px rgba(2,132,199,.08)', width: '100%', boxSizing: 'border-box', borderRadius: '8px' }}
                         />
                         <div className="small" style={{ marginTop: '8px', fontWeight: 800 }}>Enter a score from 0.00 to 10.00</div>
                       </div>
@@ -1332,8 +1332,8 @@ export default function AssessmentPage() {
                     <div className="qs-card" style={{ border: '1px solid var(--line)', borderRadius: '16px', padding: '16px' }}>
                       <h3 style={{ marginBottom: '6px' }}>Written Examination (WE)</h3>
                       <p className="small" style={{ margin: '0 0 12px', minHeight: '36px' }}>Score for the written examination component.</p>
-                      <div style={{ marginTop: 'auto', padding: '14px', border: '2px solid var(--line)', borderRadius: '18px', background: 'linear-gradient(135deg,#FFFFFF,#F8FCFF)' }}>
-                        <label style={{ margin: '0 0 8px', display: 'block', fontWeight: 'bold' }}>SCORE (MAX 5)</label>
+                      <div style={{ marginTop: 'auto', padding: '14px', border: '2px solid var(--line)', borderRadius: '18px', background: 'var(--card-subtle)' }}>
+                        <label style={{ margin: '0 0 8px', display: 'block', fontWeight: 'bold', color: 'var(--text)' }}>SCORE (MAX 5)</label>
                         <input
                           type="number"
                           min="0"
@@ -1342,7 +1342,7 @@ export default function AssessmentPage() {
                           value={modalCompScores.we ?? ''}
                           onChange={e => handleCompScoreChange('we', e.target.value)}
                           placeholder="0.00 - 5.00"
-                          style={{ height: '50px', textAlign: 'center', fontFamily: 'var(--font-heading)', fontSize: '24px', fontWeight: 950, border: '2.5px solid var(--blue-600)', background: 'white', boxShadow: '0 8px 18px rgba(2,132,199,.08)', width: '100%', boxSizing: 'border-box', borderRadius: '8px' }}
+                          style={{ height: '50px', textAlign: 'center', fontFamily: 'var(--font-heading)', fontSize: '24px', fontWeight: 950, border: '2.5px solid var(--primary)', background: 'var(--input-bg)', color: 'var(--input-text)', boxShadow: '0 8px 18px rgba(2,132,199,.08)', width: '100%', boxSizing: 'border-box', borderRadius: '8px' }}
                         />
                         <div className="small" style={{ marginTop: '8px', fontWeight: 800 }}>Enter a score from 0.00 to 5.00</div>
                       </div>
@@ -1596,11 +1596,11 @@ export default function AssessmentPage() {
 
             <div className="modal-body" style={{ marginTop: '20px', display: 'grid', gridTemplateColumns: '320px 1fr', gap: '20px', alignItems: 'start' }}>
               {/* Document Checklist Sidebar */}
-              <div style={{ border: '1px solid var(--line)', borderRadius: '12px', overflow: 'hidden', background: '#F8FAFC' }}>
-                <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)', background: 'white' }}>
-                  <h4 style={{ margin: 0, color: 'var(--navy)', fontSize: '14px' }}>Document Checklist</h4>
+              <div style={{ border: '1px solid var(--line)', borderRadius: '12px', overflow: 'hidden', background: 'var(--card-subtle)' }}>
+                <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--line)', background: 'var(--card-subtle)' }}>
+                  <h4 style={{ margin: 0, color: 'var(--text)', fontSize: '14px' }}>Document Checklist</h4>
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', background: 'white' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', background: 'var(--card)' }}>
                   {[
                     { key: 'letter_of_intent', label: 'Letter of Intent', required: true },
                     { key: 'pds', label: 'Personal Data Sheet', required: true },
@@ -1627,19 +1627,19 @@ export default function AssessmentPage() {
                         style={{
                           padding: '12px 16px',
                           cursor: 'pointer',
-                          backgroundColor: isSelected ? 'var(--blue-50)' : 'white',
-                          borderLeft: isSelected ? '4px solid var(--blue-600)' : '4px solid transparent',
-                          borderBottom: '1px solid #F1F5F9',
+                          backgroundColor: isSelected ? 'var(--dropdown-hover)' : 'var(--card)',
+                          borderLeft: isSelected ? '4px solid var(--primary)' : '4px solid transparent',
+                          borderBottom: '1px solid var(--line)',
                           transition: 'all 0.15s ease',
                           display: 'flex',
                           flexDirection: 'column',
                           gap: '2px'
                         }}
                       >
-                        <div style={{ fontWeight: 'bold', fontSize: '13px', color: isSelected ? 'var(--blue-800)' : 'var(--navy)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <div style={{ fontWeight: 'bold', fontSize: '13px', color: isSelected ? 'var(--primary)' : 'var(--text)', display: 'flex', alignItems: 'center', gap: '4px' }}>
                           {doc.label} {doc.required && <span style={{ color: '#EF4444' }}>*</span>} {isUploaded ? '✓' : ''}
                         </div>
-                        <div style={{ fontSize: '11px', color: isSelected ? 'var(--blue-600)' : '#64748B' }}>
+                        <div style={{ fontSize: '11px', color: isSelected ? 'var(--primary)' : 'var(--text-secondary)' }}>
                           {isUploaded ? 'View Uploaded Document' : 'No document uploaded'}
                         </div>
                       </div>

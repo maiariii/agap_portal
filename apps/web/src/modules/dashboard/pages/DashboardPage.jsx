@@ -54,7 +54,7 @@ const CustomSelect = ({ value, onChange, options, label, icon }) => {
         style={{
           display: 'flex',
           alignItems: 'center',
-          background: '#F8FAFC',
+          background: 'var(--input-bg)',
           borderRadius: '8px',
           padding: '6px 12px',
           gap: '10px',
@@ -63,12 +63,12 @@ const CustomSelect = ({ value, onChange, options, label, icon }) => {
         }}
       >
         <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
-          <span style={{ fontSize: '9px', fontWeight: '800', color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '0.05em', lineHeight: '1' }}>{label}</span>
-          <span style={{ fontSize: '13px', fontWeight: '600', color: '#334155', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <span style={{ fontSize: '9px', fontWeight: '800', color: 'var(--text-secondary, #94A3B8)', textTransform: 'uppercase', letterSpacing: '0.05em', lineHeight: '1' }}>{label}</span>
+          <span style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text)', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {selectedOpt ? selectedOpt.label : ''}
           </span>
         </div>
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s ease', flexShrink: 0 }}>
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary, #64748B)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s ease', flexShrink: 0 }}>
           <polyline points="6 9 12 15 18 9" />
         </svg>
       </div>
@@ -80,9 +80,9 @@ const CustomSelect = ({ value, onChange, options, label, icon }) => {
           left: 0,
           right: 0,
           marginTop: '4px',
-          background: '#ffffff',
+          background: 'var(--dropdown-bg, var(--card))',
           borderRadius: '8px',
-          border: '1px solid #E2E8F0',
+          border: '1px solid var(--line)',
           boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
           padding: '6px',
           zIndex: 100,
@@ -103,8 +103,8 @@ const CustomSelect = ({ value, onChange, options, label, icon }) => {
                   borderRadius: '6px',
                   fontSize: '13px',
                   fontWeight: isSelected ? '600' : '500',
-                  color: isSelected ? '#ffffff' : '#334155',
-                  background: isSelected ? '#0B3C5D' : 'transparent',
+                  color: isSelected ? '#ffffff' : 'var(--text)',
+                  background: isSelected ? 'var(--primary, #0B3C5D)' : 'transparent',
                   cursor: 'pointer',
                   transition: 'all 0.15s ease',
                   whiteSpace: 'nowrap',
@@ -113,14 +113,14 @@ const CustomSelect = ({ value, onChange, options, label, icon }) => {
                 }}
                 onMouseEnter={(e) => {
                   if (!isSelected) {
-                    e.target.style.background = '#F1F5F9';
-                    e.target.style.color = '#0F172A';
+                    e.target.style.background = 'var(--dropdown-hover, rgba(0,0,0,0.05))';
+                    e.target.style.color = 'var(--text)';
                   }
                 }}
                 onMouseLeave={(e) => {
                   if (!isSelected) {
                     e.target.style.background = 'transparent';
-                    e.target.style.color = '#334155';
+                    e.target.style.color = 'var(--text)';
                   }
                 }}
               >
@@ -759,22 +759,22 @@ export default function DashboardPage() {
       <style>{`
         .control-select-wrap {
           transition: all 0.2s ease;
-          border: 1.5px solid #E2E8F0 !important;
+          border: 1.5px solid var(--input-border, var(--line)) !important;
         }
         .control-select-wrap:hover {
-          border-color: #94A3B8 !important;
-          background: #ffffff !important;
+          border-color: var(--primary, #0B3C5D) !important;
+          background: var(--card-subtle) !important;
           box-shadow: 0 2px 4px 0 rgba(0, 0, 0, 0.05) !important;
         }
         .control-select-wrap:focus-within {
-          border-color: #0B3C5D !important;
-          background: #ffffff !important;
+          border-color: var(--primary, #0B3C5D) !important;
+          background: var(--input-bg) !important;
           box-shadow: 0 0 0 3px rgba(11, 60, 93, 0.15) !important;
         }
       `}</style>
       <div style={{
-        background: '#ffffff',
-        border: '2.5px solid color-mix(in srgb, var(--blue) 64%, var(--navy) 36%)',
+        background: 'var(--card)',
+        border: '2px solid color-mix(in srgb, var(--blue) 64%, var(--navy) 36%)',
         borderRadius: '20px',
         boxShadow: 'none',
         width: '100%',
@@ -787,17 +787,17 @@ export default function DashboardPage() {
           alignItems: 'center',
           gap: '16px',
           padding: '12px 20px',
-          borderBottom: '1px solid #E2E8F0',
+          borderBottom: '1px solid var(--line)',
           flexWrap: 'wrap'
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0B3C5D" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--primary, #0B3C5D)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
             </svg>
-            <h2 style={{ margin: 0, fontSize: '13px', fontWeight: '700', color: '#0F172A', letterSpacing: '-0.02em', textTransform: 'uppercase' }}>Data Filters</h2>
+            <h2 style={{ margin: 0, fontSize: '13px', fontWeight: '700', color: 'var(--text)', letterSpacing: '-0.02em', textTransform: 'uppercase' }}>Data Filters</h2>
           </div>
           
-          <div style={{ width: '1px', height: '24px', background: '#E2E8F0', flexShrink: 0 }}></div>
+          <div style={{ width: '1px', height: '24px', background: 'var(--line)', flexShrink: 0 }}></div>
           
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
             {/* Position Select */}
@@ -950,37 +950,42 @@ export default function DashboardPage() {
             margin: 0;
             font-size: 16px;
             font-weight: 700;
-            color: #0F172A;
+            color: var(--text);
           }
           .trend-range-selector {
             display: flex;
             gap: 6px;
           }
           .trend-range-btn {
-            background: #ffffff;
-            border: 1px solid #CBD5E1;
+            background: var(--card-subtle, var(--card));
+            border: 1px solid var(--line);
             border-radius: 6px;
             padding: 4px 10px;
             font-size: 12px;
             font-weight: 600;
-            color: #475569;
+            color: var(--text-secondary);
             cursor: pointer;
             transition: all 0.2s ease;
           }
+          .trend-range-btn:hover {
+            border-color: var(--primary);
+            color: var(--text);
+          }
           .trend-range-btn.active {
-            background: #0284C7;
-            border-color: #0284C7;
+            background: var(--primary);
+            border-color: var(--primary);
             color: #ffffff;
           }
           .trend-tooltip {
             position: absolute;
-            background: rgba(15, 23, 42, 0.95);
-            color: #ffffff;
+            background: var(--card-solid, rgba(15, 23, 42, 0.95));
+            color: var(--text);
+            border: 1px solid var(--line);
             padding: 6px 10px;
             border-radius: 6px;
             font-size: 11px;
             pointer-events: none;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            box-shadow: var(--shadow-sm);
             z-index: 10;
             transition: opacity 0.15s ease;
           }
@@ -990,7 +995,7 @@ export default function DashboardPage() {
           }
           .trend-point:hover {
             r: 6;
-            fill: #0284C7;
+            fill: var(--primary);
           }
         `}</style>
         <div className="trend-header">
@@ -1229,9 +1234,10 @@ export default function DashboardPage() {
         >
           <style>{`
             .trend-modal {
-              background: #ffffff;
+              background: var(--modal-bg, var(--card));
+              border: 1px solid var(--line);
               border-radius: 12px;
-              box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+              box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.25), 0 10px 10px -5px rgba(0, 0, 0, 0.1);
               width: 90%;
               max-width: 800px;
               max-height: 80vh;
@@ -1239,6 +1245,7 @@ export default function DashboardPage() {
               flex-direction: column;
               overflow: hidden;
               animation: modalFadeIn 0.2s ease-out;
+              color: var(--text);
             }
             @keyframes modalFadeIn {
               from { opacity: 0; transform: scale(0.95); }
@@ -1246,47 +1253,51 @@ export default function DashboardPage() {
             }
             .trend-modal-head {
               padding: 16px 20px;
-              border-bottom: 1px solid #E2E8F0;
+              border-bottom: 1px solid var(--line);
               display: flex;
               justify-content: space-between;
               align-items: center;
+              background: var(--modal-bg, var(--card));
             }
             .trend-modal-head h3 {
               margin: 0;
               font-size: 16px;
               font-weight: 700;
-              color: #0F172A;
+              color: var(--text);
             }
             .trend-modal-close {
               background: none;
               border: none;
               font-size: 20px;
               cursor: pointer;
-              color: #94A3B8;
+              color: var(--text-secondary);
             }
             .trend-modal-close:hover {
-              color: #475569;
+              color: var(--text);
             }
             .trend-modal-body {
               padding: 16px 20px;
               overflow-y: auto;
               flex: 1;
+              background: var(--modal-bg, var(--card));
             }
             .trend-modal-search {
               width: 100%;
               padding: 8px 12px;
-              border: 1px solid #CBD5E1;
+              border: 1px solid var(--input-border);
               border-radius: 6px;
               font-size: 13px;
               margin-bottom: 14px;
+              background: var(--input-bg);
+              color: var(--input-text);
             }
             .trend-modal-search:focus {
               outline: none;
-              border-color: #0284C7;
-              box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.15);
+              border-color: var(--primary);
+              box-shadow: 0 0 0 2px var(--focus-ring);
             }
             .trend-modal-table-wrap {
-              border: 1px solid #E2E8F0;
+              border: 1px solid var(--table-border);
               border-radius: 8px;
               overflow: hidden;
             }
@@ -1295,41 +1306,48 @@ export default function DashboardPage() {
               border-collapse: collapse;
               font-size: 12px;
               text-align: left;
+              background: var(--table-bg);
             }
             .trend-modal-table th {
-              background: #F8FAFC;
+              background: var(--table-th-bg);
               padding: 10px 12px;
               font-weight: 600;
-              color: #475569;
-              border-bottom: 1px solid #E2E8F0;
+              color: var(--text-secondary);
+              border-bottom: 1px solid var(--table-border);
             }
             .trend-modal-table td {
               padding: 10px 12px;
-              border-bottom: 1px solid #E2E8F0;
-              color: #334155;
+              border-bottom: 1px solid var(--table-border);
+              color: var(--text);
+            }
+            .trend-modal-table tbody tr:hover td {
+              background: var(--table-row-hover);
             }
             .trend-modal-table tbody tr:last-child td {
               border-bottom: none;
             }
             .trend-modal-table tfoot td {
-              background: #F8FAFC;
+              background: var(--table-th-bg);
               font-weight: 700;
-              border-top: 2px solid #E2E8F0;
+              color: var(--text);
+              border-top: 2px solid var(--table-border);
             }
             .th-sortable {
               cursor: pointer;
               user-select: none;
             }
             .th-sortable:hover {
-              background: #F1F5F9;
+              background: var(--dropdown-hover, var(--table-row-hover));
             }
             .col-filter-input {
               width: 100%;
               margin-top: 4px;
               padding: 2px 4px;
               font-size: 10px;
-              border: 1px solid #CBD5E1;
+              border: 1px solid var(--input-border);
               border-radius: 4px;
+              background: var(--input-bg);
+              color: var(--input-text);
             }
           `}</style>
           <div className="trend-modal" onClick={(e) => e.stopPropagation()}>
