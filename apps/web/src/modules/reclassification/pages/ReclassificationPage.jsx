@@ -1275,25 +1275,32 @@ export default function ReclassificationPage({ onBack }) {
           </div>
 
           <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
+            <table style={{
+              width: '100%',
+              minWidth: '1620px',
+              tableLayout: 'auto',
+              borderCollapse: 'collapse',
+              textAlign: 'left',
+              fontSize: '13px'
+            }}>
               <thead>
                 <tr style={{
                   background: isDark ? 'rgba(30, 41, 59, 0.7)' : 'rgba(241, 245, 249, 0.85)',
                   borderBottom: isDark ? '1.5px solid rgba(51, 65, 85, 0.7)' : '1.5px solid var(--line)',
                   color: 'var(--text-secondary, #94a3b8)',
-                  fontSize: '11.5px',
+                  fontSize: '11px',
                   textTransform: 'uppercase',
-                  letterSpacing: '0.04em'
+                  letterSpacing: '0.05em'
                 }}>
-                  <th style={{ padding: '12px 16px', width: '50px', minWidth: '50px', whiteSpace: 'nowrap' }}>No.</th>
-                  <th style={{ padding: '12px 16px', minWidth: '220px', whiteSpace: 'nowrap' }}>Plantilla Item & Incumbent</th>
-                  <th style={{ padding: '12px 16px', minWidth: '160px', whiteSpace: 'nowrap' }}>Current Position & SG</th>
-                  <th style={{ padding: '12px 16px', minWidth: '170px', whiteSpace: 'nowrap' }}>Station & Division</th>
-                  <th style={{ padding: '12px 16px', minWidth: '140px', whiteSpace: 'nowrap' }}>Region</th>
-                  <th style={{ padding: '12px 16px', minWidth: '160px', whiteSpace: 'nowrap' }}>Stage of Reclassification</th>
-                  <th style={{ padding: '12px 16px', minWidth: '170px', whiteSpace: 'nowrap' }}>Target Position & Remarks</th>
-                  <th style={{ padding: '12px 16px', minWidth: '180px', whiteSpace: 'nowrap' }}>Credentials Overview</th>
-                  <th style={{ padding: '12px 16px', textAlign: 'right', minWidth: '110px', whiteSpace: 'nowrap' }}>Actions</th>
+                  <th style={{ padding: '14px 16px', width: '50px', whiteSpace: 'nowrap', textAlign: 'left' }}>No.</th>
+                  <th style={{ padding: '14px 18px', minWidth: '240px', whiteSpace: 'nowrap', textAlign: 'left' }}>Plantilla Item & Incumbent</th>
+                  <th style={{ padding: '14px 18px', minWidth: '170px', whiteSpace: 'nowrap', textAlign: 'left' }}>Current Position & SG</th>
+                  <th style={{ padding: '14px 18px', minWidth: '220px', whiteSpace: 'nowrap', textAlign: 'left' }}>Station / School & Org Code</th>
+                  <th style={{ padding: '14px 18px', minWidth: '180px', whiteSpace: 'nowrap', textAlign: 'left' }}>Division & Region</th>
+                  <th style={{ padding: '14px 18px', minWidth: '170px', whiteSpace: 'nowrap', textAlign: 'left' }}>Stage of Reclassification</th>
+                  <th style={{ padding: '14px 18px', minWidth: '190px', whiteSpace: 'nowrap', textAlign: 'left' }}>Target Position & Remarks</th>
+                  <th style={{ padding: '14px 18px', minWidth: '210px', whiteSpace: 'nowrap', textAlign: 'left' }}>Credentials Overview</th>
+                  <th style={{ padding: '14px 18px', textAlign: 'right', minWidth: '120px', whiteSpace: 'nowrap' }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -1332,43 +1339,94 @@ export default function ReclassificationPage({ onBack }) {
                         <td style={{ padding: '14px 16px', color: 'var(--text-secondary, #94a3b8)', fontWeight: 600 }}>
                           {rowNum}
                         </td>
-                        <td style={{ padding: '14px 16px' }}>
-                          <div style={{ fontWeight: 750, color: inc.full_name === '#N/A' ? 'var(--muted)' : 'var(--text)' }}>
-                            {inc.full_name === '#N/A' ? 'Unfilled / Vacant Item' : inc.full_name}
+                        <td style={{ padding: '14px 18px', verticalAlign: 'middle' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                            {inc.full_name === '#N/A' ? (
+                              <span style={{
+                                fontSize: '10px',
+                                fontWeight: 800,
+                                padding: '2px 7px',
+                                borderRadius: '5px',
+                                background: isDark ? 'rgba(234, 179, 8, 0.2)' : '#fef9c3',
+                                color: isDark ? '#fde047' : '#854d0e',
+                                border: isDark ? '1px solid rgba(234, 179, 8, 0.35)' : '1px solid #fef08a',
+                                letterSpacing: '0.04em',
+                                textTransform: 'uppercase'
+                              }}>
+                                Unfilled / Vacant
+                              </span>
+                            ) : (
+                              <span style={{
+                                fontSize: '10px',
+                                fontWeight: 800,
+                                padding: '2px 7px',
+                                borderRadius: '5px',
+                                background: isDark ? 'rgba(16, 185, 129, 0.2)' : '#dcfce7',
+                                color: isDark ? '#6ee7b7' : '#166534',
+                                border: isDark ? '1px solid rgba(16, 185, 129, 0.35)' : '1px solid #bbf7d0',
+                                letterSpacing: '0.04em',
+                                textTransform: 'uppercase'
+                              }}>
+                                Filled
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ fontWeight: 750, color: inc.full_name === '#N/A' ? 'var(--muted)' : 'var(--text)', fontSize: '13.5px' }}>
+                            {inc.full_name === '#N/A' ? 'Unassigned Plantilla' : inc.full_name}
                           </div>
                           <div style={{ fontSize: '11px', color: 'var(--text-secondary, #94a3b8)', fontFamily: 'monospace', marginTop: '2px' }}>
                             {inc.plantilla_item_number || inc.employee_id}
                           </div>
                         </td>
-                        <td style={{ padding: '14px 16px' }}>
-                          <div style={{ fontWeight: 700, color: 'var(--text)' }}>{inc.current_position}</div>
+                        <td style={{ padding: '14px 18px', verticalAlign: 'middle' }}>
+                          <div style={{ fontWeight: 700, color: 'var(--text)', fontSize: '13px' }}>{inc.current_position}</div>
                           {inc.salary_grade && (
                             <span style={{
                               fontSize: '10.5px',
-                              fontWeight: 700,
+                              fontWeight: 800,
                               color: isDark ? '#93c5fd' : '#1e40af',
                               background: isDark ? 'rgba(30, 58, 138, 0.3)' : '#eff6ff',
-                              padding: '1.5px 6px',
-                              borderRadius: '4px',
+                              border: isDark ? '1px solid rgba(59, 130, 246, 0.35)' : '1px solid #bfdbfe',
+                              padding: '1.5px 7px',
+                              borderRadius: '5px',
                               display: 'inline-block',
-                              marginTop: '3px'
+                              marginTop: '4px'
                             }}>
                               SG {inc.salary_grade}
                             </span>
                           )}
                         </td>
-                        <td style={{ padding: '14px 16px' }}>
-                          <div style={{ fontWeight: 650, color: 'var(--text)' }}>{inc.station_division || inc.division}</div>
-                          {inc.uacs_oper_dsc && inc.uacs_oper_dsc !== inc.division && (
-                            <div style={{ fontSize: '11px', color: 'var(--text-secondary, #94a3b8)', marginTop: '2px' }}>
-                              {inc.uacs_oper_dsc}
+                        <td style={{ padding: '14px 18px', verticalAlign: 'middle' }}>
+                          <div style={{ fontWeight: 700, color: 'var(--text)', fontSize: '13px' }}>
+                            {inc.uacs_oper_dsc || inc.station_division || '—'}
+                          </div>
+                          {inc.org_cd && (
+                            <div style={{ marginTop: '4px' }}>
+                              <span style={{
+                                fontSize: '10.5px',
+                                fontWeight: 750,
+                                fontFamily: 'monospace',
+                                color: 'var(--text-secondary, #94a3b8)',
+                                background: isDark ? 'rgba(51, 65, 85, 0.5)' : '#f1f5f9',
+                                border: '1px solid var(--line)',
+                                padding: '1.5px 6px',
+                                borderRadius: '4px',
+                                display: 'inline-block'
+                              }}>
+                                ORG CD: {inc.org_cd}
+                              </span>
                             </div>
                           )}
                         </td>
-                        <td style={{ padding: '14px 16px', color: 'var(--text-secondary, #94a3b8)', fontSize: '12px', fontWeight: 600 }}>
-                          {inc.region || '—'}
+                        <td style={{ padding: '14px 18px', verticalAlign: 'middle' }}>
+                          <div style={{ fontWeight: 650, color: 'var(--text)', fontSize: '12.5px' }}>
+                            {inc.division || inc.station_division || '—'}
+                          </div>
+                          <div style={{ fontSize: '11.5px', color: 'var(--text-secondary, #94a3b8)', marginTop: '2px' }}>
+                            {inc.region || '—'}
+                          </div>
                         </td>
-                        <td style={{ padding: '14px 16px' }} onClick={e => e.stopPropagation()}>
+                        <td style={{ padding: '14px 18px', verticalAlign: 'middle' }} onClick={e => e.stopPropagation()}>
                           <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
                             <select
                               value={inc.stage_of_reclassification || 'For Review'}
@@ -1397,13 +1455,13 @@ export default function ReclassificationPage({ onBack }) {
                             )}
                           </div>
                         </td>
-                        <td style={{ padding: '14px 16px' }}>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        <td style={{ padding: '14px 18px', verticalAlign: 'middle' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
                             {inc.reclass_position ? (
                               <span style={{
                                 display: 'inline-flex',
                                 alignItems: 'center',
-                                padding: '3px 8px',
+                                padding: '3px 9px',
                                 borderRadius: '6px',
                                 background: isDark ? 'rgba(6, 78, 59, 0.35)' : '#ecfdf5',
                                 color: isDark ? '#6ee7b7' : '#047857',
@@ -1420,108 +1478,89 @@ export default function ReclassificationPage({ onBack }) {
                               </span>
                             )}
                             {inc.remarks && (
-                              <span style={{
-                                fontSize: '10.5px',
-                                fontWeight: 700,
-                                padding: '2px 6px',
-                                borderRadius: '4px',
-                                background: isDark ? 'rgba(51, 65, 85, 0.4)' : '#f1f5f9',
+                              <div style={{
+                                fontSize: '11px',
+                                fontWeight: 650,
+                                padding: '2.5px 7px',
+                                borderRadius: '5px',
+                                background: isDark ? 'rgba(51, 65, 85, 0.4)' : '#f8fafc',
+                                border: '1px solid var(--line)',
                                 color: isDark ? '#cbd5e1' : '#475569',
-                                width: 'fit-content'
-                              }}>
+                                width: 'fit-content',
+                                maxWidth: '220px',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap'
+                              }} title={inc.remarks}>
                                 {inc.remarks}
-                              </span>
+                              </div>
                             )}
                           </div>
                         </td>
-                        <td style={{ padding: '10px 16px', verticalAlign: 'middle' }}>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'nowrap', whiteSpace: 'nowrap' }}>
-                              <span style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                padding: '1.5px 6px',
-                                borderRadius: '5px',
-                                background: isDark ? 'rgba(30, 58, 138, 0.35)' : '#eff6ff',
-                                border: isDark ? '1px solid rgba(59, 130, 246, 0.4)' : '1px solid #bfdbfe',
-                                color: isDark ? '#93c5fd' : '#1e40af',
-                                fontSize: '10px',
-                                fontWeight: 800,
-                                flexShrink: 0
-                              }}>
-                                ED
-                              </span>
-                              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text)' }}>
-                                {inc.assessment?.education || 'Bachelor Degree'}
-                              </span>
-                            </div>
+                        <td style={{ padding: '14px 18px', verticalAlign: 'middle' }}>
+                          {(() => {
+                            const edu = inc.education || inc.assessment?.education;
+                            const exp = inc.years_experience ?? inc.assessment?.years_experience;
+                            const trn = inc.hours_of_training ?? inc.assessment?.hours_of_training;
+                            const elig = inc.eligibility || inc.assessment?.eligibility;
+                            const hasAnyCred = edu || exp !== undefined || trn !== undefined || elig;
 
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'nowrap', whiteSpace: 'nowrap' }}>
-                              <span style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                padding: '1.5px 6px',
-                                borderRadius: '5px',
-                                background: isDark ? 'rgba(120, 53, 15, 0.35)' : '#fffbeb',
-                                border: isDark ? '1px solid rgba(245, 158, 11, 0.4)' : '1px solid #fde68a',
-                                color: isDark ? '#fde68a' : '#92400e',
-                                fontSize: '10px',
-                                fontWeight: 800,
-                                flexShrink: 0
-                              }}>
-                                EXP
-                              </span>
-                              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text)' }}>
-                                {inc.assessment?.years_experience !== null && inc.assessment?.years_experience !== undefined
-                                  ? `${inc.assessment.years_experience} Years`
-                                  : 'Experience on file'}
-                              </span>
-                            </div>
+                            if (!hasAnyCred) {
+                              return (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                                  <span style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                    fontSize: '11px',
+                                    fontWeight: 700,
+                                    color: 'var(--text-secondary, #94a3b8)',
+                                    background: isDark ? 'rgba(30, 41, 59, 0.5)' : '#f1f5f9',
+                                    border: '1px solid var(--line)',
+                                    padding: '3px 8px',
+                                    borderRadius: '6px',
+                                    width: 'fit-content'
+                                  }}>
+                                    Pending Assessment
+                                  </span>
+                                  <span style={{ fontSize: '10.5px', color: 'var(--muted)' }}>
+                                    Click to evaluate credentials
+                                  </span>
+                                </div>
+                              );
+                            }
 
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'nowrap', whiteSpace: 'nowrap' }}>
-                              <span style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                padding: '1.5px 6px',
-                                borderRadius: '5px',
-                                background: isDark ? 'rgba(6, 78, 59, 0.35)' : '#ecfdf5',
-                                border: isDark ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #a7f3d0',
-                                color: isDark ? '#6ee7b7' : '#047857',
-                                fontSize: '10px',
-                                fontWeight: 800,
-                                flexShrink: 0
-                              }}>
-                                TRN
-                              </span>
-                              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text)' }}>
-                                {inc.assessment?.hours_of_training !== null && inc.assessment?.hours_of_training !== undefined
-                                  ? `${inc.assessment.hours_of_training} Hours`
-                                  : 'Training recorded'}
-                              </span>
-                            </div>
-
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'nowrap', whiteSpace: 'nowrap' }}>
-                              <span style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                padding: '1.5px 6px',
-                                borderRadius: '5px',
-                                background: isDark ? 'rgba(88, 28, 135, 0.35)' : '#faf5ff',
-                                border: isDark ? '1px solid rgba(168, 85, 247, 0.4)' : '1px solid #e9d5ff',
-                                color: isDark ? '#d8b4fe' : '#6b21a8',
-                                fontSize: '10px',
-                                fontWeight: 800,
-                                flexShrink: 0
-                              }}>
-                                ELIG
-                              </span>
-                              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text)' }}>
-                                {inc.assessment?.eligibility || 'Civil Service / Board'}
-                              </span>
-                            </div>
-                          </div>
+                            return (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxWidth: '220px' }}>
+                                {edu && (
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '5px', overflow: 'hidden' }}>
+                                    <span style={{ fontSize: '9.5px', fontWeight: 800, padding: '1.5px 5px', borderRadius: '4px', background: '#eff6ff', color: '#1e40af', flexShrink: 0 }}>ED</span>
+                                    <span style={{ fontSize: '11px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text)' }} title={edu}>{edu}</span>
+                                  </div>
+                                )}
+                                {exp !== undefined && exp !== null && (
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                    <span style={{ fontSize: '9.5px', fontWeight: 800, padding: '1.5px 5px', borderRadius: '4px', background: '#fffbeb', color: '#92400e', flexShrink: 0 }}>EXP</span>
+                                    <span style={{ fontSize: '11px', color: 'var(--text)' }}>{exp} Years</span>
+                                  </div>
+                                )}
+                                {trn !== undefined && trn !== null && (
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                    <span style={{ fontSize: '9.5px', fontWeight: 800, padding: '1.5px 5px', borderRadius: '4px', background: '#ecfdf5', color: '#065f46', flexShrink: 0 }}>TRN</span>
+                                    <span style={{ fontSize: '11px', color: 'var(--text)' }}>{trn} Hours</span>
+                                  </div>
+                                )}
+                                {elig && (
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '5px', overflow: 'hidden' }}>
+                                    <span style={{ fontSize: '9.5px', fontWeight: 800, padding: '1.5px 5px', borderRadius: '4px', background: '#faf5ff', color: '#6b21a8', flexShrink: 0 }}>ELIG</span>
+                                    <span style={{ fontSize: '11px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text)' }} title={elig}>{elig}</span>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </td>
-                        <td style={{ padding: '14px 16px', textAlign: 'right', whiteSpace: 'nowrap' }} onClick={e => e.stopPropagation()}>
+                        <td style={{ padding: '14px 18px', textAlign: 'right', whiteSpace: 'nowrap' }} onClick={e => e.stopPropagation()}>
                           <button
                             onClick={() => {
                               setSelectedIncumbent(inc);
@@ -2319,6 +2358,70 @@ export default function ReclassificationPage({ onBack }) {
               flexDirection: 'column',
               gap: '20px'
             }}>
+              {/* Card 0: Official Plantilla & Station Profile */}
+              <div style={{
+                background: isDark ? 'rgba(2, 6, 23, 0.6)' : 'var(--card-subtle)',
+                borderRadius: '16px',
+                border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid var(--line)',
+                padding: '18px 20px'
+              }}>
+                <div style={{
+                  fontSize: '11px',
+                  fontWeight: 800,
+                  color: isDark ? '#38bdf8' : '#0284c7',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.06em',
+                  marginBottom: '12px'
+                }}>
+                  Official Plantilla & Station Assignment
+                </div>
+
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                  gap: '12px',
+                  fontSize: '12.5px'
+                }}>
+                  <div style={{ background: isDark ? 'rgba(15, 23, 42, 0.6)' : 'var(--card-solid, #ffffff)', padding: '10px 14px', borderRadius: '10px', border: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid var(--line)' }}>
+                    <div style={{ fontSize: '10.5px', fontWeight: 700, color: 'var(--text-secondary, #94a3b8)', textTransform: 'uppercase' }}>Plantilla Item No.</div>
+                    <div style={{ fontWeight: 800, color: 'var(--text)', marginTop: '2px', fontFamily: 'monospace' }}>
+                      {selectedIncumbent.plantilla_item_number || selectedIncumbent.employee_id}
+                    </div>
+                  </div>
+
+                  <div style={{ background: isDark ? 'rgba(15, 23, 42, 0.6)' : 'var(--card-solid, #ffffff)', padding: '10px 14px', borderRadius: '10px', border: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid var(--line)' }}>
+                    <div style={{ fontSize: '10.5px', fontWeight: 700, color: 'var(--text-secondary, #94a3b8)', textTransform: 'uppercase' }}>Station / School</div>
+                    <div style={{ fontWeight: 750, color: 'var(--text)', marginTop: '2px' }}>
+                      {selectedIncumbent.uacs_oper_dsc || selectedIncumbent.station_division || '—'}
+                    </div>
+                  </div>
+
+                  <div style={{ background: isDark ? 'rgba(15, 23, 42, 0.6)' : 'var(--card-solid, #ffffff)', padding: '10px 14px', borderRadius: '10px', border: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid var(--line)' }}>
+                    <div style={{ fontSize: '10.5px', fontWeight: 700, color: 'var(--text-secondary, #94a3b8)', textTransform: 'uppercase' }}>Division & Region</div>
+                    <div style={{ fontWeight: 700, color: 'var(--text)', marginTop: '2px' }}>
+                      {selectedIncumbent.division || selectedIncumbent.station_division || '—'}
+                      <span style={{ fontSize: '11px', color: 'var(--text-secondary, #94a3b8)', display: 'block' }}>{selectedIncumbent.region}</span>
+                    </div>
+                  </div>
+
+                  <div style={{ background: isDark ? 'rgba(15, 23, 42, 0.6)' : 'var(--card-solid, #ffffff)', padding: '10px 14px', borderRadius: '10px', border: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid var(--line)' }}>
+                    <div style={{ fontSize: '10.5px', fontWeight: 700, color: 'var(--text-secondary, #94a3b8)', textTransform: 'uppercase' }}>Org Code & Salary Grade</div>
+                    <div style={{ fontWeight: 750, color: 'var(--text)', marginTop: '2px' }}>
+                      {selectedIncumbent.org_cd ? `ORG ${selectedIncumbent.org_cd}` : '—'} • <span style={{ color: '#2563eb' }}>SG {selectedIncumbent.salary_grade || '—'}</span>
+                    </div>
+                  </div>
+
+                  {selectedIncumbent.remarks && (
+                    <div style={{ gridColumn: '1 / -1', background: isDark ? 'rgba(15, 23, 42, 0.6)' : 'var(--card-solid, #ffffff)', padding: '10px 14px', borderRadius: '10px', border: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid var(--line)' }}>
+                      <div style={{ fontSize: '10.5px', fontWeight: 700, color: 'var(--text-secondary, #94a3b8)', textTransform: 'uppercase' }}>Inventory Remarks</div>
+                      <div style={{ fontWeight: 700, color: isDark ? '#cbd5e1' : '#334155', marginTop: '2px' }}>
+                        {selectedIncumbent.remarks}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
               {/* Card 1: Read-Only Evaluation Credentials */}
               <div style={{
                 background: isDark ? 'rgba(2, 6, 23, 0.6)' : 'var(--card-subtle)',
@@ -2334,7 +2437,7 @@ export default function ReclassificationPage({ onBack }) {
                   letterSpacing: '0.05em',
                   marginBottom: '14px'
                 }}>
-                  Read-Only Evaluation Credentials
+                  Evaluation Credentials (QS Compliance)
                 </div>
 
                 <div style={{
@@ -2347,7 +2450,7 @@ export default function ReclassificationPage({ onBack }) {
                       Highest Educational Attainment
                     </div>
                     <div style={{ fontSize: '13.5px', fontWeight: 700, color: 'var(--text)', marginTop: '4px', lineHeight: 1.4 }}>
-                      {selectedIncumbent.assessment?.education || '— No educational credential recorded'}
+                      {selectedIncumbent.education || selectedIncumbent.assessment?.education || '— No educational credential recorded yet'}
                     </div>
                   </div>
 
@@ -2356,9 +2459,11 @@ export default function ReclassificationPage({ onBack }) {
                       Years of Relevant Experience
                     </div>
                     <div style={{ fontSize: '18px', fontWeight: 850, color: isDark ? '#60a5fa' : '#2563eb', marginTop: '4px' }}>
-                      {selectedIncumbent.assessment?.years_experience !== null && selectedIncumbent.assessment?.years_experience !== undefined
-                        ? `${selectedIncumbent.assessment.years_experience} Years`
-                        : '—'}
+                      {(selectedIncumbent.years_experience !== null && selectedIncumbent.years_experience !== undefined)
+                        ? `${selectedIncumbent.years_experience} Years`
+                        : (selectedIncumbent.assessment?.years_experience !== null && selectedIncumbent.assessment?.years_experience !== undefined)
+                          ? `${selectedIncumbent.assessment.years_experience} Years`
+                          : '—'}
                     </div>
                   </div>
 
@@ -2367,9 +2472,11 @@ export default function ReclassificationPage({ onBack }) {
                       Hours of Relevant Training
                     </div>
                     <div style={{ fontSize: '18px', fontWeight: 850, color: isDark ? '#34d399' : '#059669', marginTop: '4px' }}>
-                      {selectedIncumbent.assessment?.hours_of_training !== null && selectedIncumbent.assessment?.hours_of_training !== undefined
-                        ? `${selectedIncumbent.assessment.hours_of_training} Hours`
-                        : '—'}
+                      {(selectedIncumbent.hours_of_training !== null && selectedIncumbent.hours_of_training !== undefined)
+                        ? `${selectedIncumbent.hours_of_training} Hours`
+                        : (selectedIncumbent.assessment?.hours_of_training !== null && selectedIncumbent.assessment?.hours_of_training !== undefined)
+                          ? `${selectedIncumbent.assessment.hours_of_training} Hours`
+                          : '—'}
                     </div>
                   </div>
 
@@ -2378,7 +2485,7 @@ export default function ReclassificationPage({ onBack }) {
                       Civil Service / Professional Board Eligibility
                     </div>
                     <div style={{ fontSize: '13.5px', fontWeight: 700, color: 'var(--text)', marginTop: '4px', lineHeight: 1.4 }}>
-                      {selectedIncumbent.assessment?.eligibility || '— No eligibility recorded'}
+                      {selectedIncumbent.eligibility || selectedIncumbent.assessment?.eligibility || '— No eligibility recorded yet'}
                     </div>
                   </div>
                 </div>
