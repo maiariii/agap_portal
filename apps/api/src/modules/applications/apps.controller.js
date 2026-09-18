@@ -701,6 +701,74 @@ async function getBlobsForApplicant(containerClient, appRow) {
   return Array.from(blobMap.values()).sort((a, b) => (b.lastModified || 0) - (a.lastModified || 0));
 }
 
+/**
+ * Scoped fallback helper to locate the latest blob when an exact blob path does not exist.
+ * Strictly scoped to the specified applicant and document type/folder.
+ * Never searches globally and never matches across different applicants.
+ */
+async function findLatestBlobInScope(containerClient, candidatePath, appRow, docKey) {
+  if (!containerClient || !appRow) return null;
+
+  try {
+    const applicantPrefixes = getApplicantFolderPrefixes(appRow);
+    const folderAliases = docKey ? getFolderAliasesFromKey(docKey) : [];
+
+    const prefixesToScan = new Set();
+
+    // If a candidate path was provided (e.g. applicant-18020/performance-rating/herrera_performance-rating_1787476938638_AGAP-17077.pdf)
+    if (candidatePath && typeof candidatePath === 'string') {
+      const lastSlash = candidatePath.lastIndexOf('/');
+      if (lastSlash !== -1) {
+        const candidateDir = candidatePath.substring(0, lastSlash + 1);
+        // Requirement 6 & 7: Verify candidateDir strictly belongs to this applicant
+        const belongsToApp = applicantPrefixes.some(p => candidateDir.toLowerCase().startsWith(p.toLowerCase()));
+        if (belongsToApp) {
+          prefixesToScan.add(candidateDir);
+        }
+      }
+    }
+
+    // Also add strictly scoped prefixes: applicant-{applicantId}/{folderAlias}/
+    for (const appPrefix of applicantPrefixes) {
+      for (const alias of folderAliases) {
+        prefixesToScan.add(`${appPrefix}${alias}/`.toLowerCase());
+      }
+    }
+
+    let latestBlob = null;
+    let latestModTime = -1;
+
+    for (const prefix of prefixesToScan) {
+      for await (const blob of containerClient.listBlobsFlat({ prefix })) {
+        const nameLower = blob.name.toLowerCase();
+
+        // Requirement 6 & 7: Verify applicant scoping strictly
+        const isApplicantScope = applicantPrefixes.some(p => nameLower.startsWith(p.toLowerCase()));
+        if (!isApplicantScope) continue;
+
+        // Verify folder alias matching
+        if (folderAliases.length > 0) {
+          const matchesFolder = folderAliases.some(alias => 
+            nameLower.includes(`/${alias}/`) || nameLower.includes(`/${alias}-`) || nameLower.includes(`/${alias}_`)
+          );
+          if (!matchesFolder) continue;
+        }
+
+        const lastMod = blob.properties?.lastModified ? new Date(blob.properties.lastModified).getTime() : 0;
+        if (lastMod > latestModTime) {
+          latestModTime = lastMod;
+          latestBlob = blob.name;
+        }
+      }
+    }
+
+    return latestBlob;
+  } catch (err) {
+    console.error(`[findLatestBlobInScope Error]`, err.message);
+    return null;
+  }
+}
+
 export function clearDocListCache() {
   docListCache.clear();
 }
@@ -1180,9 +1248,29 @@ export async function downloadApplicationDocument(req, res) {
       return '';
     };
 
-    const matchedBlobName = findBlob(app);
+    let matchedBlobName = findBlob(app);
 
-    if (!matchedBlobName) {
+    // Requirement 4: Exact blob referenced by database must always be preferred when it exists.
+    let blobExists = false;
+    if (matchedBlobName) {
+      try {
+        blobExists = await containerClient.getBlobClient(matchedBlobName).exists();
+      } catch (e) {
+        blobExists = false;
+      }
+    }
+
+    // Requirement 5 & 6: Only when exact blob does NOT exist, search for latest valid replacement strictly in applicant scope
+    if (!blobExists) {
+      const fallbackBlob = await findLatestBlobInScope(containerClient, matchedBlobName, app, key);
+      if (fallbackBlob) {
+        console.log(`[Azure Storage] 🟢 Resolved fallback blob for "${key}": "${fallbackBlob}" (supersedes missing "${matchedBlobName}")`);
+        matchedBlobName = fallbackBlob;
+        blobExists = true;
+      }
+    }
+
+    if (!matchedBlobName || !blobExists) {
       const availableBlobs = allBlobs.map(b => b.name);
       console.log(`[Azure Storage] Strict match failed for applicant "${applicantCode}". Serving fallback PDF. Scoped blobs:`, availableBlobs);
       res.setHeader('Content-Type', 'application/pdf');
@@ -1198,7 +1286,7 @@ export async function downloadApplicationDocument(req, res) {
     const downloadBlockBlobResponse = await blobClient.download(0);
     
     res.setHeader('Content-Type', downloadBlockBlobResponse.contentType || 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="${matchedBlobName}"`);
+    res.setHeader('Content-Disposition', `inline; filename="${matchedBlobName.split('/').pop()}"`);
     
     downloadBlockBlobResponse.readableStreamBody.pipe(res);
   } catch (err) {
