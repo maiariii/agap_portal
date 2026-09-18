@@ -706,7 +706,7 @@ async function getBlobsForApplicant(containerClient, appRow) {
  * Strictly scoped to the specified applicant and document type/folder.
  * Never searches globally and never matches across different applicants.
  */
-async function findLatestBlobInScope(containerClient, candidatePath, appRow, docKey) {
+async function findLatestBlobInScope(containerClient, candidatePath, appRow, docKey, openIntervals = null, isClosed = false) {
   if (!containerClient || !appRow) return null;
 
   try {
@@ -754,9 +754,21 @@ async function findLatestBlobInScope(containerClient, candidatePath, appRow, doc
           if (!matchesFolder) continue;
         }
 
-        const lastMod = blob.properties?.lastModified ? new Date(blob.properties.lastModified).getTime() : 0;
-        if (lastMod > latestModTime) {
-          latestModTime = lastMod;
+        const lastMod = blob.properties?.lastModified ? new Date(blob.properties.lastModified) : null;
+
+        // Existing Closed Vacancy Rule:
+        // Under no circumstances does a Closed division/vacancy fetch uploads made outside open posting intervals.
+        if (isClosed && openIntervals && openIntervals.length > 0 && lastMod) {
+          const inPeriod = isUploadedInOpenPeriod(lastMod, openIntervals);
+          if (!inPeriod) {
+            console.log(`[findLatestBlobInScope] ⛔ Exclude blob "${blob.name}": Vacancy is CLOSED and document was NOT uploaded in an open posting period.`);
+            continue;
+          }
+        }
+
+        const modTime = lastMod ? lastMod.getTime() : 0;
+        if (modTime > latestModTime) {
+          latestModTime = modTime;
           latestBlob = blob.name;
         }
       }
@@ -1262,7 +1274,14 @@ export async function downloadApplicationDocument(req, res) {
 
     // Requirement 5 & 6: Only when exact blob does NOT exist, search for latest valid replacement strictly in applicant scope
     if (!blobExists) {
-      const fallbackBlob = await findLatestBlobInScope(containerClient, matchedBlobName, app, key);
+      const fallbackBlob = await findLatestBlobInScope(
+        containerClient, 
+        matchedBlobName, 
+        app, 
+        key, 
+        auditLogResult?.openIntervals, 
+        auditLogResult?.isClosed
+      );
       if (fallbackBlob) {
         console.log(`[Azure Storage] 🟢 Resolved fallback blob for "${key}": "${fallbackBlob}" (supersedes missing "${matchedBlobName}")`);
         matchedBlobName = fallbackBlob;
