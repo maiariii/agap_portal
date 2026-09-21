@@ -78,8 +78,11 @@ export async function login(req, res) {
       console.warn('Note: Could not update last_login_at:', e.message);
     }
 
+    const resolvedRole = user.role === 'regional_office' ? 'regional_office' : (user.role || 'hr_officer');
+    const resolvedPosition = resolvedRole === 'regional_office' ? 'Regional Office' : 'HRMO';
+
     const token = jwt.sign(
-      { id: user.id, username: user.username, role: user.role, fullName: user.full_name, firstName: user.first_name, lastName: user.last_name, region: user.region, division: user.division },
+      { id: user.id, username: user.username, role: resolvedRole, fullName: user.full_name, firstName: user.first_name, lastName: user.last_name, region: user.region, division: user.division, position: resolvedPosition },
       JWT_SECRET,
       { expiresIn: '30d' }
     );
@@ -89,12 +92,13 @@ export async function login(req, res) {
       user: {
         id: user.id,
         username: user.username,
-        role: user.role,
+        role: resolvedRole,
         fullName: user.full_name,
         firstName: user.first_name,
         lastName: user.last_name,
         region: user.region,
-        division: user.division
+        division: user.division,
+        position: resolvedPosition
       }
     });
   } catch (error) {
@@ -104,7 +108,7 @@ export async function login(req, res) {
 }
 
 export async function register(req, res) {
-  const { firstName, lastName, region, division, email, password, passcode } = req.body;
+  const { firstName, lastName, region, division, role, position, email, password, passcode } = req.body;
   if (!firstName || !lastName || !region || !division || !email || !password || !passcode) {
     return res.status(400).json({ error: 'All fields are required (First Name, Last Name, Region, Division, DepEd Email, Password, and Passcode).' });
   }
@@ -130,8 +134,9 @@ export async function register(req, res) {
     const password_hash = await bcrypt.hash(password, 10);
     const passcode_hash = passcode; // Must not be hashed when stored in the database
     const fullName = `${firstName} ${lastName}`;
-    const officeStr = `Region: ${region}, Division: ${division}`;
-    const userRole = 'hr_officer'; // Hardcoded position
+    const userRole = role === 'regional_office' || String(position || '').toLowerCase().includes('regional') ? 'regional_office' : 'hr_officer';
+    const roleTitle = userRole === 'regional_office' ? 'Regional Office' : 'HRMO';
+    const officeStr = `Role: ${roleTitle}, Region: ${region}, Division: ${division}`;
 
     await pool.query(
       `INSERT INTO users (id, username, email, full_name, first_name, last_name, region, division, office, password_hash, passcode_hash, role, status)

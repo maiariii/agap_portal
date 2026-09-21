@@ -8,11 +8,23 @@ import {
   getIncumbents,
   updateIncumbentStage,
   updateIncumbentPosition,
-  getIncumbentDocuments
+  getIncumbentDocuments,
+  uploadReclassCsv,
+  downloadReclassTemplate,
+  scanReclassNosca,
+  importNoscaItems
 } from './reclass.controller.js';
 import { authenticateToken } from '../../middleware/auth.middleware.js';
 
 const router = Router();
+
+// Regional Office NOSCA Scanner & Import Endpoints
+router.post('/scan-nosca', authenticateToken, scanReclassNosca);
+router.post('/import-nosca-items', authenticateToken, importNoscaItems);
+
+// CSV Ingestion & Template Endpoints
+router.post('/upload-csv', authenticateToken, uploadReclassCsv);
+router.get('/template-csv', downloadReclassTemplate);
 
 // Incumbent Guidance Counselors Endpoints
 router.get('/incumbents', authenticateToken, getIncumbents);

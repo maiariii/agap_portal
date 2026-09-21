@@ -15,7 +15,7 @@ export const apiFetch = async (path, options = {}) => {
       } catch(e) {}
 
       if (
-        (res.status === 401 || res.status === 403 || (typeof errMsg === 'string' && errMsg.includes('User not found'))) &&
+        (res.status === 401 || (typeof errMsg === 'string' && (errMsg.includes('User not found') || errMsg.includes('Invalid token') || errMsg.includes('Access token missing')))) &&
         path !== '/api/auth/login' &&
         path !== '/api/auth/hq-sso'
       ) {

@@ -453,6 +453,37 @@ export default function TeacherHiringModule({ onBack }) {
 
           return (
             <>
+              {/* Style for Stepper Transitions & Smooth Animations */}
+              <style>{`
+                .th-stepper-btn {
+                  transition: background-color 0.38s cubic-bezier(0.16, 1, 0.3, 1),
+                              border-color 0.38s cubic-bezier(0.16, 1, 0.3, 1),
+                              box-shadow 0.38s cubic-bezier(0.16, 1, 0.3, 1),
+                              opacity 0.38s cubic-bezier(0.16, 1, 0.3, 1),
+                              transform 0.38s cubic-bezier(0.16, 1, 0.3, 1) !important;
+                }
+                .th-stepper-btn:hover {
+                  opacity: 1 !important;
+                }
+                .th-stepper-btn:active {
+                  transform: scale(0.985) !important;
+                }
+                .th-stepper-badge {
+                  transition: background-color 0.38s cubic-bezier(0.16, 1, 0.3, 1),
+                              box-shadow 0.38s cubic-bezier(0.16, 1, 0.3, 1),
+                              color 0.38s cubic-bezier(0.16, 1, 0.3, 1),
+                              transform 0.38s cubic-bezier(0.16, 1, 0.3, 1) !important;
+                }
+                .th-stepper-text {
+                  transition: color 0.38s cubic-bezier(0.16, 1, 0.3, 1) !important;
+                }
+                .th-stepper-line {
+                  transition: width 0.45s cubic-bezier(0.16, 1, 0.3, 1),
+                              box-shadow 0.45s cubic-bezier(0.16, 1, 0.3, 1) !important;
+                  will-change: width;
+                }
+              `}</style>
+
               {/* Modern Connected Step Stepper */}
               <div style={{
                 background: 'var(--card)',
@@ -465,10 +496,12 @@ export default function TeacherHiringModule({ onBack }) {
                 gap: '12px',
                 boxShadow: isDark ? '0 8px 28px rgba(0, 0, 0, 0.35)' : '0 2px 12px rgba(0, 0, 0, 0.03)',
                 backdropFilter: 'blur(16px)',
-                WebkitBackdropFilter: 'blur(16px)'
+                WebkitBackdropFilter: 'blur(16px)',
+                transition: 'all 0.35s cubic-bezier(0.16, 1, 0.3, 1)'
               }}>
                 {/* Step 1: CAR CSV Ingestion */}
                 <div
+                  className="th-stepper-btn"
                   onClick={() => setCurrentStep(1)}
                   style={{
                     display: 'flex',
@@ -477,7 +510,7 @@ export default function TeacherHiringModule({ onBack }) {
                     cursor: 'pointer',
                     padding: '8px 16px',
                     borderRadius: '12px',
-                    background: currentStep === 1
+                    backgroundColor: currentStep === 1
                       ? (isDark ? 'rgba(5, 150, 105, 0.16)' : '#ecfdf5')
                       : (isStep1Done ? (isDark ? 'rgba(15, 23, 42, 0.6)' : 'var(--card-subtle)') : 'transparent'),
                     border: currentStep === 1
@@ -486,48 +519,56 @@ export default function TeacherHiringModule({ onBack }) {
                     boxShadow: currentStep === 1
                       ? (isDark ? '0 0 16px rgba(16, 185, 129, 0.25)' : '0 2px 10px rgba(5, 150, 105, 0.15)')
                       : 'none',
-                    transition: 'all 0.25s ease',
-                    flexShrink: 0
+                    transform: currentStep === 1 ? 'translateY(-1px)' : 'translateY(0)',
+                    opacity: 1,
+                    flexShrink: 0,
+                    userSelect: 'none'
                   }}
                 >
-                  <div style={{
-                    width: '34px',
-                    height: '34px',
-                    borderRadius: '10px',
-                    background: isStep1Done
-                      ? (currentStep === 1 ? 'linear-gradient(135deg, #059669 0%, #10b981 100%)' : '#059669')
-                      : (currentStep === 1 ? 'linear-gradient(135deg, #059669 0%, #10b981 100%)' : (isDark ? 'rgba(51, 65, 85, 0.8)' : '#e2e8f0')),
-                    color: '#ffffff',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontWeight: 800,
-                    fontSize: '13.5px',
-                    boxShadow: currentStep === 1 ? '0 0 0 3.5px rgba(16, 185, 129, 0.25)' : 'none',
-                    transition: 'all 0.2s ease',
-                    flexShrink: 0
-                  }}>
-                    {isStep1Done ? (
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="20 6 9 17 4 12" />
-                      </svg>
-                    ) : '1'}
+                  <div
+                    className="th-stepper-badge"
+                    style={{
+                      width: '34px',
+                      height: '34px',
+                      borderRadius: '10px',
+                      backgroundColor: isStep1Done
+                        ? '#059669'
+                        : (currentStep === 1 ? '#059669' : (isDark ? 'rgba(51, 65, 85, 0.8)' : '#e2e8f0')),
+                      backgroundImage: 'linear-gradient(135deg, rgba(255, 255, 255, 0.18) 0%, rgba(0, 0, 0, 0.08) 100%)',
+                      color: '#ffffff',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontWeight: 800,
+                      fontSize: '13.5px',
+                      boxShadow: currentStep === 1 ? (isDark ? '0 0 16px rgba(16, 185, 129, 0.5), 0 0 0 3.5px rgba(16, 185, 129, 0.25)' : '0 4px 12px rgba(5, 150, 105, 0.35), 0 0 0 3.5px rgba(16, 185, 129, 0.25)') : 'none',
+                      transform: currentStep === 1 ? 'scale(1.06)' : 'scale(1)',
+                      flexShrink: 0
+                    }}
+                  >
+                    1
                   </div>
                   <div>
-                    <div style={{
-                      fontSize: '13px',
-                      fontWeight: 800,
-                      color: currentStep === 1 ? (isDark ? '#34d399' : '#047857') : 'var(--text)',
-                      lineHeight: 1.2
-                    }}>
+                    <div
+                      className="th-stepper-text"
+                      style={{
+                        fontSize: '13px',
+                        fontWeight: 800,
+                        color: currentStep === 1 ? (isDark ? '#34d399' : '#047857') : 'var(--text)',
+                        lineHeight: 1.2
+                      }}
+                    >
                       CAR CSV Ingestion
                     </div>
-                    <div style={{
-                      fontSize: '11px',
-                      color: currentStep === 1 ? (isDark ? '#a7f3d0' : '#059669') : 'var(--muted)',
-                      fontWeight: 500,
-                      marginTop: '1px'
-                    }}>
+                    <div
+                      className="th-stepper-text"
+                      style={{
+                        fontSize: '11px',
+                        color: currentStep === 1 ? (isDark ? '#a7f3d0' : '#059669') : 'var(--muted)',
+                        fontWeight: 500,
+                        marginTop: '1px'
+                      }}
+                    >
                       {isStep1Done ? 'Batch Ingested' : 'Template & Parser'}
                     </div>
                   </div>
@@ -539,20 +580,26 @@ export default function TeacherHiringModule({ onBack }) {
                   minWidth: '36px',
                   height: '4px',
                   borderRadius: '999px',
-                  background: isDark ? 'rgba(51, 65, 85, 0.5)' : '#e2e8f0',
+                  backgroundColor: isDark ? 'rgba(51, 65, 85, 0.5)' : '#e2e8f0',
                   position: 'relative',
-                  overflow: 'hidden'
+                  overflow: 'hidden',
+                  transition: 'background-color 0.38s cubic-bezier(0.16, 1, 0.3, 1)'
                 }}>
-                  <div style={{
-                    height: '100%',
-                    width: (currentStep >= 2 || isStep1Done) ? '100%' : '0%',
-                    background: 'linear-gradient(90deg, #059669, #10b981)',
-                    transition: 'width 0.4s cubic-bezier(0.16, 1, 0.3, 1)'
-                  }} />
+                  <div
+                    className="th-stepper-line"
+                    style={{
+                      height: '100%',
+                      width: currentStep >= 2 ? '100%' : '0%',
+                      background: 'linear-gradient(90deg, #059669, #10b981)',
+                      boxShadow: currentStep >= 2 ? '0 0 8px rgba(16, 185, 129, 0.45)' : 'none',
+                      borderRadius: '999px'
+                    }}
+                  />
                 </div>
 
                 {/* Step 2: Pre-Commit Audit */}
                 <div
+                  className="th-stepper-btn"
                   onClick={() => batchId && setCurrentStep(2)}
                   style={{
                     display: 'flex',
@@ -561,58 +608,65 @@ export default function TeacherHiringModule({ onBack }) {
                     cursor: batchId ? 'pointer' : 'not-allowed',
                     padding: '8px 16px',
                     borderRadius: '12px',
-                    background: currentStep === 2
+                    backgroundColor: currentStep === 2
                       ? (isDark ? 'rgba(5, 150, 105, 0.16)' : '#ecfdf5')
-                      : (isStep2Done ? (isDark ? 'rgba(15, 23, 42, 0.6)' : 'var(--card-subtle)') : 'transparent'),
+                      : 'transparent',
                     border: currentStep === 2
                       ? (isDark ? '1.5px solid rgba(16, 185, 129, 0.5)' : '1.5px solid #a7f3d0')
-                      : (isStep2Done ? (isDark ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid #bbf7d0') : '1px solid var(--line)'),
+                      : (isDark ? '1px solid rgba(51, 65, 85, 0.5)' : '1px solid var(--line)'),
                     boxShadow: currentStep === 2
                       ? (isDark ? '0 0 16px rgba(16, 185, 129, 0.25)' : '0 2px 10px rgba(5, 150, 105, 0.15)')
                       : 'none',
-                    opacity: batchId ? 1 : 0.6,
-                    transition: 'all 0.25s ease',
-                    flexShrink: 0
+                    transform: currentStep === 2 ? 'translateY(-1px)' : 'translateY(0)',
+                    opacity: currentStep === 2 ? 1 : 0.65,
+                    flexShrink: 0,
+                    userSelect: 'none'
                   }}
                 >
-                  <div style={{
-                    width: '34px',
-                    height: '34px',
-                    borderRadius: '10px',
-                    background: isStep2Done
-                      ? (currentStep === 2 ? 'linear-gradient(135deg, #059669 0%, #10b981 100%)' : '#059669')
-                      : (currentStep === 2 ? 'linear-gradient(135deg, #059669 0%, #10b981 100%)' : (isDark ? 'rgba(51, 65, 85, 0.8)' : '#e2e8f0')),
-                    color: (currentStep === 2 || isStep2Done) ? '#ffffff' : (isDark ? '#94a3b8' : '#64748b'),
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontWeight: 800,
-                    fontSize: '13.5px',
-                    boxShadow: currentStep === 2 ? '0 0 0 3.5px rgba(16, 185, 129, 0.25)' : 'none',
-                    transition: 'all 0.2s ease',
-                    flexShrink: 0
-                  }}>
-                    {isStep2Done ? (
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="20 6 9 17 4 12" />
-                      </svg>
-                    ) : '2'}
+                  <div
+                    className="th-stepper-badge"
+                    style={{
+                      width: '34px',
+                      height: '34px',
+                      borderRadius: '10px',
+                      backgroundColor: currentStep === 2
+                        ? '#059669'
+                        : (isDark ? 'rgba(51, 65, 85, 0.7)' : '#e2e8f0'),
+                      backgroundImage: 'linear-gradient(135deg, rgba(255, 255, 255, 0.18) 0%, rgba(0, 0, 0, 0.08) 100%)',
+                      color: currentStep === 2 ? '#ffffff' : (isDark ? '#94a3b8' : '#64748b'),
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontWeight: 800,
+                      fontSize: '13.5px',
+                      boxShadow: currentStep === 2 ? (isDark ? '0 0 16px rgba(16, 185, 129, 0.5), 0 0 0 3.5px rgba(16, 185, 129, 0.25)' : '0 4px 12px rgba(5, 150, 105, 0.35), 0 0 0 3.5px rgba(16, 185, 129, 0.25)') : 'none',
+                      transform: currentStep === 2 ? 'scale(1.06)' : 'scale(1)',
+                      flexShrink: 0
+                    }}
+                  >
+                    2
                   </div>
                   <div>
-                    <div style={{
-                      fontSize: '13px',
-                      fontWeight: 800,
-                      color: currentStep === 2 ? (isDark ? '#34d399' : '#047857') : 'var(--text)',
-                      lineHeight: 1.2
-                    }}>
+                    <div
+                      className="th-stepper-text"
+                      style={{
+                        fontSize: '13px',
+                        fontWeight: 800,
+                        color: currentStep === 2 ? (isDark ? '#34d399' : '#047857') : (isDark ? '#94a3b8' : '#64748b'),
+                        lineHeight: 1.2
+                      }}
+                    >
                       Pre-Commit Audit
                     </div>
-                    <div style={{
-                      fontSize: '11px',
-                      color: currentStep === 2 ? (isDark ? '#a7f3d0' : '#059669') : 'var(--muted)',
-                      fontWeight: 500,
-                      marginTop: '1px'
-                    }}>
+                    <div
+                      className="th-stepper-text"
+                      style={{
+                        fontSize: '11px',
+                        color: currentStep === 2 ? (isDark ? '#a7f3d0' : '#059669') : 'var(--muted)',
+                        fontWeight: 500,
+                        marginTop: '1px'
+                      }}
+                    >
                       {isStep2Done ? 'Audit Verified' : 'Inline Rules & Scores'}
                     </div>
                   </div>
@@ -624,20 +678,26 @@ export default function TeacherHiringModule({ onBack }) {
                   minWidth: '36px',
                   height: '4px',
                   borderRadius: '999px',
-                  background: isDark ? 'rgba(51, 65, 85, 0.5)' : '#e2e8f0',
+                  backgroundColor: isDark ? 'rgba(51, 65, 85, 0.5)' : '#e2e8f0',
                   position: 'relative',
-                  overflow: 'hidden'
+                  overflow: 'hidden',
+                  transition: 'background-color 0.38s cubic-bezier(0.16, 1, 0.3, 1)'
                 }}>
-                  <div style={{
-                    height: '100%',
-                    width: (currentStep >= 3 || isStep2Done) ? '100%' : '0%',
-                    background: 'linear-gradient(90deg, #059669, #10b981)',
-                    transition: 'width 0.4s cubic-bezier(0.16, 1, 0.3, 1)'
-                  }} />
+                  <div
+                    className="th-stepper-line"
+                    style={{
+                      height: '100%',
+                      width: currentStep >= 3 ? '100%' : '0%',
+                      background: 'linear-gradient(90deg, #059669, #10b981)',
+                      boxShadow: currentStep >= 3 ? '0 0 8px rgba(16, 185, 129, 0.45)' : 'none',
+                      borderRadius: '999px'
+                    }}
+                  />
                 </div>
 
                 {/* Step 3: Plantilla Appointments */}
                 <div
+                  className="th-stepper-btn"
                   onClick={() => (isStep2Done || currentStep === 3) && setCurrentStep(3)}
                   style={{
                     display: 'flex',
@@ -646,64 +706,65 @@ export default function TeacherHiringModule({ onBack }) {
                     cursor: (isStep2Done || currentStep === 3) ? 'pointer' : 'not-allowed',
                     padding: '8px 16px',
                     borderRadius: '12px',
-                    background: isStep3Done
-                      ? (isDark ? 'rgba(15, 23, 42, 0.6)' : 'var(--card-subtle)')
-                      : (currentStep === 3
-                        ? (isDark ? 'rgba(5, 150, 105, 0.16)' : '#ecfdf5')
-                        : 'transparent'),
-                    border: isStep3Done
-                      ? (isDark ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid #bbf7d0')
-                      : (currentStep === 3
-                        ? (isDark ? '1.5px solid rgba(16, 185, 129, 0.5)' : '1.5px solid #a7f3d0')
-                        : '1px solid var(--line)'),
+                    backgroundColor: currentStep === 3
+                      ? (isDark ? 'rgba(5, 150, 105, 0.16)' : '#ecfdf5')
+                      : 'transparent',
+                    border: currentStep === 3
+                      ? (isDark ? '1.5px solid rgba(16, 185, 129, 0.5)' : '1.5px solid #a7f3d0')
+                      : (isDark ? '1px solid rgba(51, 65, 85, 0.5)' : '1px solid var(--line)'),
                     boxShadow: currentStep === 3
                       ? (isDark ? '0 0 16px rgba(16, 185, 129, 0.25)' : '0 2px 10px rgba(5, 150, 105, 0.15)')
                       : 'none',
-                    opacity: (isStep2Done || currentStep === 3) ? 1 : 0.6,
-                    transition: 'all 0.25s ease',
-                    flexShrink: 0
+                    transform: currentStep === 3 ? 'translateY(-1px)' : 'translateY(0)',
+                    opacity: currentStep === 3 ? 1 : 0.65,
+                    flexShrink: 0,
+                    userSelect: 'none'
                   }}
                 >
-                  <div style={{
-                    width: '34px',
-                    height: '34px',
-                    borderRadius: '10px',
-                    background: isStep3Done
-                      ? '#059669'
-                      : (currentStep === 3
-                        ? 'linear-gradient(135deg, #059669 0%, #10b981 100%)'
-                        : (isDark ? 'rgba(51, 65, 85, 0.8)' : '#e2e8f0')),
-                    color: (currentStep === 3 || isStep3Done) ? '#ffffff' : (isDark ? '#94a3b8' : '#64748b'),
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontWeight: 800,
-                    fontSize: '13.5px',
-                    boxShadow: currentStep === 3 ? '0 0 0 3.5px rgba(16, 185, 129, 0.25)' : 'none',
-                    transition: 'all 0.2s ease',
-                    flexShrink: 0
-                  }}>
-                    {isStep3Done ? (
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="20 6 9 17 4 12" />
-                      </svg>
-                    ) : '3'}
+                  <div
+                    className="th-stepper-badge"
+                    style={{
+                      width: '34px',
+                      height: '34px',
+                      borderRadius: '10px',
+                      backgroundColor: currentStep === 3
+                        ? '#059669'
+                        : (isDark ? 'rgba(51, 65, 85, 0.7)' : '#e2e8f0'),
+                      backgroundImage: 'linear-gradient(135deg, rgba(255, 255, 255, 0.18) 0%, rgba(0, 0, 0, 0.08) 100%)',
+                      color: currentStep === 3 ? '#ffffff' : (isDark ? '#94a3b8' : '#64748b'),
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontWeight: 800,
+                      fontSize: '13.5px',
+                      boxShadow: currentStep === 3 ? (isDark ? '0 0 16px rgba(16, 185, 129, 0.5), 0 0 0 3.5px rgba(16, 185, 129, 0.25)' : '0 4px 12px rgba(5, 150, 105, 0.35), 0 0 0 3.5px rgba(16, 185, 129, 0.25)') : 'none',
+                      transform: currentStep === 3 ? 'scale(1.06)' : 'scale(1)',
+                      flexShrink: 0
+                    }}
+                  >
+                    3
                   </div>
                   <div>
-                    <div style={{
-                      fontSize: '13px',
-                      fontWeight: 800,
-                      color: currentStep === 3 ? (isDark ? '#34d399' : '#047857') : 'var(--text)',
-                      lineHeight: 1.2
-                    }}>
+                    <div
+                      className="th-stepper-text"
+                      style={{
+                        fontSize: '13px',
+                        fontWeight: 800,
+                        color: currentStep === 3 ? (isDark ? '#34d399' : '#047857') : (isDark ? '#94a3b8' : '#64748b'),
+                        lineHeight: 1.2
+                      }}
+                    >
                       Plantilla Appointments
                     </div>
-                    <div style={{
-                      fontSize: '11px',
-                      color: currentStep === 3 ? (isDark ? '#a7f3d0' : '#059669') : 'var(--muted)',
-                      fontWeight: 500,
-                      marginTop: '1px'
-                    }}>
+                    <div
+                      className="th-stepper-text"
+                      style={{
+                        fontSize: '11px',
+                        color: currentStep === 3 ? (isDark ? '#a7f3d0' : '#059669') : 'var(--muted)',
+                        fontWeight: 500,
+                        marginTop: '1px'
+                      }}
+                    >
                       {isStep3Done ? 'All Appointed & Bound' : '1-to-1 Item Binding'}
                     </div>
                   </div>

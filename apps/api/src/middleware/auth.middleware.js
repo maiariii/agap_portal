@@ -21,3 +21,14 @@ export function authenticateToken(req, res, next) {
     next();
   });
 }
+
+export function requireHrmoAccess(req, res, next) {
+  const role = String(req.user?.role || '').toLowerCase().trim();
+  const position = String(req.user?.position || '').toLowerCase().trim();
+  if (role === 'regional_office' || role === 'regional' || position === 'regional office') {
+    return res.status(403).json({
+      error: 'Access restricted: Regional Office accounts can only access the Reclassification module.'
+    });
+  }
+  next();
+}

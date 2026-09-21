@@ -4415,51 +4415,19 @@ tbody tr.clickable-row:hover td {
   }
 }
 
-.toast-container {
-  position: fixed !important;
-  top: 32px !important;
-  left: 50% !important;
-  transform: translateX(-50%) !important;
-  z-index: 99999999 !important;
-  animation: slideInToastCenter 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
-
-.toast-card {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  border-radius: 16px;
-  padding: 16px 28px;
-  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.25), 0 8px 10px -6px rgba(0, 0, 0, 0.15);
-  min-width: 360px;
-  font-family: var(--font-heading);
-  font-size: 15px;
-  font-weight: 900;
-  justify-content: center;
-}
-
-.toast-card.success {
-  background: linear-gradient(135deg, #059669, #10B981);
-  color: white;
-  border: 1.5px solid #047857;
-}
-
-.toast-card.error {
-  background: linear-gradient(135deg, #DC2626, #EF4444);
-  color: white;
-  border: 1.5px solid #B91C1C;
-}
-
-.toast-card.info {
-  background: linear-gradient(135deg, #1D4ED8, #3B82F6);
-  color: white;
-  border: 1.5px solid #1E40AF;
-}
-
-.toast-card.warning {
-  background: linear-gradient(135deg, #D97706, #F59E0B);
-  color: white;
-  border: 1.5px solid #B45309;
+@keyframes agapToastSpringIn {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -18px) scale(0.96);
+  }
+  60% {
+    opacity: 1;
+    transform: translate(-50%, 2px) scale(1.008);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
 }
 
 /* Sticky Columns in Appointments and Unappointed Tables */

@@ -74,6 +74,7 @@ export default function App() {
   const [regLastName, setRegLastName] = useState('');
   const [regRegion, setRegRegion] = useState('');
   const [regDivision, setRegDivision] = useState('');
+  const [regPosition, setRegPosition] = useState('HRMO');
   const [regEmail, setRegEmail] = useState('');
   const [regPassword, setRegPassword] = useState('');
   const [regConfirm, setRegConfirm] = useState('');
@@ -242,6 +243,8 @@ export default function App() {
           lastName: regLastName,
           region: regRegion,
           division: regDivision,
+          role: regPosition === 'Regional Office' ? 'regional_office' : 'hr_officer',
+          position: regPosition,
           email: regEmail,
           password: regPassword,
           passcode: regPasscode
@@ -250,7 +253,7 @@ export default function App() {
       setRegSuccess('Account created! You can now sign in.');
       setToast({ message: 'Account created successfully!', type: 'success' });
       setRegFirstName(''); setRegLastName(''); setRegRegion('');
-      setRegDivision(''); setRegEmail(''); setRegPassword('');
+      setRegDivision(''); setRegPosition('HRMO'); setRegEmail(''); setRegPassword('');
       setRegConfirm(''); setRegPasscode('');
     } catch (err) {
       setRegError(err.message);
@@ -783,15 +786,28 @@ export default function App() {
                     </div>
 
                     <div className="form-group" style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                      <label style={{ color: 'var(--navy)', fontWeight: 750, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px' }}>Position</label>
+                      <label style={{ color: 'var(--navy)', fontWeight: 750, fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px' }}>Role / Position</label>
                       <div className="form-group-input-wrapper">
                         <span className="input-icon">💼</span>
-                        <input
-                          type="text"
-                          value="HRMO"
-                          disabled
-                          style={{ padding: '12px 14px 12px 42px', borderRadius: '12px', border: '1.5px solid var(--line)', background: 'var(--card-subtle)', color: 'var(--muted)', cursor: 'not-allowed', fontSize: '13.5px', width: '100%' }}
-                        />
+                        <select
+                          value={regPosition}
+                          onChange={e => setRegPosition(e.target.value)}
+                          required
+                          style={{
+                            padding: '12px 14px 12px 42px',
+                            borderRadius: '12px',
+                            border: '1.5px solid var(--input-border)',
+                            background: 'var(--input-bg)',
+                            color: 'var(--input-text)',
+                            fontSize: '13.5px',
+                            width: '100%',
+                            height: '47px',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          <option value="HRMO">HRMO</option>
+                          <option value="Regional Office">Regional Office</option>
+                        </select>
                       </div>
                     </div>
 
@@ -878,11 +894,26 @@ export default function App() {
     );
   }
 
+  const isRegionalOffice = user?.role === 'regional_office' || String(user?.position || '').toLowerCase().trim() === 'regional office';
+
+  // Guard: Regional Office accounts are restricted exclusively to the Reclassification module
+  if (isRegionalOffice && selectedModule && selectedModule !== 'reclassification') {
+    setSelectedModule('reclassification');
+    sessionStorage.setItem('agap_selected_module', 'reclassification');
+  }
+
   // Post-Login Module Selection Router
   if (!selectedModule) {
     return (
       <ModuleSelectionPage
         onSelectModule={(mod) => {
+          if (isRegionalOffice && mod !== 'reclassification') {
+            setToast({
+              message: 'Access Restricted: Regional Office accounts can only access the Reclassification module.',
+              type: 'warning'
+            });
+            return;
+          }
           setSelectedModule(mod);
           sessionStorage.setItem('agap_selected_module', mod);
         }}

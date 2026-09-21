@@ -5,14 +5,22 @@ import { apiFetch } from '../config/api.js';
 const DataContext = createContext(null);
 
 export function DataProvider({ children }) {
-  const { token, handleLogout } = useAuth();
+  const { token, user, handleLogout } = useAuth();
   const [positions, setPositions] = useState([]);
   const [vacancies, setVacancies] = useState([]);
   const [applications, setApplications] = useState([]);
   const [loading, setLoading] = useState(false);
 
+  const isRo = user?.role === 'regional_office' || String(user?.position || '').toLowerCase().trim() === 'regional office';
+
   const loadAllData = async () => {
     if (!token) return;
+    if (isRo) {
+      setPositions([]);
+      setVacancies([]);
+      setApplications([]);
+      return;
+    }
     setLoading(true);
     try {
       const [posList, vacList, appList] = await Promise.all([
@@ -41,7 +49,7 @@ export function DataProvider({ children }) {
       setVacancies([]);
       setApplications([]);
     }
-  }, [token]);
+  }, [token, isRo]);
 
   return (
     <DataContext.Provider value={{

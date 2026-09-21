@@ -10,6 +10,7 @@ export default function SettingsPage() {
   const { user } = useAuth();
   const { setToast } = useToast();
   const { theme, isDark, setTheme } = useTheme();
+  const isRegionalOffice = user?.role === 'regional_office' || user?.position === 'Regional Office';
 
   // Collaborators state
   const [collaborators, setCollaborators] = useState([]);
@@ -264,10 +265,10 @@ export default function SettingsPage() {
               </div>
               <div>
                 <h3 style={{ fontSize: '16px', fontWeight: 800, margin: 0, color: isDark ? '#F8FAFC' : '#08315f' }}>
-                  HRMO Account Profile
+                  {isRegionalOffice ? 'Regional Office Profile' : 'HRMO Account Profile'}
                 </h3>
                 <span style={{ fontSize: '11.5px', color: isDark ? '#94a3b8' : '#64748b', fontWeight: 600 }}>
-                  Host Administrator
+                  {user?.position ? `${user.position} • Host Administrator` : (isRegionalOffice ? 'Regional Office • Host Administrator' : 'Host Administrator')}
                 </span>
               </div>
             </div>
@@ -312,7 +313,7 @@ export default function SettingsPage() {
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="20 6 9 17 4 12" />
               </svg>
-              Verified HRMO Host
+              {isRegionalOffice ? 'Verified Regional Office Host' : 'Verified HRMO Host'}
             </span>
             <span style={{ fontSize: '11.5px', color: isDark ? '#94a3b8' : '#64748b' }}>
               All helpers inherit your Region & Division

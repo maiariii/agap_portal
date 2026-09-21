@@ -11,7 +11,7 @@ import applicationsRouter from './modules/applications/apps.router.js';
 import reclassRouter from './modules/reclassification/reclass.router.js';
 import collaboratorsRouter from './modules/collaborators/collaborators.router.js';
 import { getPositions } from './modules/vacancies/vacancies.controller.js';
-import { authenticateToken } from './middleware/auth.middleware.js';
+import { authenticateToken, requireHrmoAccess } from './middleware/auth.middleware.js';
 import { errorHandler } from './middleware/error.middleware.js';
 import { runMigration as runAuditLogMigration } from './db/migration_documents_audit_logs.js';
 import { runMigration as runVacanciesMigration } from './db/alter_vacancies_doc_fetch.js';
@@ -69,10 +69,10 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // Mount Modular Endpoints
 app.use('/api/auth', authRouter);
-app.use('/api/vacancies', vacanciesRouter);
-app.use('/api/applications', applicationsRouter);
+app.use('/api/vacancies', authenticateToken, requireHrmoAccess, vacanciesRouter);
+app.use('/api/applications', authenticateToken, requireHrmoAccess, applicationsRouter);
 app.use('/api/reclassification', reclassRouter);
-app.use('/api/collaborators', authenticateToken, collaboratorsRouter);
+app.use('/api/collaborators', authenticateToken, requireHrmoAccess, collaboratorsRouter);
 
 // Positions endpoint (direct path matching frontend)
 app.get('/api/positions', authenticateToken, getPositions);

@@ -16,6 +16,28 @@ export default function ReclassificationPage({ onBack }) {
   const { setToast } = useToast();
   const { isDark } = useTheme();
 
+  const isRegionalOffice = 
+    user?.role === 'regional_office' || 
+    user?.role === 'regional_director' || 
+    user?.role === 'admin' ||
+    String(user?.role || '').toLowerCase().includes('regional') ||
+    String(user?.position || '').toLowerCase().trim() === 'regional office';
+
+  // Regional Office NOSCA Scanner & Modal state
+  const [showNoscaModal, setShowNoscaModal] = useState(false);
+  const [scanningNosca, setScanningNosca] = useState(false);
+  const [scannedNoscaResult, setScannedNoscaResult] = useState(null);
+  const [selectedNoscaItems, setSelectedNoscaItems] = useState([]);
+  const [noscaFileName, setNoscaFileName] = useState('');
+  const [noscaSearchTerm, setNoscaSearchTerm] = useState('');
+  const [noscaActiveCategory, setNoscaActiveCategory] = useState('ALL');
+  const [noscaCopiedSn, setNoscaCopiedSn] = useState(false);
+  const [isNoscaDragOver, setIsNoscaDragOver] = useState(false);
+  const [confirmRemoveState, setConfirmRemoveState] = useState({ open: false, item: null, isBulk: false });
+  const [showConfirmAddModal, setShowConfirmAddModal] = useState(false);
+  const [importingNoscaItems, setImportingNoscaItems] = useState(false);
+  const noscaFileInputRef = React.useRef(null);
+
   const [applications, setApplications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -55,6 +77,22 @@ export default function ReclassificationPage({ onBack }) {
   const [showReevalModal, setShowReevalModal] = useState(false);
   const [showDocModal, setShowDocModal] = useState(false);
   const [showNewAppModal, setShowNewAppModal] = useState(false);
+
+  // CSV Ingestion Modal state
+  const [showCsvModal, setShowCsvModal] = useState(false);
+  const [csvFile, setCsvFile] = useState(null);
+  const [csvFileName, setCsvFileName] = useState('');
+  const [csvContent, setCsvContent] = useState('');
+  const [csvPreviewRows, setCsvPreviewRows] = useState([]);
+  const [csvTotalRowsCount, setCsvTotalRowsCount] = useState(0);
+  const [isUploadingCsv, setIsUploadingCsv] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadStats, setUploadStats] = useState(null);
+  const [replaceExisting, setReplaceExisting] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+
+  // Workflow Stepper state: 1 = CSV Ingestion, 2 = Assessment Workbench, 3 = DBM Endorsement
+  const [currentStep, setCurrentStep] = useState(1);
 
   // Form states for re-evaluation
   const [reevalResult, setReevalResult] = useState('Qualified (CSC QS)');
@@ -450,6 +488,11 @@ export default function ReclassificationPage({ onBack }) {
     return filteredIncumbents.slice(start, start + pageSizeIncumbents);
   }, [filteredIncumbents, currentPageIncumbents, pageSizeIncumbents]);
 
+  // Step completion flags
+  const isStep1Done = incumbents.length > 0 || currentStep > 1;
+  const isStep2Done = currentStep > 2 || incumbents.some(i => i.stage_of_reclassification === 'Endorsed' || i.stage_of_reclassification === 'Approved' || (i.reclass_position && i.reclass_position !== '#N/A'));
+  const isStep3Done = incumbents.some(i => i.stage_of_reclassification === 'Approved');
+
   // Global Escape key listener to close active modals
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -458,11 +501,12 @@ export default function ReclassificationPage({ onBack }) {
         if (showReevalModal) setShowReevalModal(false);
         if (showDocModal) setShowDocModal(false);
         if (showNewAppModal) setShowNewAppModal(false);
+        if (showCsvModal) setShowCsvModal(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [showAssessmentModal, showReevalModal, showDocModal, showNewAppModal]);
+  }, [showAssessmentModal, showReevalModal, showDocModal, showNewAppModal, showCsvModal]);
 
   const getStageBadge = (stage) => {
     switch (stage) {
@@ -703,13 +747,376 @@ export default function ReclassificationPage({ onBack }) {
   // Handle DBM Export Trigger
   const handleExportDBM = () => {
     try {
-      const token = localStorage.getItem('deped_token') || sessionStorage.getItem('deped_token');
+      const token = localStorage.getItem('agap_token') || localStorage.getItem('deped_token') || sessionStorage.getItem('deped_token');
       const exportUrl = `/api/reclassification/export-dbm${token ? `?token=${encodeURIComponent(token)}` : ''}`;
       window.open(exportUrl, '_blank');
       setToast({ message: 'Generating DBM submission spreadsheet...', type: 'info' });
     } catch (err) {
       console.error('Error triggering DBM export:', err);
       setToast({ message: 'Downloading DBM export data...', type: 'info' });
+    }
+  };
+
+  // Process NOSCA PDF file upload & trigger root scanner.py
+  const processNoscaFile = (file) => {
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith('.pdf') && file.type !== 'application/pdf') {
+      setToast({
+        title: 'Invalid File Format',
+        message: 'Please select a valid PDF file for NOSCA scanning.',
+        type: 'error'
+      });
+      return;
+    }
+
+    setScanningNosca(true);
+    setNoscaFileName(file.name);
+
+    const reader = new FileReader();
+    reader.onload = async (uploadEvt) => {
+      try {
+        const fileData = uploadEvt.target.result;
+        const res = await apiFetch('/api/reclassification/scan-nosca', {
+          method: 'POST',
+          body: JSON.stringify({
+            fileData,
+            fileName: file.name
+          })
+        });
+
+        if (res && res.data) {
+          setScannedNoscaResult(res.data);
+          setSelectedNoscaItems(res.data.items || []);
+          setShowNoscaModal(true);
+          setToast({
+            title: 'NOSCA Scanned Successfully',
+            message: `Serial No: ${res.data.serial_no || 'N/A'} • ${res.data.count || 0} Plantilla items extracted.`,
+            type: 'success'
+          });
+        } else {
+          throw new Error(res?.error || 'Failed to parse NOSCA document.');
+        }
+      } catch (err) {
+        console.error('[Reclass] NOSCA Scan Error:', err);
+        setToast({
+          title: 'NOSCA Scan Failed',
+          message: err.message || 'Error occurred while scanning NOSCA PDF.',
+          type: 'error'
+        });
+      } finally {
+        setScanningNosca(false);
+        if (noscaFileInputRef.current) {
+          noscaFileInputRef.current.value = '';
+        }
+      }
+    };
+
+    reader.onerror = () => {
+      setScanningNosca(false);
+      setToast({
+        title: 'File Read Error',
+        message: 'Unable to read the selected file.',
+        type: 'error'
+      });
+    };
+
+    reader.readAsDataURL(file);
+  };
+
+  const handleNoscaFileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (file) processNoscaFile(file);
+  };
+
+  const handleNoscaDrop = (e) => {
+    e.preventDefault();
+    setIsNoscaDragOver(false);
+    const file = e.dataTransfer?.files?.[0];
+    if (file) processNoscaFile(file);
+  };
+
+  const handleCopySerialNo = (sn) => {
+    if (!sn) return;
+    navigator.clipboard?.writeText(sn);
+    setNoscaCopiedSn(true);
+    setTimeout(() => setNoscaCopiedSn(false), 2000);
+    setToast({ message: 'Serial number copied to clipboard', type: 'info' });
+  };
+
+  // Toggle selection of an individual item
+  const toggleSelectNoscaItem = (item) => {
+    setSelectedNoscaItems(prev => {
+      if (prev.includes(item)) {
+        return prev.filter(i => i !== item);
+      } else {
+        return [...prev, item];
+      }
+    });
+  };
+
+  // Toggle select/deselect all currently visible/filtered items
+  const toggleSelectAllNoscaItems = () => {
+    const visibleItemStrings = filteredNoscaItems;
+    if (visibleItemStrings.length === 0) return;
+    const allVisibleSelected = visibleItemStrings.every(i => selectedNoscaItems.includes(i));
+
+    if (allVisibleSelected) {
+      setSelectedNoscaItems(prev => prev.filter(i => !visibleItemStrings.includes(i)));
+    } else {
+      const set = new Set([...selectedNoscaItems, ...visibleItemStrings]);
+      setSelectedNoscaItems(Array.from(set));
+    }
+  };
+
+  // Trigger Remove Item Confirmation Layer
+  const handleRequestRemoveItem = (item) => {
+    setConfirmRemoveState({ open: true, item, isBulk: false });
+  };
+
+  // Trigger Bulk Remove Confirmation Layer
+  const handleRequestRemoveSelected = () => {
+    if (selectedNoscaItems.length === 0) {
+      setToast({ message: 'No items selected to remove.', type: 'info' });
+      return;
+    }
+    setConfirmRemoveState({ open: true, item: null, isBulk: true });
+  };
+
+  // Execute confirmed item removal
+  const handleExecuteConfirmedRemoval = () => {
+    if (!scannedNoscaResult) return;
+
+    if (confirmRemoveState.isBulk) {
+      const itemsToRemoveSet = new Set(selectedNoscaItems);
+      const newItems = (scannedNoscaResult.items || []).filter(i => !itemsToRemoveSet.has(i));
+
+      const newCategoryBreakdown = {};
+      Object.keys(scannedNoscaResult.category_breakdown || {}).forEach(cat => {
+        newCategoryBreakdown[cat] = (scannedNoscaResult.category_breakdown[cat] || []).filter(i => !itemsToRemoveSet.has(i));
+      });
+
+      setScannedNoscaResult(prev => ({
+        ...prev,
+        items: newItems,
+        count: newItems.length,
+        category_breakdown: newCategoryBreakdown
+      }));
+      setSelectedNoscaItems([]);
+      setToast({ message: `Removed ${itemsToRemoveSet.size} item(s) from NOSCA batch.`, type: 'info' });
+    } else if (confirmRemoveState.item) {
+      const target = confirmRemoveState.item;
+      const newItems = (scannedNoscaResult.items || []).filter(i => i !== target);
+
+      const newCategoryBreakdown = {};
+      Object.keys(scannedNoscaResult.category_breakdown || {}).forEach(cat => {
+        newCategoryBreakdown[cat] = (scannedNoscaResult.category_breakdown[cat] || []).filter(i => !itemsToRemoveSet.has(i));
+      });
+
+      setScannedNoscaResult(prev => ({
+        ...prev,
+        items: newItems,
+        count: newItems.length,
+        category_breakdown: newCategoryBreakdown
+      }));
+      setSelectedNoscaItems(prev => prev.filter(i => i !== target));
+      setToast({ message: `Removed item ${target} from NOSCA batch.`, type: 'info' });
+    }
+
+    setConfirmRemoveState({ open: false, item: null, isBulk: false });
+  };
+
+  // Trigger Add / Commit Confirmation Layer
+  const handleRequestAddItems = () => {
+    if (selectedNoscaItems.length === 0) {
+      setToast({ title: 'No Items Selected', message: 'Please select at least one plantilla item to import.', type: 'error' });
+      return;
+    }
+    setShowConfirmAddModal(true);
+  };
+
+  // Execute confirmed addition / import into database
+  const handleExecuteConfirmedImport = async () => {
+    if (!scannedNoscaResult || selectedNoscaItems.length === 0) return;
+
+    setImportingNoscaItems(true);
+    try {
+      const res = await apiFetch('/api/reclassification/import-nosca-items', {
+        method: 'POST',
+        body: JSON.stringify({
+          serialNo: scannedNoscaResult.serial_no,
+          division: scannedNoscaResult.division,
+          schoolName: scannedNoscaResult.school_name,
+          position: scannedNoscaResult.position,
+          items: selectedNoscaItems
+        })
+      });
+
+      if (res && res.success) {
+        setToast({
+          title: 'Plantilla Items Registered',
+          message: res.message || `Successfully committed ${selectedNoscaItems.length} items to Reclassification Inventory.`,
+          type: 'success'
+        });
+        setShowConfirmAddModal(false);
+        setShowNoscaModal(false);
+        fetchIncumbents();
+        fetchApplications();
+      } else {
+        throw new Error(res?.error || 'Failed to import NOSCA plantilla items.');
+      }
+    } catch (err) {
+      console.error('[Reclass] Import NOSCA error:', err);
+      setToast({
+        title: 'Import Failed',
+        message: err.message || 'An error occurred while importing NOSCA items.',
+        type: 'error'
+      });
+    } finally {
+      setImportingNoscaItems(false);
+    }
+  };
+
+  // Filtered NOSCA items for interactive breakdown
+  const filteredNoscaItems = useMemo(() => {
+    if (!scannedNoscaResult) return [];
+    let list = [];
+    if (noscaActiveCategory === 'ALL') {
+      list = scannedNoscaResult.items || [];
+    } else if (scannedNoscaResult.category_breakdown?.[noscaActiveCategory]) {
+      list = scannedNoscaResult.category_breakdown[noscaActiveCategory] || [];
+    }
+
+    if (!noscaSearchTerm.trim()) return list;
+    const q = noscaSearchTerm.toLowerCase();
+    return list.filter(item => String(item).toLowerCase().includes(q));
+  }, [scannedNoscaResult, noscaActiveCategory, noscaSearchTerm]);
+
+  // Match scanned items with current incumbent counselors
+  const matchedIncumbentsCount = useMemo(() => {
+    if (!scannedNoscaResult?.items || !incumbents?.length) return 0;
+    const noscaSet = new Set(scannedNoscaResult.items.map(i => String(i).trim().toLowerCase()));
+    return incumbents.filter(inc => inc.plantilla_item_number && noscaSet.has(String(inc.plantilla_item_number).trim().toLowerCase())).length;
+  }, [scannedNoscaResult, incumbents]);
+
+  // Parse CSV text for client preview
+  const parseCsvPreview = (text) => {
+    const lines = text.split(/\r?\n/).filter(l => l.trim().length > 0);
+    if (lines.length === 0) return { headers: [], rows: [], totalCount: 0 };
+
+    const parseLine = (line) => {
+      const res = [];
+      let cur = '';
+      let inQuotes = false;
+      for (let i = 0; i < line.length; i++) {
+        const c = line[i];
+        if (c === '"') {
+          if (inQuotes && line[i + 1] === '"') {
+            cur += '"';
+            i++;
+          } else {
+            inQuotes = !inQuotes;
+          }
+        } else if (c === ',' && !inQuotes) {
+          res.push(cur.trim());
+          cur = '';
+        } else {
+          cur += c;
+        }
+      }
+      res.push(cur.trim());
+      return res;
+    };
+
+    const headers = parseLine(lines[0]);
+    const previewRows = lines.slice(1, 6).map(line => {
+      const cols = parseLine(line);
+      const rowObj = {};
+      headers.forEach((h, idx) => {
+        rowObj[h] = cols[idx] || '';
+      });
+      return rowObj;
+    });
+
+    return { headers, rows: previewRows, totalCount: Math.max(0, lines.length - 1) };
+  };
+
+  // Handle file selection from dropzone or input
+  const handleSelectCsvFile = (selectedFile) => {
+    if (!selectedFile) return;
+    if (!selectedFile.name.toLowerCase().endsWith('.csv')) {
+      setToast({ message: 'Please select a valid CSV file (.csv)', type: 'error' });
+      return;
+    }
+
+    setCsvFile(selectedFile);
+    setCsvFileName(selectedFile.name);
+    setUploadStats(null);
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const content = e.target?.result;
+      if (typeof content === 'string') {
+        setCsvContent(content);
+        const { rows, totalCount } = parseCsvPreview(content);
+        setCsvPreviewRows(rows);
+        setCsvTotalRowsCount(totalCount);
+      }
+    };
+    reader.readAsText(selectedFile);
+  };
+
+  // Handle Download CSV Template
+  const handleDownloadCsvTemplate = () => {
+    try {
+      const token = localStorage.getItem('deped_token') || sessionStorage.getItem('deped_token');
+      const downloadUrl = `/api/reclassification/template-csv${token ? `?token=${encodeURIComponent(token)}` : ''}`;
+      window.open(downloadUrl, '_blank');
+      setToast({ message: 'Downloading Reclassification CSV template...', type: 'info' });
+    } catch (err) {
+      console.error('Error downloading template:', err);
+      setToast({ message: 'Failed to download template', type: 'error' });
+    }
+  };
+
+  // Execute CSV ingestion (either uploaded file or default master inventory)
+  const handleExecuteCsvIngestion = async (useDefault = false) => {
+    if (!useDefault && !csvContent) {
+      setToast({ message: 'Please select or drop a CSV file first.', type: 'warning' });
+      return;
+    }
+
+    setIsUploadingCsv(true);
+    setUploadProgress(25);
+
+    try {
+      const payload = useDefault
+        ? { useDefaultFile: true, replaceExisting }
+        : { csvContent, fileName: csvFileName, replaceExisting };
+
+      setUploadProgress(50);
+
+      const res = await apiFetch('/api/reclassification/upload-csv', {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
+
+      setUploadProgress(100);
+      setUploadStats(res);
+      setToast({
+        message: res.message || `Successfully ingested ${res.insertedOrUpdated || 0} records!`,
+        type: 'success'
+      });
+
+      // Refresh data
+      fetchIncumbents();
+    } catch (err) {
+      console.error('CSV Ingestion failed:', err);
+      setToast({
+        message: err.message || 'Failed to ingest CSV file.',
+        type: 'error'
+      });
+    } finally {
+      setIsUploadingCsv(false);
     }
   };
 
@@ -872,29 +1279,802 @@ export default function ReclassificationPage({ onBack }) {
 
       {/* Main Container */}
       <main style={{ maxWidth: '1400px', margin: '0 auto', padding: '24px 28px 60px', position: 'relative', zIndex: 1 }}>
-        {/* Incumbent Guidance Counselors KPI Cards Row */}
+        {/* Workflow Stepper Navigation */}
+        {/* Style for Stepper Transitions & Smooth View Transitions */}
+        <style>{`
+          @keyframes reclassStepFadeIn {
+            0% {
+              opacity: 0;
+              transform: translateY(6px);
+            }
+            100% {
+              opacity: 1;
+              transform: translateY(0);
+            }
+          }
+          .reclass-step-content-anim {
+            animation: reclassStepFadeIn 0.38s cubic-bezier(0.16, 1, 0.3, 1) both;
+          }
+          .reclass-stepper-btn {
+            transition: background-color 0.38s cubic-bezier(0.16, 1, 0.3, 1),
+                        border-color 0.38s cubic-bezier(0.16, 1, 0.3, 1),
+                        box-shadow 0.38s cubic-bezier(0.16, 1, 0.3, 1),
+                        opacity 0.38s cubic-bezier(0.16, 1, 0.3, 1),
+                        transform 0.38s cubic-bezier(0.16, 1, 0.3, 1) !important;
+          }
+          .reclass-stepper-btn:hover {
+            opacity: 1 !important;
+          }
+          .reclass-stepper-btn:active {
+            transform: scale(0.985) !important;
+          }
+          .reclass-stepper-badge {
+            transition: background-color 0.38s cubic-bezier(0.16, 1, 0.3, 1),
+                        box-shadow 0.38s cubic-bezier(0.16, 1, 0.3, 1),
+                        color 0.38s cubic-bezier(0.16, 1, 0.3, 1),
+                        transform 0.38s cubic-bezier(0.16, 1, 0.3, 1) !important;
+          }
+          .reclass-stepper-text {
+            transition: color 0.38s cubic-bezier(0.16, 1, 0.3, 1) !important;
+          }
+          .reclass-stepper-line {
+            transition: width 0.45s cubic-bezier(0.16, 1, 0.3, 1),
+                        box-shadow 0.45s cubic-bezier(0.16, 1, 0.3, 1) !important;
+            will-change: width;
+          }
+        `}</style>
+
         <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-          gap: '16px',
-          marginBottom: '24px'
+          background: isDark ? 'rgba(15, 23, 42, 0.75)' : '#ffffff',
+          borderRadius: '16px',
+          border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid var(--line)',
+          padding: '12px 20px',
+          marginBottom: '24px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+          boxShadow: isDark ? '0 8px 28px rgba(0, 0, 0, 0.35)' : '0 2px 12px rgba(0, 0, 0, 0.03)',
+          backdropFilter: 'blur(16px)',
+          WebkitBackdropFilter: 'blur(16px)',
+          overflowX: 'auto',
+          transition: 'all 0.35s cubic-bezier(0.16, 1, 0.3, 1)'
         }}>
-          <div className="card" style={{
-            background: isDark ? 'rgba(15, 23, 42, 0.65)' : 'var(--card)',
-            backdropFilter: 'blur(16px)',
-            borderRadius: '16px',
-            border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid var(--line)',
-            padding: '18px 22px',
-            boxShadow: isDark ? '0 8px 32px rgba(0, 0, 0, 0.3)' : '0 4px 12px rgba(0, 0, 0, 0.03)'
-          }}>
-            <div style={{ fontSize: '12px', fontWeight: 700, color: isDark ? '#94a3b8' : 'var(--text-secondary, #64748b)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-              Total Incumbent Counselors
+          {/* Step 1: Inventory CSV Ingestion */}
+          <div
+            className="reclass-stepper-btn"
+            onClick={() => setCurrentStep(1)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+              cursor: 'pointer',
+              padding: '8px 16px',
+              borderRadius: '12px',
+              backgroundColor: currentStep === 1
+                ? (isDark ? 'rgba(37, 99, 235, 0.2)' : '#eff6ff')
+                : (currentStep > 1 ? (isDark ? 'rgba(30, 41, 59, 0.4)' : '#f8fafc') : 'transparent'),
+              border: currentStep === 1
+                ? (isDark ? '1.5px solid rgba(59, 130, 246, 0.6)' : '1.5px solid #93c5fd')
+                : (currentStep > 1 ? (isDark ? '1px solid rgba(59, 130, 246, 0.35)' : '1px solid #bfdbfe') : (isDark ? '1px solid rgba(51, 65, 85, 0.5)' : '1px solid var(--line)')),
+              boxShadow: currentStep === 1
+                ? (isDark ? '0 0 16px rgba(59, 130, 246, 0.25)' : '0 2px 10px rgba(37, 99, 235, 0.15)')
+                : 'none',
+              transform: currentStep === 1 ? 'translateY(-1px)' : 'translateY(0)',
+              opacity: 1,
+              flexShrink: 0,
+              userSelect: 'none'
+            }}
+          >
+            <div
+              className="reclass-stepper-badge"
+              style={{
+                width: '34px',
+                height: '34px',
+                borderRadius: '10px',
+                backgroundColor: currentStep === 1
+                  ? '#2563eb'
+                  : (currentStep > 1 ? '#2563eb' : (isDark ? 'rgba(51, 65, 85, 0.7)' : '#e2e8f0')),
+                backgroundImage: 'linear-gradient(135deg, rgba(255, 255, 255, 0.18) 0%, rgba(0, 0, 0, 0.08) 100%)',
+                color: currentStep >= 1 ? '#ffffff' : (isDark ? '#94a3b8' : '#64748b'),
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontWeight: 800,
+                fontSize: '13.5px',
+                boxShadow: currentStep === 1
+                  ? (isDark ? '0 0 16px rgba(59, 130, 246, 0.5), 0 0 0 3.5px rgba(59, 130, 246, 0.25)' : '0 4px 12px rgba(37, 99, 235, 0.35), 0 0 0 3.5px rgba(59, 130, 246, 0.25)')
+                  : 'none',
+                transform: currentStep === 1 ? 'scale(1.06)' : 'scale(1)',
+                flexShrink: 0
+              }}
+            >
+              1
             </div>
-            <div style={{ fontSize: '30px', fontWeight: 850, color: 'var(--text)', margin: '6px 0 2px' }}>
-              {incumbentMetrics.total}
+            <div>
+              <div
+                className="reclass-stepper-text"
+                style={{
+                  fontSize: '13px',
+                  fontWeight: 800,
+                  color: currentStep === 1 ? (isDark ? '#60a5fa' : '#1d4ed8') : (currentStep > 1 ? (isDark ? '#f8fafc' : '#1e293b') : (isDark ? '#94a3b8' : '#64748b')),
+                  lineHeight: 1.2
+                }}
+              >
+                Step 1: Inventory CSV Ingestion
+              </div>
+              <div
+                className="reclass-stepper-text"
+                style={{
+                  fontSize: '11px',
+                  color: currentStep === 1 ? (isDark ? '#93c5fd' : '#2563eb') : 'var(--muted)',
+                  fontWeight: 500,
+                  marginTop: '1px'
+                }}
+              >
+                {isStep1Done ? `${incumbents.length} Records Loaded` : 'Template & Master Inventory Sync'}
+              </div>
             </div>
-            <div style={{ fontSize: '12px', color: isDark ? '#64748b' : 'var(--text-secondary, #64748b)' }}>Under reclassification assessment</div>
           </div>
+
+          {/* Connector Line 1 -> 2 */}
+          <div style={{
+            flex: 1,
+            minWidth: '36px',
+            height: '4px',
+            borderRadius: '999px',
+            backgroundColor: isDark ? 'rgba(51, 65, 85, 0.5)' : '#e2e8f0',
+            position: 'relative',
+            overflow: 'hidden',
+            transition: 'background-color 0.38s cubic-bezier(0.16, 1, 0.3, 1)'
+          }}>
+            <div
+              className="reclass-stepper-line"
+              style={{
+                height: '100%',
+                width: currentStep >= 2 ? '100%' : '0%',
+                background: 'linear-gradient(90deg, #2563eb, #3b82f6)',
+                boxShadow: currentStep >= 2 ? '0 0 8px rgba(59, 130, 246, 0.45)' : 'none',
+                borderRadius: '999px'
+              }}
+            />
+          </div>
+
+          {/* Step 2: Counselor Assessment & Workbench */}
+          <div
+            className="reclass-stepper-btn"
+            onClick={() => setCurrentStep(2)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+              cursor: 'pointer',
+              padding: '8px 16px',
+              borderRadius: '12px',
+              backgroundColor: currentStep === 2
+                ? (isDark ? 'rgba(37, 99, 235, 0.2)' : '#eff6ff')
+                : (currentStep > 2 ? (isDark ? 'rgba(30, 41, 59, 0.4)' : '#f8fafc') : 'transparent'),
+              border: currentStep === 2
+                ? (isDark ? '1.5px solid rgba(59, 130, 246, 0.6)' : '1.5px solid #93c5fd')
+                : (currentStep > 2 ? (isDark ? '1px solid rgba(59, 130, 246, 0.35)' : '1px solid #bfdbfe') : (isDark ? '1px solid rgba(51, 65, 85, 0.5)' : '1px solid var(--line)')),
+              boxShadow: currentStep === 2
+                ? (isDark ? '0 0 16px rgba(59, 130, 246, 0.25)' : '0 2px 10px rgba(37, 99, 235, 0.15)')
+                : 'none',
+              transform: currentStep === 2 ? 'translateY(-1px)' : 'translateY(0)',
+              opacity: currentStep >= 2 ? 1 : 0.55,
+              flexShrink: 0,
+              userSelect: 'none'
+            }}
+          >
+            <div
+              className="reclass-stepper-badge"
+              style={{
+                width: '34px',
+                height: '34px',
+                borderRadius: '10px',
+                backgroundColor: currentStep === 2
+                  ? '#2563eb'
+                  : (currentStep > 2 ? '#2563eb' : (isDark ? 'rgba(51, 65, 85, 0.7)' : '#e2e8f0')),
+                backgroundImage: 'linear-gradient(135deg, rgba(255, 255, 255, 0.18) 0%, rgba(0, 0, 0, 0.08) 100%)',
+                color: currentStep >= 2 ? '#ffffff' : (isDark ? '#94a3b8' : '#64748b'),
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontWeight: 800,
+                fontSize: '13.5px',
+                boxShadow: currentStep === 2
+                  ? (isDark ? '0 0 16px rgba(59, 130, 246, 0.5), 0 0 0 3.5px rgba(59, 130, 246, 0.25)' : '0 4px 12px rgba(37, 99, 235, 0.35), 0 0 0 3.5px rgba(59, 130, 246, 0.25)')
+                  : 'none',
+                transform: currentStep === 2 ? 'scale(1.06)' : 'scale(1)',
+                flexShrink: 0
+              }}
+            >
+              2
+            </div>
+            <div>
+              <div
+                className="reclass-stepper-text"
+                style={{
+                  fontSize: '13px',
+                  fontWeight: 800,
+                  color: currentStep === 2 ? (isDark ? '#60a5fa' : '#1d4ed8') : (currentStep > 2 ? (isDark ? '#f8fafc' : '#1e293b') : (isDark ? '#94a3b8' : '#64748b')),
+                  lineHeight: 1.2
+                }}
+              >
+                Step 2: Assessment Workbench
+              </div>
+              <div
+                className="reclass-stepper-text"
+                style={{
+                  fontSize: '11px',
+                  color: currentStep === 2 ? (isDark ? '#93c5fd' : '#2563eb') : 'var(--muted)',
+                  fontWeight: 500,
+                  marginTop: '1px'
+                }}
+              >
+                {isStep2Done ? 'Assessments & Position Assigned' : 'Stage Progression & Reclass Decisions'}
+              </div>
+            </div>
+          </div>
+
+          {/* Connector Line 2 -> 3 */}
+          <div style={{
+            flex: 1,
+            minWidth: '36px',
+            height: '4px',
+            borderRadius: '999px',
+            backgroundColor: isDark ? 'rgba(51, 65, 85, 0.5)' : '#e2e8f0',
+            position: 'relative',
+            overflow: 'hidden',
+            transition: 'background-color 0.38s cubic-bezier(0.16, 1, 0.3, 1)'
+          }}>
+            <div
+              className="reclass-stepper-line"
+              style={{
+                height: '100%',
+                width: currentStep >= 3 ? '100%' : '0%',
+                background: 'linear-gradient(90deg, #2563eb, #3b82f6)',
+                boxShadow: currentStep >= 3 ? '0 0 8px rgba(59, 130, 246, 0.45)' : 'none',
+                borderRadius: '999px'
+              }}
+            />
+          </div>
+
+          {/* Step 3: DBM Endorsement & Report */}
+          <div
+            className="reclass-stepper-btn"
+            onClick={() => setCurrentStep(3)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+              cursor: 'pointer',
+              padding: '8px 16px',
+              borderRadius: '12px',
+              backgroundColor: currentStep === 3
+                ? (isDark ? 'rgba(37, 99, 235, 0.2)' : '#eff6ff')
+                : 'transparent',
+              border: currentStep === 3
+                ? (isDark ? '1.5px solid rgba(59, 130, 246, 0.6)' : '1.5px solid #93c5fd')
+                : (isDark ? '1px solid rgba(51, 65, 85, 0.5)' : '1px solid var(--line)'),
+              boxShadow: currentStep === 3
+                ? (isDark ? '0 0 16px rgba(59, 130, 246, 0.25)' : '0 2px 10px rgba(37, 99, 235, 0.15)')
+                : 'none',
+              transform: currentStep === 3 ? 'translateY(-1px)' : 'translateY(0)',
+              opacity: currentStep === 3 ? 1 : 0.55,
+              flexShrink: 0,
+              userSelect: 'none'
+            }}
+          >
+            <div
+              className="reclass-stepper-badge"
+              style={{
+                width: '34px',
+                height: '34px',
+                borderRadius: '10px',
+                backgroundColor: currentStep === 3
+                  ? '#2563eb'
+                  : (isDark ? 'rgba(51, 65, 85, 0.7)' : '#e2e8f0'),
+                backgroundImage: 'linear-gradient(135deg, rgba(255, 255, 255, 0.18) 0%, rgba(0, 0, 0, 0.08) 100%)',
+                color: currentStep === 3 ? '#ffffff' : (isDark ? '#94a3b8' : '#64748b'),
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontWeight: 800,
+                fontSize: '13.5px',
+                boxShadow: currentStep === 3
+                  ? (isDark ? '0 0 16px rgba(59, 130, 246, 0.5), 0 0 0 3.5px rgba(59, 130, 246, 0.25)' : '0 4px 12px rgba(37, 99, 235, 0.35), 0 0 0 3.5px rgba(59, 130, 246, 0.25)')
+                  : 'none',
+                transform: currentStep === 3 ? 'scale(1.06)' : 'scale(1)',
+                flexShrink: 0
+              }}
+            >
+              3
+            </div>
+            <div>
+              <div
+                className="reclass-stepper-text"
+                style={{
+                  fontSize: '13px',
+                  fontWeight: 800,
+                  color: currentStep === 3 ? (isDark ? '#60a5fa' : '#1d4ed8') : (isDark ? '#94a3b8' : '#64748b'),
+                  lineHeight: 1.2
+                }}
+              >
+                Step 3: DBM Endorsement
+              </div>
+              <div
+                className="reclass-stepper-text"
+                style={{
+                  fontSize: '11px',
+                  color: currentStep === 3 ? (isDark ? '#93c5fd' : '#2563eb') : 'var(--muted)',
+                  fontWeight: 500,
+                  marginTop: '1px'
+                }}
+              >
+                {isStep3Done ? 'Ready for Transmittal' : 'Summary & DBM Spreadsheet'}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* STEP 1 VIEW: INVENTORY & CSV INGESTION */}
+        {currentStep === 1 && (
+          <div className="reclass-step-content-anim" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            {/* Status Banner for Master Inventory */}
+            {isStep1Done ? (
+              <div style={{
+                padding: '16px 20px',
+                borderRadius: '12px',
+                background: isDark ? 'rgba(16, 185, 129, 0.15)' : '#ecfdf5',
+                border: isDark ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #a7f3d0',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '16px',
+                flexWrap: 'wrap'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div style={{
+                    width: '32px',
+                    height: '32px',
+                    borderRadius: '8px',
+                    background: '#10b981',
+                    color: '#ffffff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontWeight: 800
+                  }}>
+                    ✓
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '13.5px', fontWeight: 800, color: isDark ? '#6ee7b7' : '#065f46' }}>
+                      Master Plantilla Inventory Active: {incumbents.length.toLocaleString()} Records Loaded
+                    </div>
+                    <div style={{ fontSize: '12px', color: isDark ? '#a7f3d0' : '#047857' }}>
+                      {incumbentMetrics.forReview} For Review • {incumbentMetrics.endorsed} Endorsed • {incumbentMetrics.approved} Approved • {incumbentMetrics.vacant} Vacant/Unfilled • {incumbentMetrics.abolition || 0} Abolitions
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <button
+                    type="button"
+                    onClick={() => handleExecuteCsvIngestion(true)}
+                    disabled={isUploadingCsv}
+                    style={{
+                      background: isDark ? 'rgba(30, 41, 59, 0.8)' : '#ffffff',
+                      border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid #cbd5e1',
+                      padding: '7px 14px',
+                      borderRadius: '8px',
+                      fontSize: '12px',
+                      fontWeight: 700,
+                      color: isDark ? '#f8fafc' : '#0f172a',
+                      cursor: isUploadingCsv ? 'not-allowed' : 'pointer'
+                    }}
+                  >
+                    {isUploadingCsv ? 'Syncing...' : 'Re-sync Master Inventory'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div style={{
+                padding: '16px 20px',
+                borderRadius: '12px',
+                background: isDark ? 'rgba(37, 99, 235, 0.15)' : '#eff6ff',
+                border: isDark ? '1px solid rgba(59, 130, 246, 0.4)' : '1px solid #bfdbfe',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '16px',
+                flexWrap: 'wrap'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div style={{
+                    width: '32px',
+                    height: '32px',
+                    borderRadius: '8px',
+                    background: '#2563eb',
+                    color: '#ffffff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontWeight: 800
+                  }}>
+                    ⚡
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '13.5px', fontWeight: 800, color: isDark ? '#93c5fa' : '#1e40af' }}>
+                      Official Nationwide Master Inventory Available
+                    </div>
+                    <div style={{ fontSize: '12px', color: isDark ? '#cbd5e1' : '#3b82f6' }}>
+                      5,600+ DepEd guidance counselor plantilla positions ready to sync into database
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => handleExecuteCsvIngestion(true)}
+                  disabled={isUploadingCsv}
+                  style={{
+                    background: '#2563eb',
+                    border: 'none',
+                    padding: '8px 18px',
+                    borderRadius: '8px',
+                    fontSize: '12.5px',
+                    fontWeight: 750,
+                    color: '#ffffff',
+                    cursor: isUploadingCsv ? 'not-allowed' : 'pointer',
+                    boxShadow: '0 2px 10px rgba(37, 99, 235, 0.25)'
+                  }}
+                >
+                  {isUploadingCsv ? 'Syncing Records...' : 'Sync Master Inventory Now'}
+                </button>
+              </div>
+            )}
+
+            {/* Custom CSV Upload & Dropzone Card */}
+            <div style={{
+              background: isDark ? 'rgba(15, 23, 42, 0.75)' : '#ffffff',
+              borderRadius: '16px',
+              border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid var(--line)',
+              padding: '24px 28px',
+              boxShadow: isDark ? '0 8px 32px rgba(0, 0, 0, 0.3)' : '0 4px 12px rgba(0, 0, 0, 0.03)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '20px'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '16px', flexWrap: 'wrap' }}>
+                <div>
+                  <h3 style={{ fontSize: '16px', fontWeight: 800, margin: '0 0 4px', color: isDark ? '#f8fafc' : '#0f172a' }}>
+                    Upload Custom or Updated Inventory CSV
+                  </h3>
+                  <p style={{ margin: 0, fontSize: '12.5px', color: isDark ? '#94a3b8' : '#64748b' }}>
+                    Upload a division or regional guidance counselor inventory file to batch ingest or update existing items.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleDownloadCsvTemplate}
+                  style={{
+                    background: isDark ? 'rgba(30, 41, 59, 0.8)' : '#f8fafc',
+                    border: isDark ? '1px solid rgba(59, 130, 246, 0.4)' : '1px solid #bfdbfe',
+                    padding: '8px 14px',
+                    borderRadius: '8px',
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    color: isDark ? '#93c5fd' : '#1d4ed8',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+                  }}
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
+                  </svg>
+                  Download CSV Template
+                </button>
+              </div>
+
+              {/* Drag & Drop Area */}
+              <div
+                onDragOver={e => {
+                  e.preventDefault();
+                  setIsDragging(true);
+                }}
+                onDragLeave={() => setIsDragging(false)}
+                onDrop={e => {
+                  e.preventDefault();
+                  setIsDragging(false);
+                  if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                    handleSelectCsvFile(e.dataTransfer.files[0]);
+                  }
+                }}
+                onClick={() => document.getElementById('step1-reclass-csv-input')?.click()}
+                style={{
+                  border: isDragging
+                    ? '2px dashed #3b82f6'
+                    : (isDark ? '2px dashed rgba(71, 85, 105, 0.8)' : '2px dashed #cbd5e1'),
+                  borderRadius: '14px',
+                  padding: '36px 20px',
+                  textAlign: 'center',
+                  background: isDragging
+                    ? (isDark ? 'rgba(37, 99, 235, 0.15)' : '#eff6ff')
+                    : (isDark ? 'rgba(30, 41, 59, 0.35)' : '#f8fafc'),
+                  transition: 'all 0.2s ease',
+                  cursor: 'pointer'
+                }}
+              >
+                <input
+                  id="step1-reclass-csv-input"
+                  type="file"
+                  accept=".csv"
+                  onChange={e => {
+                    if (e.target.files && e.target.files[0]) {
+                      handleSelectCsvFile(e.target.files[0]);
+                    }
+                  }}
+                  style={{ display: 'none' }}
+                />
+
+                <div style={{
+                  width: '52px',
+                  height: '52px',
+                  borderRadius: '50%',
+                  background: isDark ? 'rgba(59, 130, 246, 0.2)' : '#e0f2fe',
+                  color: isDark ? '#60a5fa' : '#0284c7',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  margin: '0 auto 12px'
+                }}>
+                  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                    <line x1="12" y1="18" x2="12" y2="12" />
+                    <line x1="9" y1="15" x2="15" y2="15" />
+                  </svg>
+                </div>
+
+                <div style={{ fontSize: '15px', fontWeight: 750, color: isDark ? '#f8fafc' : '#0f172a', marginBottom: '4px' }}>
+                  {csvFileName ? `Selected: ${csvFileName}` : 'Drag and drop your .csv file here, or click to browse'}
+                </div>
+                <div style={{ fontSize: '12.5px', color: isDark ? '#94a3b8' : '#64748b' }}>
+                  {csvTotalRowsCount > 0
+                    ? `✓ ${csvTotalRowsCount.toLocaleString()} data records parsed and ready for ingestion`
+                    : 'Supports standard CSV files with commas and quoted text fields'}
+                </div>
+              </div>
+
+              {/* Data Preview Table */}
+              {csvPreviewRows.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span style={{ fontSize: '13px', fontWeight: 750, color: isDark ? '#cbd5e1' : '#1e293b' }}>
+                      Previewing First {csvPreviewRows.length} Records (of {csvTotalRowsCount.toLocaleString()} rows)
+                    </span>
+                    <span style={{ fontSize: '11.5px', color: '#10b981', fontWeight: 700 }}>
+                      ✓ Header Columns Validated
+                    </span>
+                  </div>
+
+                  <div style={{
+                    overflowX: 'auto',
+                    border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid #e2e8f0',
+                    borderRadius: '10px',
+                    background: isDark ? 'rgba(15, 23, 42, 0.6)' : '#ffffff'
+                  }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                      <thead>
+                        <tr style={{ background: isDark ? 'rgba(30, 41, 59, 0.8)' : '#f8fafc', borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid #e2e8f0' }}>
+                          <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569' }}>Item Number</th>
+                          <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569' }}>Incumbent</th>
+                          <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569' }}>Current Position</th>
+                          <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569' }}>Division</th>
+                          <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569' }}>Target Reclass</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {csvPreviewRows.map((row, idx) => {
+                          const itemNo = row['PLANTILLA ITEM NUMBER'] || row['Plantilla Item Number'] || Object.values(row)[4] || '—';
+                          const name = row['INCUMBENT'] || row['Incumbent'] || Object.values(row)[7] || '#N/A';
+                          const pos = row['POSITION TITLE'] || row['Position Title'] || Object.values(row)[5] || '—';
+                          const division = row['DIVISION'] || row['Division'] || Object.values(row)[1] || '—';
+                          const target = row['RECLASS POSITION'] || row['Reclass Position'] || Object.values(row)[8] || 'For Review';
+
+                          return (
+                            <tr key={idx} style={{ borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.4)' : '1px solid #f1f5f9' }}>
+                              <td style={{ padding: '8px 12px', fontWeight: 650, color: isDark ? '#f8fafc' : '#0f172a' }}>{itemNo}</td>
+                              <td style={{ padding: '8px 12px', color: isDark ? '#cbd5e1' : '#334155' }}>
+                                {name === '#N/A' ? <em style={{ color: '#94a3b8' }}>Unfilled / Vacant</em> : name}
+                              </td>
+                              <td style={{ padding: '8px 12px', color: isDark ? '#94a3b8' : '#64748b' }}>{pos}</td>
+                              <td style={{ padding: '8px 12px', color: isDark ? '#94a3b8' : '#64748b' }}>{division}</td>
+                              <td style={{ padding: '8px 12px' }}>
+                                <span style={{
+                                  padding: '2px 8px',
+                                  borderRadius: '6px',
+                                  fontSize: '11px',
+                                  fontWeight: 700,
+                                  background: isDark ? 'rgba(59, 130, 246, 0.2)' : '#eff6ff',
+                                  color: isDark ? '#93c5fd' : '#1d4ed8'
+                                }}>
+                                  {target === '#N/A' ? 'Pending Eval' : target}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+
+              {/* Progress Indicator */}
+              {isUploadingCsv && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', fontWeight: 700, color: isDark ? '#f8fafc' : '#0f172a' }}>
+                    <span>Processing and Ingesting Records into Database...</span>
+                    <span>{uploadProgress}%</span>
+                  </div>
+                  <div style={{ height: '8px', borderRadius: '999px', background: isDark ? 'rgba(51, 65, 85, 0.8)' : '#e2e8f0', overflow: 'hidden' }}>
+                    <div style={{
+                      height: '100%',
+                      width: `${uploadProgress}%`,
+                      background: 'linear-gradient(90deg, #3b82f6 0%, #10b981 100%)',
+                      borderRadius: '999px',
+                      transition: 'width 0.3s ease'
+                    }} />
+                  </div>
+                </div>
+              )}
+
+              {/* Ingestion Report Banner */}
+              {uploadStats && (
+                <div style={{
+                  padding: '16px 20px',
+                  borderRadius: '12px',
+                  background: isDark ? 'rgba(16, 185, 129, 0.15)' : '#ecfdf5',
+                  border: isDark ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #a7f3d0',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '10px'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: isDark ? '#6ee7b7' : '#065f46', fontWeight: 750, fontSize: '14px' }}>
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                        <polyline points="22 4 12 14.01 9 11.01" />
+                      </svg>
+                      {uploadStats.message}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setCurrentStep(2)}
+                      style={{
+                        background: '#10b981',
+                        color: '#ffffff',
+                        border: 'none',
+                        padding: '8px 16px',
+                        borderRadius: '8px',
+                        fontSize: '12.5px',
+                        fontWeight: 750,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Open Step 2: Assessment Workbench →
+                    </button>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '8px' }}>
+                    <div style={{ padding: '8px 12px', borderRadius: '8px', background: isDark ? 'rgba(15, 23, 42, 0.5)' : '#ffffff', border: isDark ? '1px solid rgba(51, 65, 85, 0.5)' : '1px solid #e2e8f0' }}>
+                      <div style={{ fontSize: '10.5px', color: isDark ? '#94a3b8' : '#64748b', textTransform: 'uppercase', fontWeight: 700 }}>Total in Database</div>
+                      <div style={{ fontSize: '16px', fontWeight: 800, color: isDark ? '#f8fafc' : '#0f172a' }}>{uploadStats.totalInDatabase || uploadStats.insertedOrUpdated}</div>
+                    </div>
+                    {uploadStats.metrics && (
+                      <>
+                        <div style={{ padding: '8px 12px', borderRadius: '8px', background: isDark ? 'rgba(15, 23, 42, 0.5)' : '#ffffff', border: isDark ? '1px solid rgba(51, 65, 85, 0.5)' : '1px solid #e2e8f0' }}>
+                          <div style={{ fontSize: '10.5px', color: isDark ? '#94a3b8' : '#64748b', textTransform: 'uppercase', fontWeight: 700 }}>For Review</div>
+                          <div style={{ fontSize: '16px', fontWeight: 800, color: '#f59e0b' }}>{uploadStats.metrics.forReview}</div>
+                        </div>
+                        <div style={{ padding: '8px 12px', borderRadius: '8px', background: isDark ? 'rgba(15, 23, 42, 0.5)' : '#ffffff', border: isDark ? '1px solid rgba(51, 65, 85, 0.5)' : '1px solid #e2e8f0' }}>
+                          <div style={{ fontSize: '10.5px', color: isDark ? '#94a3b8' : '#64748b', textTransform: 'uppercase', fontWeight: 700 }}>Vacant / Unfilled</div>
+                          <div style={{ fontSize: '16px', fontWeight: 800, color: '#64748b' }}>{uploadStats.metrics.vacant}</div>
+                        </div>
+                        <div style={{ padding: '8px 12px', borderRadius: '8px', background: isDark ? 'rgba(15, 23, 42, 0.5)' : '#ffffff', border: isDark ? '1px solid rgba(51, 65, 85, 0.5)' : '1px solid #e2e8f0' }}>
+                          <div style={{ fontSize: '10.5px', color: isDark ? '#94a3b8' : '#64748b', textTransform: 'uppercase', fontWeight: 700 }}>Abolition</div>
+                          <div style={{ fontSize: '16px', fontWeight: 800, color: '#ef4444' }}>{uploadStats.metrics.abolition}</div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Execution Action Footer */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '12px' }}>
+                <button
+                  type="button"
+                  onClick={() => handleExecuteCsvIngestion(false)}
+                  disabled={isUploadingCsv || (!csvContent && !csvFile)}
+                  style={{
+                    padding: '10px 24px',
+                    borderRadius: '10px',
+                    border: 'none',
+                    background: (!csvContent && !csvFile) || isUploadingCsv
+                      ? '#64748b'
+                      : 'linear-gradient(135deg, #1e40af 0%, #2563eb 100%)',
+                    color: '#ffffff',
+                    fontSize: '13px',
+                    fontWeight: 750,
+                    cursor: (!csvContent && !csvFile) || isUploadingCsv ? 'not-allowed' : 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    boxShadow: (!csvContent && !csvFile) || isUploadingCsv ? 'none' : '0 4px 14px rgba(37, 99, 235, 0.35)'
+                  }}
+                >
+                  {isUploadingCsv ? 'Ingesting CSV Records...' : (csvTotalRowsCount > 0 ? `Ingest ${csvTotalRowsCount.toLocaleString()} Records` : 'Start CSV Ingestion')}
+                </button>
+
+                {isStep1Done && (
+                  <button
+                    type="button"
+                    onClick={() => setCurrentStep(2)}
+                    style={{
+                      padding: '10px 20px',
+                      borderRadius: '10px',
+                      border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid #cbd5e1',
+                      background: isDark ? 'rgba(30, 41, 59, 0.8)' : '#ffffff',
+                      color: isDark ? '#f8fafc' : '#0f172a',
+                      fontSize: '13px',
+                      fontWeight: 750,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Proceed to Step 2 →
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* STEP 2 VIEW: COUNSELOR ASSESSMENT WORKBENCH */}
+        {currentStep === 2 && (
+          <div className="reclass-step-content-anim">
+            {/* Incumbent Guidance Counselors KPI Cards Row */}
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+              gap: '16px',
+              marginBottom: '24px'
+            }}>
+              <div className="card" style={{
+                background: isDark ? 'rgba(15, 23, 42, 0.65)' : 'var(--card)',
+                backdropFilter: 'blur(16px)',
+                borderRadius: '16px',
+                border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid var(--line)',
+                padding: '18px 22px',
+                boxShadow: isDark ? '0 8px 32px rgba(0, 0, 0, 0.3)' : '0 4px 12px rgba(0, 0, 0, 0.03)'
+              }}>
+                <div style={{ fontSize: '12px', fontWeight: 700, color: isDark ? '#94a3b8' : 'var(--text-secondary, #64748b)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  Total Incumbent Counselors
+                </div>
+                <div style={{ fontSize: '30px', fontWeight: 850, color: 'var(--text)', margin: '6px 0 2px' }}>
+                  {incumbentMetrics.total}
+                </div>
+                <div style={{ fontSize: '12px', color: isDark ? '#64748b' : 'var(--text-secondary, #64748b)' }}>Under reclassification assessment</div>
+              </div>
 
           <div className="card" style={{
             background: isDark ? 'rgba(15, 23, 42, 0.65)' : 'var(--card)',
@@ -1640,7 +2820,336 @@ export default function ReclassificationPage({ onBack }) {
             </div>
           </div>
         </div>
-      </main>
+
+        {/* Step 2 Bottom Navigation Footer */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            marginTop: '20px',
+            padding: '16px 20px',
+            borderRadius: '14px',
+            background: isDark ? 'rgba(15, 23, 42, 0.75)' : '#ffffff',
+            border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid var(--line)',
+            boxShadow: isDark ? '0 8px 24px rgba(0, 0, 0, 0.3)' : '0 2px 10px rgba(0, 0, 0, 0.03)',
+            flexWrap: 'wrap',
+            gap: '12px'
+          }}>
+            <button
+              type="button"
+              onClick={() => setCurrentStep(1)}
+              style={{
+                padding: '9px 18px',
+                borderRadius: '10px',
+                border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid #cbd5e1',
+                background: isDark ? 'rgba(30, 41, 59, 0.7)' : '#ffffff',
+                color: isDark ? '#f8fafc' : '#0f172a',
+                fontSize: '13px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+            >
+              ← Back to Step 1: Inventory CSV
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setCurrentStep(3)}
+              style={{
+                padding: '9px 22px',
+                borderRadius: '10px',
+                border: 'none',
+                background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)',
+                color: '#ffffff',
+                fontSize: '13px',
+                fontWeight: 750,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)'
+              }}
+            >
+              Proceed to Step 3: DBM Endorsement →
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* STEP 3 VIEW: DBM ENDORSEMENT & REPORT */}
+      {currentStep === 3 && (
+        <div className="reclass-step-content-anim" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          {/* Step 3 Header */}
+          <div style={{
+            background: isDark ? 'rgba(15, 23, 42, 0.75)' : '#ffffff',
+            borderRadius: '16px',
+            border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid var(--line)',
+            padding: '24px 28px',
+            boxShadow: isDark ? '0 8px 32px rgba(0, 0, 0, 0.3)' : '0 4px 12px rgba(0, 0, 0, 0.03)'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '10px', flexWrap: 'wrap', marginBottom: '18px' }}>
+              {isRegionalOffice && (
+                <>
+                  <input
+                    ref={noscaFileInputRef}
+                    type="file"
+                    accept=".pdf,application/pdf"
+                    style={{ display: 'none' }}
+                    onChange={handleNoscaFileChange}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNoscaModal(true)}
+                    disabled={scanningNosca}
+                    style={{
+                      background: 'linear-gradient(135deg, #4f46e5 0%, #6366f1 100%)',
+                      border: 'none',
+                      padding: '10px 20px',
+                      borderRadius: '10px',
+                      fontSize: '13px',
+                      color: '#ffffff',
+                      cursor: scanningNosca ? 'not-allowed' : 'pointer',
+                      fontWeight: 750,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      boxShadow: '0 4px 14px rgba(99, 102, 241, 0.35)',
+                      transition: 'all 0.15s ease',
+                      opacity: scanningNosca ? 0.75 : 1
+                    }}
+                    title="Upload official DBM NOSCA PDF and review allocations"
+                  >
+                    {scanningNosca ? (
+                      <>
+                        <div style={{ width: '14px', height: '14px', border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+                        <span>Scanning NOSCA...</span>
+                      </>
+                    ) : (
+                      <>
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                          <polyline points="14 2 14 8 20 8" />
+                          <line x1="12" y1="18" x2="12" y2="12" />
+                          <line x1="9" y1="15" x2="15" y2="15" />
+                        </svg>
+                        <span>{scannedNoscaResult ? `Manage NOSCA (${selectedNoscaItems.length}/${scannedNoscaResult.count || 0})` : 'Upload & Scan NOSCA'}</span>
+                      </>
+                    )}
+                  </button>
+                </>
+              )}
+
+              <button
+                type="button"
+                onClick={handleExportDBM}
+                style={{
+                  background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)',
+                  border: 'none',
+                  padding: '10px 22px',
+                  borderRadius: '10px',
+                  fontSize: '13px',
+                  color: '#ffffff',
+                  cursor: 'pointer',
+                  fontWeight: 750,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  boxShadow: '0 4px 14px rgba(16, 185, 129, 0.35)',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                Export DBM Spreadsheet (.xlsx)
+              </button>
+            </div>
+
+            {/* Summary KPIs */}
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+              gap: '14px'
+            }}>
+              <div style={{
+                padding: '16px 20px',
+                borderRadius: '12px',
+                background: isDark ? 'rgba(30, 58, 138, 0.25)' : '#eff6ff',
+                border: isDark ? '1px solid rgba(59, 130, 246, 0.4)' : '1px solid #bfdbfe'
+              }}>
+                <div style={{ fontSize: '11px', fontWeight: 750, color: isDark ? '#93c5fd' : '#1d4ed8', textTransform: 'uppercase' }}>
+                  Endorsed for DBM
+                </div>
+                <div style={{ fontSize: '28px', fontWeight: 850, color: isDark ? '#bfdbfe' : '#1e40af', margin: '4px 0 2px' }}>
+                  {incumbentMetrics.endorsed}
+                </div>
+                <div style={{ fontSize: '11.5px', color: isDark ? '#93c5fd' : '#2563eb' }}>Passed school/division endorsement</div>
+              </div>
+
+              <div style={{
+                padding: '16px 20px',
+                borderRadius: '12px',
+                background: isDark ? 'rgba(6, 95, 70, 0.25)' : '#ecfdf5',
+                border: isDark ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #a7f3d0'
+              }}>
+                <div style={{ fontSize: '11px', fontWeight: 750, color: isDark ? '#6ee7b7' : '#047857', textTransform: 'uppercase' }}>
+                  Approved by Appointing Authority
+                </div>
+                <div style={{ fontSize: '28px', fontWeight: 850, color: isDark ? '#a7f3d0' : '#065f46', margin: '4px 0 2px' }}>
+                  {incumbentMetrics.approved}
+                </div>
+                <div style={{ fontSize: '11.5px', color: isDark ? '#6ee7b7' : '#059669' }}>Final approval for reclassification</div>
+              </div>
+
+              <div style={{
+                padding: '16px 20px',
+                borderRadius: '12px',
+                background: isDark ? 'rgba(180, 83, 9, 0.2)' : '#fffbeb',
+                border: isDark ? '1px solid rgba(245, 158, 11, 0.4)' : '1px solid #fde68a'
+              }}>
+                <div style={{ fontSize: '11px', fontWeight: 750, color: isDark ? '#fde68a' : '#92400e', textTransform: 'uppercase' }}>
+                  Pending Evaluation
+                </div>
+                <div style={{ fontSize: '28px', fontWeight: 850, color: isDark ? '#fef3c7' : '#b45309', margin: '4px 0 2px' }}>
+                  {incumbentMetrics.forReview}
+                </div>
+                <div style={{ fontSize: '11.5px', color: isDark ? '#fde68a' : '#d97706' }}>Under qualifications check</div>
+              </div>
+
+              <div style={{
+                padding: '16px 20px',
+                borderRadius: '12px',
+                background: isDark ? 'rgba(30, 41, 59, 0.5)' : '#f8fafc',
+                border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid #e2e8f0'
+              }}>
+                <div style={{ fontSize: '11px', fontWeight: 750, color: isDark ? '#94a3b8' : '#64748b', textTransform: 'uppercase' }}>
+                  Total Inventory Items
+                </div>
+                <div style={{ fontSize: '28px', fontWeight: 850, color: isDark ? '#f8fafc' : '#0f172a', margin: '4px 0 2px' }}>
+                  {incumbentMetrics.total}
+                </div>
+                <div style={{ fontSize: '11.5px', color: isDark ? '#94a3b8' : '#64748b' }}>Guidance Counselor plantilla items</div>
+              </div>
+            </div>
+          </div>
+
+
+
+          {/* Endorsed Candidates List Card */}
+          <div style={{
+            background: isDark ? 'rgba(15, 23, 42, 0.65)' : '#ffffff',
+            borderRadius: '16px',
+            border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid var(--line)',
+            padding: '24px 28px',
+            boxShadow: isDark ? '0 8px 32px rgba(0, 0, 0, 0.3)' : '0 4px 12px rgba(0, 0, 0, 0.03)'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+              <h3 style={{ fontSize: '16px', fontWeight: 800, margin: 0, color: isDark ? '#f8fafc' : '#0f172a' }}>
+                Endorsed & Approved Counselors for DBM Transmittal
+              </h3>
+              <span style={{ fontSize: '12px', color: isDark ? '#94a3b8' : '#64748b', fontWeight: 600 }}>
+                {incumbents.filter(i => i.stage_of_reclassification === 'Endorsed' || i.stage_of_reclassification === 'Approved').length} candidates
+              </span>
+            </div>
+
+            <div style={{
+              overflowX: 'auto',
+              border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid #e2e8f0',
+              borderRadius: '12px'
+            }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px' }}>
+                <thead>
+                  <tr style={{ background: isDark ? 'rgba(30, 41, 59, 0.8)' : '#f8fafc', borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid #e2e8f0' }}>
+                    <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569' }}>Plantilla Item No</th>
+                    <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569' }}>Incumbent Name</th>
+                    <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569' }}>Current Position</th>
+                    <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569' }}>Target Position</th>
+                    <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569' }}>Division</th>
+                    <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569' }}>Stage</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {incumbents
+                    .filter(i => i.stage_of_reclassification === 'Endorsed' || i.stage_of_reclassification === 'Approved')
+                    .slice(0, 15)
+                    .map((counselor, idx) => {
+                      const badge = getStageBadge(counselor.stage_of_reclassification);
+                      return (
+                        <tr key={counselor.id || idx} style={{ borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.4)' : '1px solid #f1f5f9' }}>
+                          <td style={{ padding: '10px 14px', fontWeight: 650, color: isDark ? '#f8fafc' : '#0f172a' }}>{counselor.plantilla_item_number || counselor.employee_id}</td>
+                          <td style={{ padding: '10px 14px', color: isDark ? '#cbd5e1' : '#334155', fontWeight: 700 }}>{counselor.full_name}</td>
+                          <td style={{ padding: '10px 14px', color: isDark ? '#94a3b8' : '#64748b' }}>{counselor.current_position}</td>
+                          <td style={{ padding: '10px 14px' }}>
+                            <span style={{
+                              padding: '3px 9px',
+                              borderRadius: '6px',
+                              fontSize: '11px',
+                              fontWeight: 700,
+                              background: isDark ? 'rgba(59, 130, 246, 0.2)' : '#eff6ff',
+                              color: isDark ? '#93c5fd' : '#1d4ed8'
+                            }}>
+                              {counselor.reclass_position || 'School Counselor'}
+                            </span>
+                          </td>
+                          <td style={{ padding: '10px 14px', color: isDark ? '#94a3b8' : '#64748b' }}>{counselor.division || counselor.station_division}</td>
+                          <td style={{ padding: '10px 14px' }}>
+                            <span style={{
+                              padding: '3px 9px',
+                              borderRadius: '999px',
+                              fontSize: '11px',
+                              fontWeight: 700,
+                              background: badge.bg,
+                              color: badge.text,
+                              border: `1px solid ${badge.border}`
+                            }}>
+                              {badge.icon} {counselor.stage_of_reclassification}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  {incumbents.filter(i => i.stage_of_reclassification === 'Endorsed' || i.stage_of_reclassification === 'Approved').length === 0 && (
+                    <tr>
+                      <td colSpan={6} style={{ padding: '24px', textAlign: 'center', color: isDark ? '#94a3b8' : '#64748b' }}>
+                        No counselors have been marked as Endorsed or Approved yet. Move candidates to Endorsed/Approved in Step 2.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Navigation Back */}
+            <div style={{ display: 'flex', justifyContent: 'flex-start', marginTop: '20px' }}>
+              <button
+                type="button"
+                onClick={() => setCurrentStep(2)}
+                style={{
+                  padding: '9px 18px',
+                  borderRadius: '10px',
+                  border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid #cbd5e1',
+                  background: isDark ? 'rgba(30, 41, 59, 0.7)' : '#ffffff',
+                  color: isDark ? '#f8fafc' : '#0f172a',
+                  fontSize: '13px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                ← Return to Step 2: Assessment Workbench
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </main>
 
       {/* MODAL 1: RE-EVALUATION AGAINST CSC QS */}
       {showReevalModal && selectedApp && (
@@ -2796,6 +4305,1585 @@ export default function ReclassificationPage({ onBack }) {
                       <polyline points="7 3 7 8 15 8" />
                     </svg>
                     Save Changes
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* RECLASSIFICATION CSV INGESTION MODAL */}
+      {showCsvModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.72)',
+          backdropFilter: 'blur(8px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 100,
+          padding: '20px'
+        }}>
+          <div style={{
+            background: isDark ? '#0f172a' : '#ffffff',
+            borderRadius: '18px',
+            border: isDark ? '1px solid rgba(51, 65, 85, 0.9)' : '1px solid #e2e8f0',
+            width: '100%',
+            maxWidth: '780px',
+            maxHeight: '90vh',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            boxShadow: isDark ? '0 24px 64px rgba(0, 0, 0, 0.6)' : '0 20px 50px rgba(0, 0, 0, 0.15)'
+          }}>
+            {/* Modal Header */}
+            <div style={{
+              padding: '20px 26px',
+              borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid #e2e8f0',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              background: isDark ? 'rgba(15, 23, 42, 0.95)' : '#ffffff'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div style={{
+                  width: '40px',
+                  height: '40px',
+                  borderRadius: '10px',
+                  background: isDark ? 'rgba(37, 99, 235, 0.2)' : '#EFF6FF',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  border: isDark ? '1px solid rgba(59, 130, 246, 0.4)' : '1px solid #BFDBFE'
+                }}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={isDark ? '#60a5fa' : '#2563eb'} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="17 8 12 3 7 8" />
+                    <line x1="12" y1="3" x2="12" y2="15" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 800, color: isDark ? '#f8fafc' : '#0f172a' }}>
+                    Ingest Guidance Counselor Reclassification CSV
+                  </h3>
+                  <p style={{ margin: '3px 0 0', fontSize: '12px', color: isDark ? '#94a3b8' : '#64748b' }}>
+                    Upload DepEd Plantilla & Inventory CSV to ingest, validate, and batch update incumbent counselors.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowCsvModal(false)}
+                disabled={isUploadingCsv}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: isDark ? '#94a3b8' : '#64748b',
+                  fontSize: '20px',
+                  cursor: isUploadingCsv ? 'not-allowed' : 'pointer',
+                  padding: '6px',
+                  borderRadius: '6px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'color 0.15s'
+                }}
+                onMouseOver={e => e.currentTarget.style.color = isDark ? '#f8fafc' : '#0f172a'}
+                onMouseOut={e => e.currentTarget.style.color = isDark ? '#94a3b8' : '#64748b'}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div style={{ padding: '24px 26px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              {/* Quick Actions Bar */}
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '12px 16px',
+                borderRadius: '12px',
+                background: isDark ? 'rgba(30, 41, 59, 0.5)' : '#f8fafc',
+                border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid #e2e8f0',
+                gap: '12px',
+                flexWrap: 'wrap'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={isDark ? '#38bdf8' : '#0284c7'} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10" />
+                    <line x1="12" y1="16" x2="12" y2="12" />
+                    <line x1="12" y1="8" x2="12.01" y2="8" />
+                  </svg>
+                  <span style={{ fontSize: '12px', fontWeight: 650, color: isDark ? '#cbd5e1' : '#334155' }}>
+                    DepEd Standard Format: REGION, DIVISION, PLANTILLA ITEM NUMBER, POSITION, INCUMBENT...
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <button
+                    type="button"
+                    onClick={handleDownloadCsvTemplate}
+                    style={{
+                      background: isDark ? 'rgba(51, 65, 85, 0.7)' : '#ffffff',
+                      border: isDark ? '1px solid rgba(71, 85, 105, 0.8)' : '1px solid #cbd5e1',
+                      padding: '6px 12px',
+                      borderRadius: '7px',
+                      fontSize: '11.5px',
+                      fontWeight: 700,
+                      color: isDark ? '#93c5fd' : '#1d4ed8',
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      transition: 'all 0.15s ease'
+                    }}
+                    onMouseOver={e => e.currentTarget.style.borderColor = '#3b82f6'}
+                    onMouseOut={e => e.currentTarget.style.borderColor = isDark ? 'rgba(71, 85, 105, 0.8)' : '#cbd5e1'}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <polyline points="7 10 12 15 17 10" />
+                      <line x1="12" y1="15" x2="12" y2="3" />
+                    </svg>
+                    Download Template
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleExecuteCsvIngestion(true)}
+                    disabled={isUploadingCsv}
+                    style={{
+                      background: isDark ? 'rgba(16, 185, 129, 0.15)' : '#ecfdf5',
+                      border: isDark ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #a7f3d0',
+                      padding: '6px 12px',
+                      borderRadius: '7px',
+                      fontSize: '11.5px',
+                      fontWeight: 700,
+                      color: isDark ? '#6ee7b7' : '#047857',
+                      cursor: isUploadingCsv ? 'not-allowed' : 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      transition: 'all 0.15s ease'
+                    }}
+                    onMouseOver={e => !isUploadingCsv && (e.currentTarget.style.background = isDark ? 'rgba(16, 185, 129, 0.25)' : '#d1fae5')}
+                    onMouseOut={e => !isUploadingCsv && (e.currentTarget.style.background = isDark ? 'rgba(16, 185, 129, 0.15)' : '#ecfdf5')}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                      <polyline points="22 4 12 14.01 9 11.01" />
+                    </svg>
+                    Sync Official Inventory (5,600+ items)
+                  </button>
+                </div>
+              </div>
+
+              {/* Drag & Drop File Zone */}
+              <div
+                onDragOver={e => {
+                  e.preventDefault();
+                  setIsDragging(true);
+                }}
+                onDragLeave={() => setIsDragging(false)}
+                onDrop={e => {
+                  e.preventDefault();
+                  setIsDragging(false);
+                  if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                    handleSelectCsvFile(e.dataTransfer.files[0]);
+                  }
+                }}
+                style={{
+                  border: isDragging
+                    ? '2px dashed #3b82f6'
+                    : (isDark ? '2px dashed rgba(71, 85, 105, 0.8)' : '2px dashed #cbd5e1'),
+                  borderRadius: '14px',
+                  padding: '30px 20px',
+                  textAlign: 'center',
+                  background: isDragging
+                    ? (isDark ? 'rgba(37, 99, 235, 0.15)' : '#eff6ff')
+                    : (isDark ? 'rgba(30, 41, 59, 0.35)' : '#fcfdfe'),
+                  transition: 'all 0.2s ease',
+                  cursor: 'pointer',
+                  position: 'relative'
+                }}
+                onClick={() => document.getElementById('reclass-csv-input')?.click()}
+              >
+                <input
+                  id="reclass-csv-input"
+                  type="file"
+                  accept=".csv"
+                  onChange={e => {
+                    if (e.target.files && e.target.files[0]) {
+                      handleSelectCsvFile(e.target.files[0]);
+                    }
+                  }}
+                  style={{ display: 'none' }}
+                />
+
+                <div style={{
+                  width: '48px',
+                  height: '48px',
+                  borderRadius: '50%',
+                  background: isDark ? 'rgba(59, 130, 246, 0.2)' : '#e0f2fe',
+                  color: isDark ? '#60a5fa' : '#0284c7',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  margin: '0 auto 12px'
+                }}>
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                    <line x1="12" y1="18" x2="12" y2="12" />
+                    <line x1="9" y1="15" x2="15" y2="15" />
+                  </svg>
+                </div>
+
+                <div style={{ fontSize: '14px', fontWeight: 700, color: isDark ? '#f8fafc' : '#0f172a', marginBottom: '4px' }}>
+                  {csvFileName ? `Selected: ${csvFileName}` : 'Drag and drop your CSV file here, or browse'}
+                </div>
+                <div style={{ fontSize: '12px', color: isDark ? '#94a3b8' : '#64748b' }}>
+                  {csvTotalRowsCount > 0
+                    ? `${csvTotalRowsCount} data rows detected and parsed`
+                    : 'Accepts standard DepEd guidance counselor reclassification inventory spreadsheets'}
+                </div>
+              </div>
+
+              {/* Data Preview Section (when file parsed) */}
+              {csvPreviewRows.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span style={{ fontSize: '12.5px', fontWeight: 750, color: isDark ? '#cbd5e1' : '#1e293b' }}>
+                      File Preview (Showing first {csvPreviewRows.length} of {csvTotalRowsCount} records)
+                    </span>
+                    <span style={{ fontSize: '11px', color: isDark ? '#94a3b8' : '#64748b', fontWeight: 600 }}>
+                      Validation Status: <strong style={{ color: '#10b981' }}>✓ Columns Recognized</strong>
+                    </span>
+                  </div>
+
+                  <div style={{
+                    overflowX: 'auto',
+                    border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid #e2e8f0',
+                    borderRadius: '10px',
+                    background: isDark ? 'rgba(15, 23, 42, 0.6)' : '#ffffff'
+                  }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11.5px' }}>
+                      <thead>
+                        <tr style={{ background: isDark ? 'rgba(30, 41, 59, 0.8)' : '#f8fafc', borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid #e2e8f0' }}>
+                          <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569' }}>Item Number</th>
+                          <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569' }}>Incumbent Name</th>
+                          <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569' }}>Position</th>
+                          <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569' }}>Division / Station</th>
+                          <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569' }}>Target Reclass</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {csvPreviewRows.map((row, idx) => {
+                          const itemNo = row['PLANTILLA ITEM NUMBER'] || row['Plantilla Item Number'] || Object.values(row)[4] || '—';
+                          const name = row['INCUMBENT'] || row['Incumbent'] || Object.values(row)[7] || '#N/A';
+                          const pos = row['POSITION TITLE'] || row['Position Title'] || Object.values(row)[5] || '—';
+                          const division = row['DIVISION'] || row['Division'] || Object.values(row)[1] || '—';
+                          const target = row['RECLASS POSITION'] || row['Reclass Position'] || Object.values(row)[8] || 'For Review';
+
+                          return (
+                            <tr key={idx} style={{ borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.4)' : '1px solid #f1f5f9' }}>
+                              <td style={{ padding: '8px 12px', fontWeight: 650, color: isDark ? '#f8fafc' : '#0f172a' }}>{itemNo}</td>
+                              <td style={{ padding: '8px 12px', color: isDark ? '#cbd5e1' : '#334155' }}>
+                                {name === '#N/A' ? <em style={{ color: '#94a3b8' }}>Unfilled / Vacant</em> : name}
+                              </td>
+                              <td style={{ padding: '8px 12px', color: isDark ? '#94a3b8' : '#64748b' }}>{pos}</td>
+                              <td style={{ padding: '8px 12px', color: isDark ? '#94a3b8' : '#64748b' }}>{division}</td>
+                              <td style={{ padding: '8px 12px' }}>
+                                <span style={{
+                                  padding: '2px 8px',
+                                  borderRadius: '6px',
+                                  fontSize: '10.5px',
+                                  fontWeight: 700,
+                                  background: isDark ? 'rgba(59, 130, 246, 0.2)' : '#eff6ff',
+                                  color: isDark ? '#93c5fd' : '#1d4ed8'
+                                }}>
+                                  {target === '#N/A' ? 'Pending Eval' : target}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+
+              {/* Progress Indicator */}
+              {isUploadingCsv && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', fontWeight: 700, color: isDark ? '#f8fafc' : '#0f172a' }}>
+                    <span>Processing and Ingesting Records into Database...</span>
+                    <span>{uploadProgress}%</span>
+                  </div>
+                  <div style={{ height: '8px', borderRadius: '999px', background: isDark ? 'rgba(51, 65, 85, 0.8)' : '#e2e8f0', overflow: 'hidden' }}>
+                    <div style={{
+                      height: '100%',
+                      width: `${uploadProgress}%`,
+                      background: 'linear-gradient(90deg, #3b82f6 0%, #10b981 100%)',
+                      borderRadius: '999px',
+                      transition: 'width 0.3s ease'
+                    }} />
+                  </div>
+                </div>
+              )}
+
+              {/* Upload Success Summary */}
+              {uploadStats && (
+                <div style={{
+                  padding: '16px 20px',
+                  borderRadius: '12px',
+                  background: isDark ? 'rgba(16, 185, 129, 0.15)' : '#ecfdf5',
+                  border: isDark ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #a7f3d0',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '10px'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: isDark ? '#6ee7b7' : '#065f46', fontWeight: 750, fontSize: '13.5px' }}>
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                      <polyline points="22 4 12 14.01 9 11.01" />
+                    </svg>
+                    {uploadStats.message}
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '8px' }}>
+                    <div style={{ padding: '8px', borderRadius: '8px', background: isDark ? 'rgba(15, 23, 42, 0.5)' : '#ffffff', border: isDark ? '1px solid rgba(51, 65, 85, 0.5)' : '1px solid #e2e8f0' }}>
+                      <div style={{ fontSize: '10.5px', color: isDark ? '#94a3b8' : '#64748b', textTransform: 'uppercase', fontWeight: 700 }}>Total In Database</div>
+                      <div style={{ fontSize: '16px', fontWeight: 800, color: isDark ? '#f8fafc' : '#0f172a' }}>{uploadStats.totalInDatabase || uploadStats.insertedOrUpdated}</div>
+                    </div>
+                    {uploadStats.metrics && (
+                      <>
+                        <div style={{ padding: '8px', borderRadius: '8px', background: isDark ? 'rgba(15, 23, 42, 0.5)' : '#ffffff', border: isDark ? '1px solid rgba(51, 65, 85, 0.5)' : '1px solid #e2e8f0' }}>
+                          <div style={{ fontSize: '10.5px', color: isDark ? '#94a3b8' : '#64748b', textTransform: 'uppercase', fontWeight: 700 }}>For Review</div>
+                          <div style={{ fontSize: '16px', fontWeight: 800, color: '#f59e0b' }}>{uploadStats.metrics.forReview}</div>
+                        </div>
+                        <div style={{ padding: '8px', borderRadius: '8px', background: isDark ? 'rgba(15, 23, 42, 0.5)' : '#ffffff', border: isDark ? '1px solid rgba(51, 65, 85, 0.5)' : '1px solid #e2e8f0' }}>
+                          <div style={{ fontSize: '10.5px', color: isDark ? '#94a3b8' : '#64748b', textTransform: 'uppercase', fontWeight: 700 }}>Vacant / Unfilled</div>
+                          <div style={{ fontSize: '16px', fontWeight: 800, color: '#64748b' }}>{uploadStats.metrics.vacant}</div>
+                        </div>
+                        <div style={{ padding: '8px', borderRadius: '8px', background: isDark ? 'rgba(15, 23, 42, 0.5)' : '#ffffff', border: isDark ? '1px solid rgba(51, 65, 85, 0.5)' : '1px solid #e2e8f0' }}>
+                          <div style={{ fontSize: '10.5px', color: isDark ? '#94a3b8' : '#64748b', textTransform: 'uppercase', fontWeight: 700 }}>Abolition</div>
+                          <div style={{ fontSize: '16px', fontWeight: 800, color: '#ef4444' }}>{uploadStats.metrics.abolition}</div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div style={{
+              padding: '16px 26px',
+              borderTop: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid #e2e8f0',
+              background: isDark ? 'rgba(15, 23, 42, 0.95)' : '#f8fafc',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'flex-end',
+              gap: '12px'
+            }}>
+              <button
+                type="button"
+                onClick={() => setShowCsvModal(false)}
+                disabled={isUploadingCsv}
+                style={{
+                  padding: '9px 18px',
+                  borderRadius: '10px',
+                  border: isDark ? '1px solid rgba(71, 85, 105, 0.8)' : '1px solid #cbd5e1',
+                  background: isDark ? 'rgba(30, 41, 59, 0.6)' : '#ffffff',
+                  color: isDark ? '#f8fafc' : '#0f172a',
+                  fontSize: '13px',
+                  fontWeight: 700,
+                  cursor: isUploadingCsv ? 'not-allowed' : 'pointer'
+                }}
+              >
+                {uploadStats ? 'Close' : 'Cancel'}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleExecuteCsvIngestion(false)}
+                disabled={isUploadingCsv || (!csvContent && !csvFile)}
+                style={{
+                  padding: '9px 24px',
+                  borderRadius: '10px',
+                  border: 'none',
+                  background: (!csvContent && !csvFile) || isUploadingCsv
+                    ? '#64748b'
+                    : 'linear-gradient(135deg, #1e40af 0%, #2563eb 100%)',
+                  color: '#ffffff',
+                  fontSize: '13px',
+                  fontWeight: 750,
+                  cursor: (!csvContent && !csvFile) || isUploadingCsv ? 'not-allowed' : 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  boxShadow: (!csvContent && !csvFile) || isUploadingCsv ? 'none' : '0 4px 12px rgba(37, 99, 235, 0.3)'
+                }}
+              >
+                {isUploadingCsv ? (
+                  <>
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ animation: 'spin 1s linear infinite' }}>
+                      <circle cx="12" cy="12" r="10" strokeDasharray="32" strokeDashoffset="10" />
+                    </svg>
+                    Ingesting CSV...
+                  </>
+                ) : (
+                  <>
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <polyline points="17 8 12 3 7 8" />
+                      <line x1="12" y1="3" x2="12" y2="15" />
+                    </svg>
+                    {csvTotalRowsCount > 0 ? `Ingest ${csvTotalRowsCount} Records` : 'Start CSV Ingestion'}
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* REGIONAL OFFICE: NOSCA SCANNER & PLANTILLA ITEM SELECTION MODAL */}
+      {showNoscaModal && (
+        <div
+          onClick={(e) => { if (e.target === e.currentTarget && !scanningNosca) setShowNoscaModal(false); }}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: isDark ? 'rgba(2, 6, 23, 0.78)' : 'rgba(15, 23, 42, 0.55)',
+            backdropFilter: 'blur(10px)',
+            display: 'grid',
+            placeItems: 'center',
+            zIndex: 100,
+            padding: '16px'
+          }}
+        >
+          <div style={{
+            background: isDark ? 'rgba(15, 23, 42, 0.96)' : '#ffffff',
+            backdropFilter: 'blur(20px)',
+            borderRadius: '22px',
+            width: 'min(1280px, 96vw)',
+            height: 'min(860px, 92vh)',
+            maxHeight: '92vh',
+            display: 'flex',
+            flexDirection: 'column',
+            boxShadow: isDark ? '0 30px 70px rgba(0,0,0,0.65)' : '0 20px 50px rgba(0,0,0,0.18)',
+            border: isDark ? '1px solid rgba(99, 102, 241, 0.35)' : '1px solid #c7d2fe',
+            overflow: 'hidden'
+          }}>
+            <style>{`
+              @media (max-width: 960px) {
+                .nosca-split-layout {
+                  grid-template-columns: 1fr !important;
+                }
+              }
+            `}</style>
+
+            {/* Modal Header */}
+            <div style={{
+              padding: '18px 26px',
+              background: isDark ? 'rgba(30, 27, 75, 0.5)' : 'linear-gradient(135deg, #eef2ff 0%, #e0e7ff 100%)',
+              borderBottom: isDark ? '1px solid rgba(99, 102, 241, 0.25)' : '1px solid #c7d2fe',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '16px',
+              flexWrap: 'wrap'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div style={{
+                  width: '38px',
+                  height: '38px',
+                  borderRadius: '12px',
+                  background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#ffffff',
+                  boxShadow: '0 4px 14px rgba(79, 70, 229, 0.35)'
+                }}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                    <path d="M16 13H8" />
+                    <path d="M16 17H8" />
+                    <path d="M10 9H8" />
+                  </svg>
+                </div>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '10px', fontWeight: 800, padding: '2px 8px', borderRadius: '6px', background: isDark ? 'rgba(99, 102, 241, 0.25)' : '#e0e7ff', color: isDark ? '#a5b4fc' : '#4338ca', letterSpacing: '0.5px', textTransform: 'uppercase' }}>
+                      Regional Office Privilege
+                    </span>
+                    <span style={{ fontSize: '11px', color: isDark ? '#94a3b8' : '#64748b', fontWeight: 600 }}>
+                      AI/pdfplumber Parser
+                    </span>
+                  </div>
+                  <h3 style={{ fontSize: '16px', fontWeight: 850, margin: '2px 0 0', color: isDark ? '#f8fafc' : '#1e1b4b' }}>
+                    Notice of Organization, Staffing, and Compensation Action (NOSCA)
+                  </h3>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                {scannedNoscaResult && (
+                  <div style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '4px 10px',
+                    borderRadius: '8px',
+                    background: isDark ? 'rgba(99, 102, 241, 0.2)' : '#ffffff',
+                    border: isDark ? '1px solid rgba(99, 102, 241, 0.4)' : '1px solid #c7d2fe',
+                    fontSize: '11.5px',
+                    fontWeight: 750,
+                    color: isDark ? '#c4b5fd' : '#4f46e5'
+                  }}>
+                    <span>SN: {scannedNoscaResult.serial_no || 'UNKNOWN'}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleCopySerialNo(scannedNoscaResult.serial_no)}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', padding: 0 }}
+                      title="Copy Serial Number"
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                      </svg>
+                    </button>
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setShowNoscaModal(false)}
+                  disabled={scanningNosca}
+                  style={{
+                    background: isDark ? 'rgba(30, 41, 59, 0.8)' : '#ffffff',
+                    border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid #cbd5e1',
+                    width: '34px',
+                    height: '34px',
+                    borderRadius: '10px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: scanningNosca ? 'not-allowed' : 'pointer',
+                    transition: 'all 0.15s ease',
+                    boxShadow: isDark ? 'none' : '0 1px 3px rgba(0, 0, 0, 0.08)',
+                    padding: 0
+                  }}
+                  title="Close Modal"
+                  aria-label="Close"
+                  onMouseOver={e => {
+                    e.currentTarget.style.background = isDark ? 'rgba(239, 68, 68, 0.25)' : '#fee2e2';
+                    e.currentTarget.style.borderColor = '#ef4444';
+                    const svg = e.currentTarget.querySelector('svg');
+                    if (svg) svg.style.stroke = isDark ? '#fca5a5' : '#dc2626';
+                  }}
+                  onMouseOut={e => {
+                    e.currentTarget.style.background = isDark ? 'rgba(30, 41, 59, 0.8)' : '#ffffff';
+                    e.currentTarget.style.borderColor = isDark ? 'rgba(51, 65, 85, 0.8)' : '#cbd5e1';
+                    const svg = e.currentTarget.querySelector('svg');
+                    if (svg) svg.style.stroke = isDark ? '#e2e8f0' : '#1e293b';
+                  }}
+                >
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke={isDark ? '#e2e8f0' : '#1e293b'}
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    style={{ transition: 'stroke 0.15s ease' }}
+                  >
+                    <path d="M18 6L6 18M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Body - 2 Column Split Layout */}
+            <div
+              className="nosca-split-layout"
+              style={{
+                padding: '24px 26px',
+                overflowY: 'auto',
+                flex: 1,
+                display: 'grid',
+                gridTemplateColumns: '360px 1fr',
+                gap: '24px',
+                minHeight: 0,
+                alignItems: 'start'
+              }}
+            >
+              {/* LEFT COLUMN: UPLOAD & ACTIVE DOCUMENT INFO */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                {scannedNoscaResult && (
+                  <div style={{
+                    background: isDark ? 'rgba(30, 41, 59, 0.45)' : '#f8fafc',
+                    border: isDark ? '1px solid rgba(99, 102, 241, 0.35)' : '1px solid #e0e7ff',
+                    borderRadius: '16px',
+                    padding: '18px 20px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '14px',
+                    boxShadow: isDark ? '0 4px 16px rgba(0,0,0,0.2)' : '0 2px 8px rgba(99, 102, 241, 0.05)'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      <div style={{
+                        width: '42px',
+                        height: '42px',
+                        borderRadius: '12px',
+                        background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: '#ffffff',
+                        boxShadow: '0 4px 12px rgba(79, 70, 229, 0.3)',
+                        flexShrink: 0
+                      }}>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                          <polyline points="14 2 14 8 20 8" />
+                        </svg>
+                      </div>
+                      <div style={{ overflow: 'hidden' }}>
+                        <div style={{ fontSize: '13.5px', fontWeight: 800, color: isDark ? '#f8fafc' : '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {noscaFileName || 'NOSCA Document.pdf'}
+                        </div>
+                        <div style={{ fontSize: '11px', color: isDark ? '#6ee7b7' : '#059669', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <span>● Document Loaded & Parsed</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '12px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.4)' : '1px solid #f1f5f9' }}>
+                        <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>Serial Number</span>
+                        <span style={{ fontWeight: 800, color: isDark ? '#c4b5fd' : '#4f46e5' }}>{scannedNoscaResult.serial_no || 'N/A'}</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.4)' : '1px solid #f1f5f9' }}>
+                        <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>Division</span>
+                        <span style={{ fontWeight: 700, color: isDark ? '#f8fafc' : '#0f172a', textAlign: 'right' }}>{scannedNoscaResult.division ? `Division of ${scannedNoscaResult.division}` : 'Regional Scope'}</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.4)' : '1px solid #f1f5f9' }}>
+                        <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>Station</span>
+                        <span style={{ fontWeight: 650, color: isDark ? '#cbd5e1' : '#334155', textAlign: 'right', maxWidth: '180px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{scannedNoscaResult.school_name || 'All Stations'}</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.4)' : '1px solid #f1f5f9' }}>
+                        <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>Target Position</span>
+                        <span style={{ fontWeight: 700, color: isDark ? '#f8fafc' : '#0f172a', textAlign: 'right' }}>{scannedNoscaResult.position || 'School Counselor Associate I'}</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.4)' : '1px solid #f1f5f9' }}>
+                        <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>Total Plantilla Items</span>
+                        <span style={{ fontWeight: 800, color: isDark ? '#f8fafc' : '#0f172a' }}>{scannedNoscaResult.count || 0}</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0' }}>
+                        <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>Selected for Import</span>
+                        <span style={{ fontWeight: 800, color: '#10b981' }}>{selectedNoscaItems.length} items</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Upload Dropzone */}
+                <div
+                  onDragOver={(e) => { e.preventDefault(); setIsNoscaDragOver(true); }}
+                  onDragLeave={() => setIsNoscaDragOver(false)}
+                  onDrop={handleNoscaDrop}
+                  onClick={() => !scanningNosca && noscaFileInputRef.current?.click()}
+                  style={{
+                    border: isNoscaDragOver
+                      ? '2px dashed #6366f1'
+                      : (isDark ? '2px dashed rgba(99, 102, 241, 0.45)' : '2px dashed #c7d2fe'),
+                    borderRadius: '16px',
+                    padding: scannedNoscaResult ? '24px 18px' : '44px 22px',
+                    textAlign: 'center',
+                    background: isNoscaDragOver
+                      ? (isDark ? 'rgba(99, 102, 241, 0.18)' : '#eef2ff')
+                      : (isDark
+                          ? 'linear-gradient(180deg, rgba(30, 41, 59, 0.4) 0%, rgba(15, 23, 42, 0.6) 100%)'
+                          : 'linear-gradient(180deg, #fbfcfe 0%, #f4f7fb 100%)'),
+                    boxShadow: isNoscaDragOver
+                      ? '0 0 0 4px rgba(99, 102, 241, 0.18)'
+                      : (isDark ? 'none' : '0 2px 8px rgba(99, 102, 241, 0.04)'),
+                    cursor: scanningNosca ? 'wait' : 'pointer',
+                    transition: 'all 0.2s ease'
+                  }}
+                >
+                  {scanningNosca ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '14px' }}>
+                      <div style={{
+                        width: '46px',
+                        height: '46px',
+                        borderRadius: '50%',
+                        border: '3.5px solid rgba(99, 102, 241, 0.2)',
+                        borderTopColor: '#6366f1',
+                        animation: 'spin 0.8s linear infinite'
+                      }} />
+                      <div>
+                        <div style={{ fontSize: '15px', fontWeight: 800, color: isDark ? '#f8fafc' : '#0f172a' }}>
+                          Scanning NOSCA PDF...
+                        </div>
+                        <div style={{ fontSize: '12px', color: isDark ? '#94a3b8' : '#64748b', marginTop: '4px' }}>
+                          Parsing plantilla allocations...
+                        </div>
+                      </div>
+                    </div>
+                  ) : scannedNoscaResult ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+                      <div style={{
+                        width: '38px',
+                        height: '38px',
+                        borderRadius: '10px',
+                        background: isDark ? 'rgba(99, 102, 241, 0.2)' : '#e0e7ff',
+                        color: '#6366f1',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                      }}>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                          <polyline points="17 8 12 3 7 8" />
+                          <line x1="12" y1="3" x2="12" y2="15" />
+                        </svg>
+                      </div>
+                      <div style={{ fontSize: '13px', fontWeight: 750, color: isDark ? '#c4b5fd' : '#4f46e5' }}>
+                        Scan or Drop Another NOSCA PDF
+                      </div>
+                      <div style={{ fontSize: '11.5px', color: isDark ? '#94a3b8' : '#64748b' }}>
+                        Click to choose a replacement file
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
+                      {/* Floating Upload Icon with Glow */}
+                      <div style={{
+                        width: '64px',
+                        height: '64px',
+                        borderRadius: '18px',
+                        background: isDark
+                          ? 'linear-gradient(135deg, rgba(99, 102, 241, 0.25) 0%, rgba(79, 70, 229, 0.15) 100%)'
+                          : 'linear-gradient(135deg, #e0e7ff 0%, #ede9fe 100%)',
+                        border: isDark ? '1px solid rgba(99, 102, 241, 0.4)' : '1px solid #c7d2fe',
+                        color: isDark ? '#a5b4fc' : '#4f46e5',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        boxShadow: isDark
+                          ? '0 8px 24px rgba(99, 102, 241, 0.25)'
+                          : '0 8px 20px rgba(99, 102, 241, 0.15)'
+                      }}>
+                        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                          <polyline points="14 2 14 8 20 8" />
+                          <path d="M12 18v-6" />
+                          <path d="M9 15l3-3 3 3" />
+                        </svg>
+                      </div>
+
+                      <div>
+                        <div style={{ fontSize: '17px', fontWeight: 850, color: isDark ? '#f8fafc' : '#0f172a' }}>
+                          Upload NOSCA PDF Here
+                        </div>
+                        <div style={{ fontSize: '12.5px', color: isDark ? '#94a3b8' : '#64748b', marginTop: '6px', lineHeight: 1.5 }}>
+                          Drag and drop your official DBM NOSCA document here, or browse files from your computer.
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (!scanningNosca) noscaFileInputRef.current?.click();
+                        }}
+                        style={{
+                          background: 'linear-gradient(135deg, #4f46e5 0%, #6366f1 100%)',
+                          border: 'none',
+                          padding: '8px 20px',
+                          borderRadius: '10px',
+                          color: '#ffffff',
+                          fontSize: '12.5px',
+                          fontWeight: 700,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '7px',
+                          cursor: 'pointer',
+                          boxShadow: '0 4px 14px rgba(79, 70, 229, 0.3)'
+                        }}
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                          <polyline points="7 10 12 15 17 10" />
+                          <line x1="12" y1="3" x2="12" y2="15" />
+                        </svg>
+                        Browse NOSCA Document
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* RIGHT COLUMN: SCANNED NOSCA RESULTS */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', minWidth: 0 }}>
+                {scannedNoscaResult ? (
+                  <>
+                    {/* Summary Bar */}
+                    <div style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+                      gap: '10px'
+                    }}>
+                      <div style={{
+                        padding: '10px 14px',
+                        borderRadius: '10px',
+                        background: isDark ? 'rgba(30, 27, 75, 0.35)' : '#f5f3ff',
+                        border: isDark ? '1px solid rgba(139, 92, 246, 0.3)' : '1px solid #ddd6fe'
+                      }}>
+                        <div style={{ fontSize: '10px', fontWeight: 800, color: isDark ? '#c4b5fd' : '#6d28d9', textTransform: 'uppercase' }}>
+                          Division & Station
+                        </div>
+                        <div style={{ fontSize: '13px', fontWeight: 850, color: isDark ? '#ede9fe' : '#4c1d95', margin: '2px 0 1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {scannedNoscaResult.division ? `Division of ${scannedNoscaResult.division}` : 'Regional Scope'}
+                        </div>
+                        <div style={{ fontSize: '10.5px', color: isDark ? '#a78bfa' : '#7c3aed', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {scannedNoscaResult.school_name || 'All Stations'}
+                        </div>
+                      </div>
+
+                      <div style={{
+                        padding: '10px 14px',
+                        borderRadius: '10px',
+                        background: isDark ? 'rgba(30, 58, 138, 0.2)' : '#eff6ff',
+                        border: isDark ? '1px solid rgba(59, 130, 246, 0.3)' : '1px solid #bfdbfe'
+                      }}>
+                        <div style={{ fontSize: '10px', fontWeight: 800, color: isDark ? '#93c5fd' : '#1d4ed8', textTransform: 'uppercase' }}>
+                          Target Position
+                        </div>
+                        <div style={{ fontSize: '13px', fontWeight: 850, color: isDark ? '#dbeafe' : '#1e3a8a', margin: '2px 0 1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {scannedNoscaResult.position || 'School Counselor Associate I'}
+                        </div>
+                        <div style={{ fontSize: '10.5px', color: isDark ? '#60a5fa' : '#2563eb' }}>
+                          Auto-assigned title
+                        </div>
+                      </div>
+
+                      <div style={{
+                        padding: '10px 14px',
+                        borderRadius: '10px',
+                        background: isDark ? 'rgba(6, 95, 70, 0.2)' : '#ecfdf5',
+                        border: isDark ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid #a7f3d0'
+                      }}>
+                        <div style={{ fontSize: '10px', fontWeight: 800, color: isDark ? '#6ee7b7' : '#047857', textTransform: 'uppercase' }}>
+                          Selection Status
+                        </div>
+                        <div style={{ fontSize: '13px', fontWeight: 850, color: isDark ? '#d1fae5' : '#065f46', margin: '2px 0 1px' }}>
+                          {selectedNoscaItems.length} of {scannedNoscaResult.count || 0} selected
+                        </div>
+                        <div style={{ fontSize: '10.5px', color: isDark ? '#34d399' : '#059669' }}>
+                          Ready for commit
+                        </div>
+                      </div>
+
+                      <div style={{
+                        padding: '10px 14px',
+                        borderRadius: '10px',
+                        background: isDark ? 'rgba(180, 83, 9, 0.18)' : '#fffbeb',
+                        border: isDark ? '1px solid rgba(245, 158, 11, 0.3)' : '1px solid #fde68a'
+                      }}>
+                        <div style={{ fontSize: '10px', fontWeight: 800, color: isDark ? '#fde68a' : '#92400e', textTransform: 'uppercase' }}>
+                          Database Match
+                        </div>
+                        <div style={{ fontSize: '13px', fontWeight: 850, color: isDark ? '#fef3c7' : '#b45309', margin: '2px 0 1px' }}>
+                          {matchedIncumbentsCount} in Inventory DB
+                        </div>
+                        <div style={{ fontSize: '10.5px', color: isDark ? '#fde68a' : '#b45309' }}>
+                          {(scannedNoscaResult.count || 0) - matchedIncumbentsCount} new allocations
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Toolbar: Category Filters, Search, Select/Deselect All, and Bulk Remove */}
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: '10px',
+                      flexWrap: 'wrap',
+                      padding: '10px 12px',
+                      borderRadius: '12px',
+                      background: isDark ? 'rgba(15, 23, 42, 0.5)' : '#f8fafc',
+                      border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid #e2e8f0'
+                    }}>
+                      {/* Category Filter Pills */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap' }}>
+                        {[
+                          { key: 'ALL', label: 'All', count: scannedNoscaResult.items?.length || 0 },
+                          { key: 'ELEMENTARY', label: 'Elementary', count: scannedNoscaResult.category_breakdown?.ELEMENTARY?.length || 0 },
+                          { key: 'JHS', label: 'JHS', count: scannedNoscaResult.category_breakdown?.JHS?.length || 0 },
+                          { key: 'SHS', label: 'SHS', count: scannedNoscaResult.category_breakdown?.SHS?.length || 0 },
+                          { key: 'ALS', label: 'ALS', count: scannedNoscaResult.category_breakdown?.ALS?.length || 0 }
+                        ].map((tab) => {
+                          const isActive = noscaActiveCategory === tab.key;
+                          return (
+                            <button
+                              key={tab.key}
+                              type="button"
+                              onClick={() => setNoscaActiveCategory(tab.key)}
+                              style={{
+                                padding: '4px 9px',
+                                borderRadius: '7px',
+                                border: 'none',
+                                background: isActive ? '#4f46e5' : (isDark ? 'rgba(30, 41, 59, 0.6)' : '#ffffff'),
+                                color: isActive ? '#ffffff' : (isDark ? '#cbd5e1' : '#475569'),
+                                fontSize: '11px',
+                                fontWeight: isActive ? 750 : 600,
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                boxShadow: isActive ? '0 2px 8px rgba(79, 70, 229, 0.35)' : 'none'
+                              }}
+                            >
+                              <span>{tab.label}</span>
+                              <span style={{
+                                padding: '1px 5px',
+                                borderRadius: '999px',
+                                fontSize: '9.5px',
+                                fontWeight: 800,
+                                background: isActive ? 'rgba(255,255,255,0.25)' : (isDark ? 'rgba(255,255,255,0.1)' : '#e2e8f0')
+                              }}>
+                                {tab.count}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Action controls: Select All, Search, and Bulk Remove */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        <button
+                          type="button"
+                          onClick={toggleSelectAllNoscaItems}
+                          style={{
+                            padding: '5px 10px',
+                            borderRadius: '7px',
+                            border: isDark ? '1px solid rgba(99, 102, 241, 0.4)' : '1px solid #c7d2fe',
+                            background: isDark ? 'rgba(99, 102, 241, 0.15)' : '#eef2ff',
+                            color: isDark ? '#a5b4fc' : '#4338ca',
+                            fontSize: '11px',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '5px'
+                          }}
+                        >
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="9 11 12 14 22 4" />
+                            <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+                          </svg>
+                          {filteredNoscaItems.length > 0 && filteredNoscaItems.every(i => selectedNoscaItems.includes(i))
+                            ? 'Deselect All'
+                            : 'Select All'
+                          }
+                        </button>
+
+                        {selectedNoscaItems.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={handleRequestRemoveSelected}
+                            style={{
+                              padding: '5px 10px',
+                              borderRadius: '7px',
+                              border: isDark ? '1px solid rgba(239, 68, 68, 0.4)' : '1px solid #fecaca',
+                              background: isDark ? 'rgba(239, 68, 68, 0.15)' : '#fef2f2',
+                              color: isDark ? '#f87171' : '#dc2626',
+                              fontSize: '11px',
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '5px'
+                            }}
+                            title="Remove all selected items with confirmation"
+                          >
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="3 6 5 6 21 6" />
+                              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                            </svg>
+                            Remove ({selectedNoscaItems.length})
+                          </button>
+                        )}
+
+                        {/* Search box */}
+                        <div style={{ position: 'relative', width: '160px' }}>
+                          <input
+                            type="text"
+                            value={noscaSearchTerm}
+                            onChange={(e) => setNoscaSearchTerm(e.target.value)}
+                            placeholder="Filter item no..."
+                            style={{
+                              width: '100%',
+                              padding: '5px 8px 5px 26px',
+                              borderRadius: '7px',
+                              fontSize: '11px',
+                              border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid #cbd5e1',
+                              background: isDark ? 'rgba(15, 23, 42, 0.6)' : '#ffffff',
+                              color: isDark ? '#f8fafc' : '#0f172a',
+                              outline: 'none'
+                            }}
+                          />
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" style={{ position: 'absolute', left: '8px', top: '50%', transform: 'translateY(-50%)', color: isDark ? '#94a3b8' : '#64748b' }}>
+                            <circle cx="11" cy="11" r="8" />
+                            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                          </svg>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Items Selection Table */}
+                    <div style={{
+                      border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid #e2e8f0',
+                      borderRadius: '12px',
+                      overflow: 'hidden',
+                      maxHeight: '400px',
+                      display: 'flex',
+                      flexDirection: 'column'
+                    }}>
+                      <div style={{ overflowY: 'auto' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                          <thead style={{ position: 'sticky', top: 0, background: isDark ? 'rgba(30, 41, 59, 0.95)' : '#f8fafc', borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid #e2e8f0', zIndex: 2 }}>
+                            <tr>
+                              <th style={{ width: '38px', padding: '9px 10px', textAlign: 'center' }}>
+                                <input
+                                  type="checkbox"
+                                  checked={filteredNoscaItems.length > 0 && filteredNoscaItems.every(i => selectedNoscaItems.includes(i))}
+                                  onChange={toggleSelectAllNoscaItems}
+                                  style={{ width: '14px', height: '14px', cursor: 'pointer', accentColor: '#4f46e5' }}
+                                />
+                              </th>
+                              <th style={{ padding: '9px 12px', textAlign: 'left', fontWeight: 750, color: isDark ? '#94a3b8' : '#475569' }}>
+                                Plantilla Item Number
+                              </th>
+                              <th style={{ padding: '9px 12px', textAlign: 'left', fontWeight: 750, color: isDark ? '#94a3b8' : '#475569' }}>
+                                Category
+                              </th>
+                              <th style={{ padding: '9px 12px', textAlign: 'left', fontWeight: 750, color: isDark ? '#94a3b8' : '#475569' }}>
+                                Database Status
+                              </th>
+                              <th style={{ width: '60px', padding: '9px 10px', textAlign: 'center', fontWeight: 750, color: isDark ? '#94a3b8' : '#475569' }}>
+                                Action
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {filteredNoscaItems.length > 0 ? (
+                              filteredNoscaItems.map((item, idx) => {
+                                const isSelected = selectedNoscaItems.includes(item);
+                                const isMatched = incumbents?.some(inc => inc.plantilla_item_number && String(inc.plantilla_item_number).trim().toLowerCase() === String(item).trim().toLowerCase());
+                                
+                                let itemCat = 'ELEMENTARY';
+                                if (scannedNoscaResult.category_breakdown?.JHS?.includes(item)) itemCat = 'JHS';
+                                else if (scannedNoscaResult.category_breakdown?.SHS?.includes(item)) itemCat = 'SHS';
+                                else if (scannedNoscaResult.category_breakdown?.ALS?.includes(item)) itemCat = 'ALS';
+
+                                return (
+                                  <tr
+                                    key={idx}
+                                    onClick={() => toggleSelectNoscaItem(item)}
+                                    style={{
+                                      borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.4)' : '1px solid #f1f5f9',
+                                      background: isSelected 
+                                        ? (isDark ? 'rgba(79, 70, 229, 0.12)' : '#eef2ff')
+                                        : (idx % 2 === 0 ? (isDark ? 'rgba(15, 23, 42, 0.3)' : '#ffffff') : (isDark ? 'rgba(15, 23, 42, 0.6)' : '#fafafa')),
+                                      cursor: 'pointer',
+                                      transition: 'background 0.15s ease'
+                                    }}
+                                  >
+                                    <td style={{ textAlign: 'center', padding: '9px 10px' }} onClick={(e) => e.stopPropagation()}>
+                                      <input
+                                        type="checkbox"
+                                        checked={isSelected}
+                                        onChange={() => toggleSelectNoscaItem(item)}
+                                        style={{ width: '14px', height: '14px', cursor: 'pointer', accentColor: '#4f46e5' }}
+                                      />
+                                    </td>
+                                    <td style={{ padding: '9px 12px', fontFamily: 'monospace', fontWeight: 700, color: isDark ? '#f8fafc' : '#0f172a' }}>
+                                      {item}
+                                    </td>
+                                    <td style={{ padding: '9px 12px' }}>
+                                      <span style={{
+                                        fontSize: '10.5px',
+                                        fontWeight: 750,
+                                        padding: '2px 7px',
+                                        borderRadius: '5px',
+                                        background: itemCat === 'SHS' ? (isDark ? 'rgba(217, 119, 6, 0.2)' : '#fef3c7') : itemCat === 'JHS' ? (isDark ? 'rgba(37, 99, 235, 0.2)' : '#dbeafe') : itemCat === 'ALS' ? (isDark ? 'rgba(147, 51, 234, 0.2)' : '#f3e8ff') : (isDark ? 'rgba(16, 185, 129, 0.2)' : '#d1fae5'),
+                                        color: itemCat === 'SHS' ? (isDark ? '#fde68a' : '#b45309') : itemCat === 'JHS' ? (isDark ? '#bfdbfe' : '#1d4ed8') : itemCat === 'ALS' ? (isDark ? '#e9d5ff' : '#7e22ce') : (isDark ? '#a7f3d0' : '#047857')
+                                      }}>
+                                        {itemCat}
+                                      </span>
+                                    </td>
+                                    <td style={{ padding: '9px 12px' }}>
+                                      {isMatched ? (
+                                        <span style={{ fontSize: '10.5px', fontWeight: 800, padding: '2px 7px', borderRadius: '5px', background: isDark ? 'rgba(16, 185, 129, 0.25)' : '#dcfce7', color: isDark ? '#6ee7b7' : '#15803d' }}>
+                                          ✓ In Reclassification DB
+                                        </span>
+                                      ) : (
+                                        <span style={{ fontSize: '10.5px', fontWeight: 750, padding: '2px 7px', borderRadius: '5px', background: isDark ? 'rgba(99, 102, 241, 0.2)' : '#e0e7ff', color: isDark ? '#a5b4fc' : '#4338ca' }}>
+                                          + New Allocation
+                                        </span>
+                                      )}
+                                    </td>
+                                    <td style={{ textAlign: 'center', padding: '9px 10px' }} onClick={(e) => e.stopPropagation()}>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleRequestRemoveItem(item)}
+                                        style={{
+                                          border: 'none',
+                                          background: 'transparent',
+                                          cursor: 'pointer',
+                                          color: isDark ? '#f87171' : '#ef4444',
+                                          padding: '3px',
+                                          borderRadius: '5px',
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          justifyContent: 'center',
+                                          transition: 'background 0.15s ease'
+                                        }}
+                                        title={`Remove item ${item} from this batch`}
+                                      >
+                                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+                                          <polyline points="3 6 5 6 21 6" />
+                                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                                        </svg>
+                                      </button>
+                                    </td>
+                                  </tr>
+                                );
+                              })
+                            ) : (
+                              <tr>
+                                <td colSpan={5} style={{ padding: '26px', textAlign: 'center', color: isDark ? '#94a3b8' : '#64748b' }}>
+                                  No plantilla items found matching the selected filter.
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div style={{
+                    background: isDark ? 'rgba(15, 23, 42, 0.4)' : '#f8fafc',
+                    border: isDark ? '1px dashed rgba(51, 65, 85, 0.7)' : '1px dashed #cbd5e1',
+                    borderRadius: '16px',
+                    padding: '40px 24px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    textAlign: 'center',
+                    minHeight: '380px',
+                    height: '100%'
+                  }}>
+                    <div style={{
+                      width: '56px',
+                      height: '56px',
+                      borderRadius: '16px',
+                      background: isDark ? 'rgba(99, 102, 241, 0.15)' : '#e0e7ff',
+                      color: '#6366f1',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      marginBottom: '14px'
+                    }}>
+                      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                        <line x1="3" y1="9" x2="21" y2="9" />
+                        <line x1="9" y1="21" x2="9" y2="9" />
+                      </svg>
+                    </div>
+                    <div style={{ fontSize: '16px', fontWeight: 800, color: isDark ? '#f8fafc' : '#0f172a' }}>
+                      Scanned Results Will Appear Here
+                    </div>
+                    <div style={{ fontSize: '12.5px', color: isDark ? '#94a3b8' : '#64748b', marginTop: '6px', maxWidth: '380px', lineHeight: 1.55 }}>
+                      Upload an official DBM NOSCA PDF on the left. Once parsed, the extracted plantilla items, category breakdown, and item selection controls will appear here.
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div style={{
+              padding: '16px 26px',
+              background: isDark ? 'rgba(15, 23, 42, 0.95)' : '#f8fafc',
+              borderTop: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid #e2e8f0',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '12px',
+              flexWrap: 'wrap'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                {scannedNoscaResult && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => noscaFileInputRef.current?.click()}
+                      disabled={scanningNosca}
+                      style={{
+                        padding: '8px 14px',
+                        borderRadius: '8px',
+                        border: isDark ? '1px solid rgba(99, 102, 241, 0.4)' : '1px solid #cbd5e1',
+                        background: isDark ? 'rgba(30, 41, 59, 0.6)' : '#ffffff',
+                        color: isDark ? '#cbd5e1' : '#475569',
+                        fontSize: '12px',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px'
+                      }}
+                    >
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                        <polyline points="17 8 12 3 7 8" />
+                        <line x1="12" y1="3" x2="12" y2="15" />
+                      </svg>
+                      Scan Another NOSCA
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setScannedNoscaResult(null);
+                        setSelectedNoscaItems([]);
+                        setNoscaFileName('');
+                        setNoscaSearchTerm('');
+                      }}
+                      style={{
+                        padding: '8px 14px',
+                        borderRadius: '8px',
+                        border: isDark ? '1px solid rgba(239, 68, 68, 0.3)' : '1px solid #fecaca',
+                        background: 'transparent',
+                        color: isDark ? '#f87171' : '#dc2626',
+                        fontSize: '12px',
+                        fontWeight: 700,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Reset
+                    </button>
+                  </>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <button
+                  type="button"
+                  onClick={() => setShowNoscaModal(false)}
+                  style={{
+                    padding: '8px 16px',
+                    borderRadius: '8px',
+                    border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid #cbd5e1',
+                    background: 'transparent',
+                    color: isDark ? '#cbd5e1' : '#475569',
+                    fontSize: '12.5px',
+                    fontWeight: 700,
+                    cursor: 'pointer'
+                  }}
+                >
+                  Close
+                </button>
+
+                {scannedNoscaResult && (
+                  <button
+                    type="button"
+                    onClick={handleRequestAddItems}
+                    disabled={selectedNoscaItems.length === 0}
+                    style={{
+                      padding: '8px 20px',
+                      borderRadius: '8px',
+                      border: 'none',
+                      background: selectedNoscaItems.length === 0
+                        ? '#64748b'
+                        : 'linear-gradient(135deg, #059669 0%, #10b981 100%)',
+                      color: '#ffffff',
+                      fontSize: '12.5px',
+                      fontWeight: 750,
+                      cursor: selectedNoscaItems.length === 0 ? 'not-allowed' : 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      boxShadow: selectedNoscaItems.length === 0 ? 'none' : '0 4px 14px rgba(16, 185, 129, 0.35)'
+                    }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                    Import & Commit Selected Items ({selectedNoscaItems.length})
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CONFIRMATION MODAL LAYER 1: REMOVE PLANTILLA ITEM(S) */}
+      {confirmRemoveState.open && (
+        <div
+          onClick={(e) => { if (e.target === e.currentTarget) setConfirmRemoveState({ open: false, item: null, isBulk: false }); }}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(2, 6, 23, 0.7)',
+            backdropFilter: 'blur(8px)',
+            display: 'grid',
+            placeItems: 'center',
+            zIndex: 120,
+            padding: '16px'
+          }}
+        >
+          <div style={{
+            background: isDark ? 'rgba(15, 23, 42, 0.98)' : '#ffffff',
+            borderRadius: '18px',
+            width: 'min(480px, 94vw)',
+            padding: '26px 28px',
+            boxShadow: '0 25px 60px rgba(0,0,0,0.5)',
+            border: isDark ? '1px solid rgba(239, 68, 68, 0.4)' : '1px solid #fecaca'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '14px', marginBottom: '16px' }}>
+              <div style={{
+                width: '42px',
+                height: '42px',
+                borderRadius: '12px',
+                background: isDark ? 'rgba(239, 68, 68, 0.2)' : '#fee2e2',
+                color: '#ef4444',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0
+              }}>
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                  <line x1="12" y1="9" x2="12" y2="13" />
+                  <line x1="12" y1="17" x2="12.01" y2="17" />
+                </svg>
+              </div>
+              <div>
+                <h4 style={{ fontSize: '17px', fontWeight: 850, margin: '0 0 4px', color: isDark ? '#f8fafc' : '#1e293b' }}>
+                  Confirm Plantilla Item Removal
+                </h4>
+                <p style={{ margin: 0, fontSize: '13px', color: isDark ? '#94a3b8' : '#64748b', lineHeight: 1.5 }}>
+                  {confirmRemoveState.isBulk ? (
+                    <>Are you sure you want to remove all <b>{selectedNoscaItems.length} selected items</b> from this NOSCA allocation batch? They will not be committed to the inventory.</>
+                  ) : (
+                    <>Are you sure you want to remove item <b style={{ fontFamily: 'monospace' }}>{confirmRemoveState.item}</b> from this NOSCA allocation batch? It will not be committed to the inventory.</>
+                  )}
+                </p>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '10px', marginTop: '22px' }}>
+              <button
+                type="button"
+                onClick={() => setConfirmRemoveState({ open: false, item: null, isBulk: false })}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: '8px',
+                  border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid #cbd5e1',
+                  background: 'transparent',
+                  color: isDark ? '#cbd5e1' : '#475569',
+                  fontSize: '12.5px',
+                  fontWeight: 700,
+                  cursor: 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteConfirmedRemoval}
+                style={{
+                  padding: '8px 18px',
+                  borderRadius: '8px',
+                  border: 'none',
+                  background: 'linear-gradient(135deg, #dc2626 0%, #ef4444 100%)',
+                  color: '#ffffff',
+                  fontSize: '12.5px',
+                  fontWeight: 750,
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 12px rgba(239, 68, 68, 0.35)'
+                }}
+              >
+                Yes, Remove Item{confirmRemoveState.isBulk ? 's' : ''}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CONFIRMATION MODAL LAYER 2: TOTAL ADD / COMMIT CONFIRMATION */}
+      {showConfirmAddModal && (
+        <div
+          onClick={(e) => { if (e.target === e.currentTarget && !importingNoscaItems) setShowConfirmAddModal(false); }}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(2, 6, 23, 0.7)',
+            backdropFilter: 'blur(8px)',
+            display: 'grid',
+            placeItems: 'center',
+            zIndex: 120,
+            padding: '16px'
+          }}
+        >
+          <div style={{
+            background: isDark ? 'rgba(15, 23, 42, 0.98)' : '#ffffff',
+            borderRadius: '20px',
+            width: 'min(540px, 94vw)',
+            padding: '28px 30px',
+            boxShadow: '0 25px 60px rgba(0,0,0,0.5)',
+            border: isDark ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #a7f3d0'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '18px' }}>
+              <div style={{
+                width: '46px',
+                height: '46px',
+                borderRadius: '14px',
+                background: isDark ? 'rgba(16, 185, 129, 0.2)' : '#dcfce7',
+                color: '#10b981',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0
+              }}>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                  <polyline points="22 4 12 14.01 9 11.01" />
+                </svg>
+              </div>
+              <div>
+                <h4 style={{ fontSize: '18px', fontWeight: 850, margin: '0 0 4px', color: isDark ? '#f8fafc' : '#1e293b' }}>
+                  Confirm Plantilla Allocation Import
+                </h4>
+                <div style={{ fontSize: '13px', color: isDark ? '#94a3b8' : '#64748b' }}>
+                  Commit {selectedNoscaItems.length} selected plantilla items into the official inventory
+                </div>
+              </div>
+            </div>
+
+            {/* Batch Details Box */}
+            <div style={{
+              background: isDark ? 'rgba(30, 41, 59, 0.5)' : '#f8fafc',
+              border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid #e2e8f0',
+              borderRadius: '12px',
+              padding: '16px',
+              marginBottom: '16px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '8px',
+              fontSize: '13px'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: isDark ? '#94a3b8' : '#64748b', fontWeight: 600 }}>NOSCA Serial:</span>
+                <span style={{ fontWeight: 800, color: isDark ? '#f8fafc' : '#0f172a' }}>{scannedNoscaResult?.serial_no || 'N/A'}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: isDark ? '#94a3b8' : '#64748b', fontWeight: 600 }}>Division:</span>
+                <span style={{ fontWeight: 700, color: isDark ? '#f8fafc' : '#0f172a' }}>{scannedNoscaResult?.division ? `Division of ${scannedNoscaResult.division}` : 'Regional Office'}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: isDark ? '#94a3b8' : '#64748b', fontWeight: 600 }}>Target Position:</span>
+                <span style={{ fontWeight: 700, color: '#10b981' }}>{scannedNoscaResult?.position || 'School Counselor Associate I'}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid #e2e8f0', paddingTop: '8px', marginTop: '2px' }}>
+                <span style={{ color: isDark ? '#94a3b8' : '#64748b', fontWeight: 700 }}>Total Items to Commit:</span>
+                <span style={{ fontWeight: 850, color: isDark ? '#a7f3d0' : '#047857', fontSize: '14px' }}>{selectedNoscaItems.length} items</span>
+              </div>
+            </div>
+
+            <div style={{
+              padding: '10px 14px',
+              borderRadius: '10px',
+              background: isDark ? 'rgba(59, 130, 246, 0.15)' : '#eff6ff',
+              border: isDark ? '1px solid rgba(59, 130, 246, 0.3)' : '1px solid #bfdbfe',
+              fontSize: '12px',
+              color: isDark ? '#93c5fd' : '#1e40af',
+              lineHeight: 1.4,
+              marginBottom: '20px'
+            }}>
+              <b>Notice:</b> Confirming will officially save these items into the database. Existing matching records will be updated with this NOSCA reference, and new records will be created as vacant plantilla items.
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '10px' }}>
+              <button
+                type="button"
+                onClick={() => setShowConfirmAddModal(false)}
+                disabled={importingNoscaItems}
+                style={{
+                  padding: '9px 18px',
+                  borderRadius: '8px',
+                  border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid #cbd5e1',
+                  background: 'transparent',
+                  color: isDark ? '#cbd5e1' : '#475569',
+                  fontSize: '13px',
+                  fontWeight: 700,
+                  cursor: importingNoscaItems ? 'not-allowed' : 'pointer'
+                }}
+              >
+                Keep Reviewing
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteConfirmedImport}
+                disabled={importingNoscaItems}
+                style={{
+                  padding: '9px 22px',
+                  borderRadius: '8px',
+                  border: 'none',
+                  background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)',
+                  color: '#ffffff',
+                  fontSize: '13px',
+                  fontWeight: 750,
+                  cursor: importingNoscaItems ? 'not-allowed' : 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  boxShadow: '0 4px 14px rgba(16, 185, 129, 0.35)'
+                }}
+              >
+                {importingNoscaItems ? (
+                  <>
+                    <div style={{ width: '15px', height: '15px', border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#ffffff', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+                    <span>Committing Items...</span>
+                  </>
+                ) : (
+                  <>
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                    <span>Confirm & Add to Inventory</span>
                   </>
                 )}
               </button>

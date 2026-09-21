@@ -1,5 +1,14 @@
 import { pool } from '../../config/db.js';
 import ExcelJS from 'exceljs';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { spawn } from 'child_process';
+import os from 'os';
+import { randomUUID } from 'crypto';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 /**
  * Fetch all reclassification applications with applicant details
@@ -602,3 +611,496 @@ export async function getIncumbentDocuments(req, res) {
     res.status(500).json({ error: error.message || 'Failed to fetch incumbent documents' });
   }
 }
+
+/**
+ * Parse CSV text respecting quoted commas and escaped quotes
+ */
+function parseCSVRows(csvText) {
+  const rows = [];
+  let currentField = '';
+  let currentRow = [];
+  let inQuotes = false;
+
+  const text = csvText.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    const nextChar = text[i + 1];
+
+    if (char === '"') {
+      if (inQuotes && nextChar === '"') {
+        currentField += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (char === ',' && !inQuotes) {
+      currentRow.push(currentField.trim());
+      currentField = '';
+    } else if (char === '\n' && !inQuotes) {
+      currentRow.push(currentField.trim());
+      if (currentRow.some(f => f !== '')) {
+        rows.push(currentRow);
+      }
+      currentRow = [];
+      currentField = '';
+    } else {
+      currentField += char;
+    }
+  }
+
+  if (currentField || currentRow.length > 0) {
+    currentRow.push(currentField.trim());
+    if (currentRow.some(f => f !== '')) {
+      rows.push(currentRow);
+    }
+  }
+
+  return rows;
+}
+
+/**
+ * Ingest Reclassification Inventory CSV into incumbent_guidance_counselors
+ */
+export async function uploadReclassCsv(req, res) {
+  let client;
+  try {
+    const { csvContent, fileName, useDefaultFile, replaceExisting } = req.body;
+    let rawCsv = '';
+
+    if (useDefaultFile) {
+      const candidates = [
+        path.resolve(__dirname, '../../../../../Inventory of Application for GC Reclass(Sheet2)2.csv'),
+        path.resolve(process.cwd(), 'Inventory of Application for GC Reclass(Sheet2)2.csv'),
+        path.resolve(__dirname, '../../../../Inventory of Application for GC Reclass(Sheet2)2.csv')
+      ];
+      const foundPath = candidates.find(p => fs.existsSync(p));
+      if (!foundPath) {
+        return res.status(404).json({ error: 'Official master inventory CSV file not found on server.' });
+      }
+      rawCsv = fs.readFileSync(foundPath, 'utf8');
+    } else {
+      if (!csvContent || typeof csvContent !== 'string' || !csvContent.trim()) {
+        return res.status(400).json({ error: 'No CSV content provided for ingestion.' });
+      }
+      rawCsv = csvContent;
+    }
+
+    const parsedRows = parseCSVRows(rawCsv);
+    if (parsedRows.length <= 1) {
+      return res.status(400).json({ error: 'The provided CSV is empty or has no data rows.' });
+    }
+
+    // Header normalization
+    const rawHeader = parsedRows[0];
+    const normalizedHeaders = rawHeader.map(h => h.toLowerCase().replace(/[^a-z0-9]/g, ''));
+
+    // Find column indexes
+    let regionIdx = normalizedHeaders.findIndex(h => h.includes('region'));
+    let divisionIdx = normalizedHeaders.findIndex(h => h.includes('division'));
+    let stationIdx = normalizedHeaders.findIndex(h => h.includes('uacs') || h.includes('station') || h.includes('oper') || h.includes('school'));
+    let orgCdIdx = normalizedHeaders.findIndex(h => h.includes('orgcd') || h.includes('org'));
+    let itemNoIdx = normalizedHeaders.findIndex(h => h.includes('plantilla') || h.includes('itemno') || h.includes('itemnum'));
+    let posIdx = normalizedHeaders.findIndex(h => h.includes('positiontitle') || (h.includes('position') && !h.includes('reclass')));
+    let sgIdx = normalizedHeaders.findIndex(h => h.includes('salarygrade') || h === 'sg');
+    let nameIdx = normalizedHeaders.findIndex(h => h.includes('incumbent') || h.includes('fullname') || h === 'name');
+    let reclassPosIdx = normalizedHeaders.findIndex(h => h.includes('reclass') || h.includes('targetpos'));
+    let remarksIdx = normalizedHeaders.findIndex(h => h.includes('remark') || h.includes('notes'));
+
+    // Fallback to default index positions if headers didn't match
+    if (itemNoIdx === -1) itemNoIdx = 4;
+    if (regionIdx === -1) regionIdx = 0;
+    if (divisionIdx === -1) divisionIdx = 1;
+    if (stationIdx === -1) stationIdx = 2;
+    if (orgCdIdx === -1) orgCdIdx = 3;
+    if (posIdx === -1) posIdx = 5;
+    if (sgIdx === -1) sgIdx = 6;
+    if (nameIdx === -1) nameIdx = 7;
+    if (reclassPosIdx === -1) reclassPosIdx = 8;
+    if (remarksIdx === -1) remarksIdx = 9;
+
+    const dataRows = parsedRows.slice(1);
+    client = await pool.connect();
+
+    // If replaceExisting is requested, delete old records
+    if (replaceExisting) {
+      await client.query('TRUNCATE TABLE incumbent_guidance_counselors CASCADE');
+    }
+
+    let insertedOrUpdated = 0;
+    let vacantCount = 0;
+    let abolitionCount = 0;
+    let forReviewCount = 0;
+
+    const chunkSize = 200;
+    for (let i = 0; i < dataRows.length; i += chunkSize) {
+      const chunk = dataRows.slice(i, i + chunkSize);
+      const values = [];
+      const placeholders = [];
+      let pIdx = 1;
+
+      for (let j = 0; j < chunk.length; j++) {
+        const row = chunk[j];
+        const region = row[regionIdx] || null;
+        const division = row[divisionIdx] || null;
+        const uacs_oper_dsc = row[stationIdx] || null;
+        const org_cd = row[orgCdIdx] || null;
+        const plantilla_item_number = (row[itemNoIdx] || '').trim();
+        const current_position = (row[posIdx] || 'Unassigned').trim();
+        const salary_grade = row[sgIdx] || null;
+        const rawName = (row[nameIdx] || '').trim();
+        const rawReclass = (row[reclassPosIdx] || '').trim();
+        const remarks = row[remarksIdx] || null;
+
+        const full_name = (!rawName || rawName.toUpperCase() === '#N/A') ? '#N/A' : rawName;
+        const reclass_position = (rawReclass && rawReclass.toUpperCase() !== '#N/A') ? rawReclass : null;
+
+        // Determine employee_id and station_division
+        const employee_id = plantilla_item_number || `ITEM-${i + j + 1}-${Date.now()}`;
+        const station_division = division || uacs_oper_dsc || 'Unknown Station';
+
+        // Stage determination
+        let stage_of_reclassification = 'For Review';
+        const upperName = full_name.toUpperCase();
+        const upperRemarks = (remarks || '').toUpperCase();
+
+        if (upperName === '#N/A' || upperName === 'VACANT' || upperName === 'UNFILLED') {
+          stage_of_reclassification = 'Unfilled / Vacant';
+          vacantCount++;
+        } else if (upperRemarks.includes('ABOLITION')) {
+          stage_of_reclassification = 'Abolition';
+          abolitionCount++;
+        } else {
+          forReviewCount++;
+        }
+
+        placeholders.push(
+          `($${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++})`
+        );
+
+        values.push(
+          employee_id,
+          plantilla_item_number,
+          full_name,
+          current_position,
+          salary_grade,
+          region,
+          division,
+          uacs_oper_dsc,
+          station_division,
+          org_cd,
+          remarks,
+          stage_of_reclassification,
+          reclass_position
+        );
+      }
+
+      if (placeholders.length > 0) {
+        const query = `
+          INSERT INTO incumbent_guidance_counselors (
+            employee_id,
+            plantilla_item_number,
+            full_name,
+            current_position,
+            salary_grade,
+            region,
+            division,
+            uacs_oper_dsc,
+            station_division,
+            org_cd,
+            remarks,
+            stage_of_reclassification,
+            reclass_position
+          ) VALUES ${placeholders.join(', ')}
+          ON CONFLICT (employee_id) DO UPDATE SET
+            plantilla_item_number = EXCLUDED.plantilla_item_number,
+            full_name = EXCLUDED.full_name,
+            current_position = EXCLUDED.current_position,
+            salary_grade = EXCLUDED.salary_grade,
+            region = EXCLUDED.region,
+            division = EXCLUDED.division,
+            uacs_oper_dsc = EXCLUDED.uacs_oper_dsc,
+            station_division = EXCLUDED.station_division,
+            org_cd = EXCLUDED.org_cd,
+            remarks = EXCLUDED.remarks,
+            stage_of_reclassification = EXCLUDED.stage_of_reclassification,
+            reclass_position = COALESCE(EXCLUDED.reclass_position, incumbent_guidance_counselors.reclass_position),
+            updated_at = NOW();
+        `;
+        await client.query(query, values);
+        insertedOrUpdated += chunk.length;
+      }
+    }
+
+    const countRes = await client.query('SELECT COUNT(*) as total FROM incumbent_guidance_counselors');
+
+    res.json({
+      success: true,
+      message: `Successfully ingested ${insertedOrUpdated} records from ${fileName || 'official inventory'}.`,
+      totalProcessed: dataRows.length,
+      insertedOrUpdated,
+      totalInDatabase: parseInt(countRes.rows[0]?.total || 0, 10),
+      metrics: {
+        vacant: vacantCount,
+        abolition: abolitionCount,
+        forReview: forReviewCount
+      }
+    });
+  } catch (error) {
+    console.error('[Reclass Controller - uploadReclassCsv]', error);
+    res.status(500).json({ error: error.message || 'Failed to ingest reclassification CSV' });
+  } finally {
+    if (client) client.release();
+  }
+}
+
+/**
+ * Stream/download the standard Guidance Counselor Reclassification CSV template
+ */
+export async function downloadReclassTemplate(req, res) {
+  try {
+    const csvContent = [
+      'REGION,DIVISION,UACS_OPER_DSC,ORG_CD,PLANTILLA ITEM NUMBER,POSITION TITLE,SALARY GRADE,INCUMBENT,RECLASS POSITION,REMARKS',
+      'National Capital Region (NCR),Division of Quezon City,Batasan Hills National High School,1015.01,OSEC-DECSB-GCOOR3-0001-2024,Guidance Coordinator III,16,"SANTOS, MARIA CLARA",School Counselor III,Active Incumbent',
+      'Region IV-A - CALABARZON,Division of Cavite,Dasmariñas National High School,1015.02,OSEC-DECSB-GCOOR2-0002-2024,Guidance Coordinator II,15,"DELA CRUZ, JUAN",School Counselor II,Active Incumbent',
+      'Region III - Central Luzon,Division of Pampanga,San Fernando High School,1015.03,OSEC-DECSB-GCOOR1-0003-2024,Guidance Coordinator I,14,#N/A,#N/A,VACANT ITEM',
+      'Region VII - Central Visayas,Division of Cebu City,Abellana National School,1015.04,OSEC-DECSB-GCOOR3-0004-2024,Guidance Coordinator III,16,"REYES, ANA LORRAINE",School Counselor III,SUBMITTED FOR ABOLITION'
+    ].join('\r\n');
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="DepEd_GC_Reclassification_Template.csv"');
+    res.send(csvContent);
+  } catch (error) {
+    console.error('[Reclass Controller - downloadReclassTemplate]', error);
+    res.status(500).json({ error: 'Failed to generate template CSV' });
+  }
+}
+
+/**
+ * Scan NOSCA PDF using root scanner.py (Regional Office privilege)
+ */
+export async function scanReclassNosca(req, res) {
+  let tempFilePath = null;
+  try {
+    const userRole = req.user?.role;
+    const isRegionalOffice = 
+      userRole === 'regional_office' || 
+      userRole === 'regional_director' || 
+      userRole === 'admin' ||
+      String(req.user?.position || '').toLowerCase().trim() === 'regional office';
+
+    if (!isRegionalOffice) {
+      return res.status(403).json({ error: 'Access denied: Only Regional Office personnel may scan NOSCA documents.' });
+    }
+
+    const { fileData, fileName } = req.body;
+    if (!fileData || typeof fileData !== 'string') {
+      return res.status(400).json({ error: 'No PDF file data provided for NOSCA scanning.' });
+    }
+
+    const base64Clean = fileData.includes(',') ? fileData.split(',')[1] : fileData;
+    const pdfBuffer = Buffer.from(base64Clean, 'base64');
+    if (pdfBuffer.length === 0) {
+      return res.status(400).json({ error: 'The uploaded file appears to be empty.' });
+    }
+
+    const tempFileName = `nosca_${Date.now()}_${randomUUID().slice(0, 8)}.pdf`;
+    tempFilePath = path.join(os.tmpdir(), tempFileName);
+    fs.writeFileSync(tempFilePath, pdfBuffer);
+
+    // Locate scanner.py
+    const candidates = [
+      path.resolve(process.cwd(), 'scanner.py'),
+      path.resolve(__dirname, '../../../../../scanner.py'),
+      path.resolve(__dirname, '../../../../scanner.py'),
+      path.resolve(__dirname, '../../../scanner.py'),
+      path.resolve('c:/Users/SC/OneDrive - Department of Education/Desktop/agap_portal/scanner.py')
+    ];
+    let scannerPath = candidates.find(p => fs.existsSync(p));
+    if (!scannerPath) {
+      scannerPath = candidates[0];
+    }
+
+    const pyProcess = spawn('python', [scannerPath, tempFilePath], {
+      windowsHide: true,
+      timeout: 60000
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    pyProcess.stdout.on('data', (data) => {
+      stdout += data.toString('utf8');
+    });
+
+    pyProcess.stderr.on('data', (data) => {
+      stderr += data.toString('utf8');
+    });
+
+    pyProcess.on('error', (err) => {
+      if (tempFilePath && fs.existsSync(tempFilePath)) {
+        try { fs.unlinkSync(tempFilePath); } catch (_) {}
+      }
+      return res.status(500).json({ error: `Failed to execute scanner: ${err.message}` });
+    });
+
+    pyProcess.on('close', (code) => {
+      if (tempFilePath && fs.existsSync(tempFilePath)) {
+        try { fs.unlinkSync(tempFilePath); } catch (_) {}
+      }
+
+      const trimmed = stdout.trim();
+      const firstBrace = trimmed.indexOf('{');
+      const lastBrace = trimmed.lastIndexOf('}');
+
+      if (firstBrace === -1 || lastBrace === -1) {
+        return res.status(500).json({ 
+          error: stderr.trim() || `Scanner failed to parse PDF (exit code ${code}).` 
+        });
+      }
+
+      try {
+        const jsonStr = trimmed.substring(firstBrace, lastBrace + 1);
+        const result = JSON.parse(jsonStr);
+
+        if (result.error) {
+          return res.status(400).json({ error: result.error });
+        }
+
+        return res.json({
+          success: true,
+          message: 'NOSCA scanned and parsed successfully',
+          fileName: fileName || 'NOSCA.pdf',
+          data: result
+        });
+      } catch (parseErr) {
+        return res.status(500).json({ error: `Failed to parse scanner output: ${parseErr.message}` });
+      }
+    });
+  } catch (error) {
+    if (tempFilePath && fs.existsSync(tempFilePath)) {
+      try { fs.unlinkSync(tempFilePath); } catch (_) {}
+    }
+    console.error('[Reclass Controller - scanReclassNosca]', error);
+    res.status(500).json({ error: error.message || 'Failed to scan NOSCA document' });
+  }
+}
+
+/**
+ * Commit selected NOSCA plantilla items into incumbent_guidance_counselors
+ */
+export async function importNoscaItems(req, res) {
+  let client;
+  try {
+    const userRole = req.user?.role;
+    const isRegionalOffice = 
+      userRole === 'regional_office' || 
+      userRole === 'regional_director' || 
+      userRole === 'admin' ||
+      String(req.user?.position || '').toLowerCase().trim() === 'regional office';
+
+    if (!isRegionalOffice) {
+      return res.status(403).json({ error: 'Access denied: Only Regional Office personnel may import NOSCA items.' });
+    }
+
+    const { serialNo, division, schoolName, position, items } = req.body;
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: 'No plantilla items selected for import.' });
+    }
+
+    client = await pool.connect();
+    await client.query('BEGIN');
+
+    let inserted = 0;
+    let updated = 0;
+
+    for (const itemNo of items) {
+      const trimmedItem = String(itemNo).trim();
+      if (!trimmedItem) continue;
+
+      // Check if item already exists in database
+      const existing = await client.query(
+        'SELECT id, employee_id, remarks, reclass_position FROM incumbent_guidance_counselors WHERE plantilla_item_number = $1 LIMIT 1',
+        [trimmedItem]
+      );
+
+      if (existing.rows.length > 0) {
+        const row = existing.rows[0];
+        const existingRemarks = row.remarks || '';
+        const noscaTag = `NOSCA Ref: ${serialNo || 'N/A'}`;
+        const newRemarks = existingRemarks.includes(noscaTag)
+          ? existingRemarks
+          : (existingRemarks ? `${existingRemarks} | ${noscaTag}` : noscaTag);
+
+        await client.query(
+          `UPDATE incumbent_guidance_counselors
+           SET reclass_position = COALESCE($1, reclass_position),
+               remarks = $2,
+               updated_at = NOW()
+           WHERE id = $3`,
+          [position || 'School Counselor Associate I', newRemarks, row.id]
+        );
+        updated++;
+      } else {
+        const generatedEmpId = `NOSCA-${Date.now().toString().slice(-5)}-${Math.floor(1000 + Math.random() * 9000)}`;
+        const divName = division 
+          ? (division.toLowerCase().startsWith('division') ? division : `Division of ${division}`) 
+          : 'Regional Office';
+        const schName = schoolName || 'Regional Allocation Station';
+
+        await client.query(
+          `INSERT INTO incumbent_guidance_counselors (
+            employee_id,
+            plantilla_item_number,
+            full_name,
+            current_position,
+            salary_grade,
+            region,
+            division,
+            uacs_oper_dsc,
+            station_division,
+            remarks,
+            stage_of_reclassification,
+            reclass_position,
+            created_at,
+            updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())`,
+          [
+            generatedEmpId,
+            trimmedItem,
+            'UNFILLED ITEM (NOSCA)',
+            'School Counselor (Unfilled)',
+            '16',
+            'National Capital Region (NCR)',
+            divName,
+            schName,
+            divName,
+            `Allocated under NOSCA Serial: ${serialNo || 'N/A'}`,
+            'For Review',
+            position || 'School Counselor Associate I'
+          ]
+        );
+        inserted++;
+      }
+    }
+
+    await client.query('COMMIT');
+
+    return res.json({
+      success: true,
+      message: `Successfully imported ${items.length} plantilla items (${inserted} newly created, ${updated} existing updated).`,
+      inserted,
+      updated,
+      total: items.length
+    });
+  } catch (error) {
+    if (client) {
+      try { await client.query('ROLLBACK'); } catch (_) {}
+    }
+    console.error('[Reclass Controller - importNoscaItems]', error);
+    res.status(500).json({ error: error.message || 'Failed to import NOSCA plantilla items.' });
+  } finally {
+    if (client) client.release();
+  }
+}
+
