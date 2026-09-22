@@ -508,12 +508,16 @@ export async function updateIncumbentStage(req, res) {
     const { stage_of_reclassification } = req.body;
 
     if (stage_of_reclassification === 'Approved') {
-      return res.status(400).json({
-        error: 'The "Approved" stage is automatically set when DBM Status is "With DBM NOSCA" and cannot be manually selected.'
-      });
-    }
-
-    if (!stage_of_reclassification || !VALID_MANUAL_STAGES.includes(stage_of_reclassification)) {
+      const current = await pool.query('SELECT dbm_status FROM incumbent_guidance_counselors WHERE id = $1', [id]);
+      if (current.rows.length === 0) {
+        return res.status(404).json({ error: 'Incumbent counselor not found' });
+      }
+      if (current.rows[0].dbm_status !== 'With DBM NOSCA') {
+        return res.status(400).json({
+          error: 'The "Approved" stage is automatically set when DBM Status is "With DBM NOSCA" and cannot be manually selected.'
+        });
+      }
+    } else if (!stage_of_reclassification || !VALID_MANUAL_STAGES.includes(stage_of_reclassification)) {
       return res.status(400).json({
         error: `Invalid stage_of_reclassification. Must be one of: ${VALID_MANUAL_STAGES.join(', ')}`
       });

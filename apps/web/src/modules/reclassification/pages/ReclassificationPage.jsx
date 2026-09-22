@@ -10,6 +10,7 @@ import { useTheme } from '../../../middleware/ThemeProvider.jsx';
 
 const ALL_RECLASS_STAGES = ['For Review', 'Endorsed', 'Approved', 'Denied', 'Unfilled / Vacant', 'Abolition'];
 const RECLASS_STAGES = ['For Review', 'Endorsed', 'Denied', 'Unfilled / Vacant', 'Abolition'];
+const APPROVED_POST_ACTION_STAGES = ['Approved', 'Unfilled / Vacant', 'Abolition'];
 const RECLASS_POSITIONS_OPTIONS = ['School Counselor I', 'School Counselor II', 'School Counselor III', 'School Counselor IV'];
 
 export default function ReclassificationPage({ onBack }) {
@@ -2991,7 +2992,7 @@ export default function ReclassificationPage({ onBack }) {
                               <select
                                 value={inc.stage_of_reclassification || 'For Review'}
                                 onChange={e => handleUpdateIncumbentStage(inc.id, e.target.value, e)}
-                                disabled={updatingStageId === inc.id || inc.stage_of_reclassification === 'Approved'}
+                                disabled={updatingStageId === inc.id}
                                 style={{
                                   padding: '5px 10px',
                                   borderRadius: '8px',
@@ -3000,19 +3001,21 @@ export default function ReclassificationPage({ onBack }) {
                                   color: badgeStyle.text,
                                   fontSize: '12px',
                                   fontWeight: 750,
-                                  cursor: inc.stage_of_reclassification === 'Approved' ? 'not-allowed' : 'pointer',
-                                  outline: 'none',
-                                  opacity: inc.stage_of_reclassification === 'Approved' ? 0.9 : 1
+                                  cursor: 'pointer',
+                                  outline: 'none'
                                 }}
-                                title={inc.stage_of_reclassification === 'Approved' ? 'Stage is Approved automatically when DBM Status is "With DBM NOSCA"' : 'Select stage of reclassification'}
+                                title={inc.stage_of_reclassification === 'Approved' ? 'Current stage is Approved (available post-approval options: Unfilled / Vacant, Abolition)' : 'Select stage of reclassification'}
                               >
-                                {RECLASS_STAGES.map(s => (
-                                  <option key={s} value={s} style={{ background: 'var(--card)', color: 'var(--text)' }}>{s}</option>
-                                ))}
-                                {inc.stage_of_reclassification === 'Approved' && (
-                                  <option value="Approved" disabled style={{ background: 'var(--card)', color: 'var(--text)' }}>
-                                    ✓ Approved (via DBM NOSCA)
-                                  </option>
+                                {inc.stage_of_reclassification === 'Approved' ? (
+                                  APPROVED_POST_ACTION_STAGES.map(s => (
+                                    <option key={s} value={s} style={{ background: 'var(--card)', color: 'var(--text)' }}>
+                                      {s === 'Approved' ? '✓ Approved (via DBM NOSCA)' : s}
+                                    </option>
+                                  ))
+                                ) : (
+                                  RECLASS_STAGES.map(s => (
+                                    <option key={s} value={s} style={{ background: 'var(--card)', color: 'var(--text)' }}>{s}</option>
+                                  ))
                                 )}
                               </select>
                               {updatingStageId === inc.id && (
@@ -5089,7 +5092,7 @@ export default function ReclassificationPage({ onBack }) {
                     <select
                       value={modalStage}
                       onChange={e => setModalStage(e.target.value)}
-                      disabled={isRegionalOffice || savingModalChanges || selectedIncumbent?.stage_of_reclassification === 'Approved'}
+                      disabled={isRegionalOffice || savingModalChanges}
                       style={{
                         width: '100%',
                         padding: '10px 14px',
@@ -5099,23 +5102,26 @@ export default function ReclassificationPage({ onBack }) {
                         fontSize: '13.5px',
                         fontWeight: 700,
                         color: 'var(--input-text, var(--text))',
-                        cursor: (isRegionalOffice || selectedIncumbent?.stage_of_reclassification === 'Approved') ? 'not-allowed' : 'pointer',
+                        cursor: isRegionalOffice ? 'not-allowed' : 'pointer',
                         outline: 'none',
-                        opacity: (isRegionalOffice || selectedIncumbent?.stage_of_reclassification === 'Approved') ? 0.85 : 1
+                        opacity: isRegionalOffice ? 0.85 : 1
                       }}
                     >
-                      {RECLASS_STAGES.map(stage => (
-                        <option key={stage} value={stage} style={{ background: 'var(--card)', color: 'var(--text)' }}>{stage}</option>
-                      ))}
-                      {selectedIncumbent?.stage_of_reclassification === 'Approved' && (
-                        <option value="Approved" disabled style={{ background: 'var(--card)', color: 'var(--text)' }}>
-                          ✓ Approved (via DBM NOSCA)
-                        </option>
+                      {(selectedIncumbent?.stage_of_reclassification === 'Approved' || modalStage === 'Approved') ? (
+                        APPROVED_POST_ACTION_STAGES.map(stage => (
+                          <option key={stage} value={stage} style={{ background: 'var(--card)', color: 'var(--text)' }}>
+                            {stage === 'Approved' ? '✓ Approved (via DBM NOSCA)' : stage}
+                          </option>
+                        ))
+                      ) : (
+                        RECLASS_STAGES.map(stage => (
+                          <option key={stage} value={stage} style={{ background: 'var(--card)', color: 'var(--text)' }}>{stage}</option>
+                        ))
                       )}
                     </select>
                     <span style={{ fontSize: '11px', color: 'var(--text-secondary, #94a3b8)', display: 'block', marginTop: '4px' }}>
-                      {selectedIncumbent?.stage_of_reclassification === 'Approved'
-                        ? 'Locked: Stage is Approved automatically when DBM Status is set to "With DBM NOSCA".'
+                      {(selectedIncumbent?.stage_of_reclassification === 'Approved' || modalStage === 'Approved')
+                        ? 'Approved item: HRMO may transition status to "Unfilled / Vacant" or "Abolition" if required.'
                         : isRegionalOffice
                           ? 'Workflow endorsement status recorded by Division HRMO.'
                           : 'Workflow status automatically syncs across modal & main table view.'}
