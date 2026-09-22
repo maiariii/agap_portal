@@ -40,6 +40,13 @@ export default function ReclassificationPage({ onBack }) {
   const [noscaInputMode, setNoscaInputMode] = useState('upload'); // 'upload' | 'manual'
   const [manualNoscaItemInput, setManualNoscaItemInput] = useState('');
   const [manualNoscaCategory, setManualNoscaCategory] = useState('ELEMENTARY');
+  const [manualNoscaSchoolId, setManualNoscaSchoolId] = useState('');
+  const [manualNoscaSchoolName, setManualNoscaSchoolName] = useState('');
+  const [manualNoscaSchoolSearch, setManualNoscaSchoolSearch] = useState('');
+  const [schoolSuggestions, setSchoolSuggestions] = useState([]);
+  const [loadingSchools, setLoadingSchools] = useState(false);
+  const [showSchoolDropdown, setShowSchoolDropdown] = useState(false);
+  const schoolSearchContainerRef = React.useRef(null);
   const [manualNoscaSerial, setManualNoscaSerial] = useState('');
   const [manualNoscaDivision, setManualNoscaDivision] = useState('');
   const [manuallyAddedNoscaItems, setManuallyAddedNoscaItems] = useState(new Set());
@@ -337,6 +344,48 @@ export default function ReclassificationPage({ onBack }) {
     fetchIncumbents();
     fetchNoscaItems();
   }, []);
+
+  // Autocomplete fetch schools from agap_schools
+  useEffect(() => {
+    if (!showSchoolDropdown) return;
+    const timer = setTimeout(async () => {
+      setLoadingSchools(true);
+      try {
+        const queryParam = manualNoscaSchoolSearch ? `?q=${encodeURIComponent(manualNoscaSchoolSearch.trim())}` : '';
+        const res = await apiFetch(`/api/reclassification/schools/autocomplete${queryParam}`);
+        if (Array.isArray(res)) {
+          setSchoolSuggestions(res);
+        }
+      } catch (err) {
+        console.error('[Reclass] Failed to autocomplete schools:', err);
+      } finally {
+        setLoadingSchools(false);
+      }
+    }, 180);
+
+    return () => clearTimeout(timer);
+  }, [manualNoscaSchoolSearch, showSchoolDropdown]);
+
+  // Click outside to close school dropdown
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (schoolSearchContainerRef.current && !schoolSearchContainerRef.current.contains(e.target)) {
+        setShowSchoolDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const handleSelectSchool = (school) => {
+    setManualNoscaSchoolId(String(school.school_id || ''));
+    setManualNoscaSchoolName(school.school_name || '');
+    setManualNoscaSchoolSearch(`${school.school_id} - ${school.school_name}`);
+    if (school.division && !manualNoscaDivision) {
+      setManualNoscaDivision(school.division.toLowerCase().startsWith('division') ? school.division : `Division of ${school.division}`);
+    }
+    setShowSchoolDropdown(false);
+  };
 
   // Update incumbent counselor stage of reclassification
   const handleUpdateIncumbentStage = async (incumbentId, newStage, e) => {
@@ -1118,7 +1167,7 @@ export default function ReclassificationPage({ onBack }) {
   };
 
   // Add a single Plantilla / Item No manually to active NOSCA batch
-  const handleAddManualNoscaItems = (inputString, targetCat, customSerial, customDiv) => {
+  const handleAddManualNoscaItems = (inputString, targetCat, customSerial, customDiv, customSchoolId, customSchoolName) => {
     const rawString = inputString !== undefined ? inputString : manualNoscaItemInput;
     const cleanItem = String(rawString || '').trim();
 
@@ -1142,6 +1191,8 @@ export default function ReclassificationPage({ onBack }) {
     const cat = targetCat || manualNoscaCategory || 'ELEMENTARY';
     const serial = (customSerial !== undefined ? customSerial : manualNoscaSerial).trim() || (scannedNoscaResult?.serial_no || 'MANUAL-NOSCA');
     const div = (customDiv !== undefined ? customDiv : manualNoscaDivision).trim() || (scannedNoscaResult?.division || (divisionFilter && divisionFilter !== 'ALL' ? divisionFilter : 'Regional Scope'));
+    const schoolId = (customSchoolId !== undefined ? customSchoolId : manualNoscaSchoolId) || scannedNoscaResult?.school_id || '';
+    const schoolName = (customSchoolName !== undefined ? customSchoolName : manualNoscaSchoolName) || scannedNoscaResult?.school_name || scannedNoscaResult?.schoolName || '';
 
     // Track manually added items for visual badges
     setManuallyAddedNoscaItems(prev => {
@@ -1162,7 +1213,9 @@ export default function ReclassificationPage({ onBack }) {
         serial_no: serial,
         fileName: 'Manual Entry',
         division: div,
-        schoolName: 'Division / Regional Inventory',
+        school_id: schoolId,
+        school_name: schoolName || 'Division / Regional Inventory',
+        schoolName: schoolName || 'Division / Regional Inventory',
         position: 'School Counselor Associate I',
         items: [itemNo],
         count: 1,
@@ -1184,6 +1237,9 @@ export default function ReclassificationPage({ onBack }) {
         ...prev,
         serial_no: prev.serial_no || serial,
         division: prev.division || div,
+        school_id: schoolId || prev.school_id,
+        school_name: schoolName || prev.school_name || prev.schoolName,
+        schoolName: schoolName || prev.schoolName || prev.school_name,
         items: merged,
         count: merged.length,
         category_breakdown: newBreakdown
@@ -1193,7 +1249,7 @@ export default function ReclassificationPage({ onBack }) {
 
     setToast({
       title: 'Plantilla Item Added',
-      message: `Successfully added ${itemNo} to the plantilla list.`,
+      message: `Successfully added ${itemNo} to the plantilla list.${schoolId ? ` (School ID: ${schoolId})` : ''}`,
       type: 'success'
     });
     setManualNoscaItemInput('');
@@ -1221,7 +1277,8 @@ export default function ReclassificationPage({ onBack }) {
         body: JSON.stringify({
           serialNo: scannedNoscaResult.serial_no,
           division: scannedNoscaResult.division,
-          schoolName: scannedNoscaResult.school_name,
+          schoolId: scannedNoscaResult.school_id || manualNoscaSchoolId || null,
+          schoolName: scannedNoscaResult.school_name || scannedNoscaResult.schoolName || manualNoscaSchoolName || null,
           position: scannedNoscaResult.position,
           items: selectedNoscaItems,
           categoryBreakdown: scannedNoscaResult.category_breakdown
@@ -6209,32 +6266,183 @@ export default function ReclassificationPage({ onBack }) {
                       </div>
                     </div>
 
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                      <div>
-                        <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: isDark ? '#cbd5e1' : '#334155', marginBottom: '4px' }}>
-                          Category
+                    {/* School ID Autocomplete Field (fetched from agap_schools) */}
+                    <div ref={schoolSearchContainerRef} style={{ position: 'relative' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                        <label style={{ fontSize: '11px', fontWeight: 700, color: isDark ? '#cbd5e1' : '#334155' }}>
+                          School ID <span style={{ fontSize: '10px', color: isDark ? '#94a3b8' : '#64748b', fontWeight: 400 }}>(agap_schools)</span>
                         </label>
-                        <select
-                          value={manualNoscaCategory}
-                          onChange={(e) => setManualNoscaCategory(e.target.value)}
+                        {manualNoscaSchoolId && (
+                          <span style={{
+                            fontSize: '10px',
+                            fontWeight: 750,
+                            color: '#10b981',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '3px'
+                          }}>
+                            ✓ ID: {manualNoscaSchoolId}
+                          </span>
+                        )}
+                      </div>
+
+                      <div style={{ position: 'relative' }}>
+                        <input
+                          type="text"
+                          value={manualNoscaSchoolSearch}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setManualNoscaSchoolSearch(val);
+                            setShowSchoolDropdown(true);
+                            if (!val.trim()) {
+                              setManualNoscaSchoolId('');
+                              setManualNoscaSchoolName('');
+                            } else if (/^\d+$/.test(val.trim())) {
+                              setManualNoscaSchoolId(val.trim());
+                            }
+                          }}
+                          onFocus={() => setShowSchoolDropdown(true)}
+                          placeholder="Type School ID or School Name..."
                           style={{
                             width: '100%',
-                            padding: '7px 8px',
+                            padding: '7px 28px 7px 9px',
                             borderRadius: '8px',
                             fontSize: '11.5px',
                             border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid #cbd5e1',
                             background: isDark ? 'rgba(15, 23, 42, 0.6)' : '#f8fafc',
                             color: isDark ? '#f8fafc' : '#0f172a',
-                            outline: 'none'
+                            outline: 'none',
+                            boxSizing: 'border-box'
                           }}
-                        >
-                          <option value="ELEMENTARY">Elementary</option>
-                          <option value="JHS">Junior High (JHS)</option>
-                          <option value="SHS">Senior High (SHS)</option>
-                          <option value="ALS">ALS</option>
-                        </select>
+                        />
+
+                        {/* Spinner or Clear / Search Icon */}
+                        {loadingSchools ? (
+                          <div style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)', display: 'flex', alignItems: 'center' }}>
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="2.5" style={{ animation: 'spin 1s linear infinite' }}>
+                              <circle cx="12" cy="12" r="10" strokeDasharray="32" strokeDashoffset="10" />
+                            </svg>
+                          </div>
+                        ) : manualNoscaSchoolSearch ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setManualNoscaSchoolSearch('');
+                              setManualNoscaSchoolId('');
+                              setManualNoscaSchoolName('');
+                              setSchoolSuggestions([]);
+                            }}
+                            style={{
+                              position: 'absolute',
+                              right: '7px',
+                              top: '50%',
+                              transform: 'translateY(-50%)',
+                              background: 'transparent',
+                              border: 'none',
+                              color: isDark ? '#94a3b8' : '#64748b',
+                              cursor: 'pointer',
+                              fontSize: '11px',
+                              padding: '2px',
+                              lineHeight: 1
+                            }}
+                            title="Clear School"
+                          >
+                            ✕
+                          </button>
+                        ) : (
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={isDark ? '#94a3b8' : '#64748b'} strokeWidth="2.2" style={{ position: 'absolute', right: '9px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}>
+                            <circle cx="11" cy="11" r="8" />
+                            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                          </svg>
+                        )}
                       </div>
 
+                      {/* Autocomplete Dropdown List */}
+                      {showSchoolDropdown && (
+                        <div style={{
+                          position: 'absolute',
+                          top: 'calc(100% + 4px)',
+                          left: 0,
+                          right: 0,
+                          background: isDark ? 'rgba(15, 23, 42, 0.98)' : '#ffffff',
+                          backdropFilter: 'blur(16px)',
+                          border: isDark ? '1px solid rgba(99, 102, 241, 0.45)' : '1px solid #c7d2fe',
+                          borderRadius: '10px',
+                          boxShadow: isDark ? '0 10px 25px rgba(0,0,0,0.5)' : '0 8px 24px rgba(0,0,0,0.12)',
+                          maxHeight: '220px',
+                          overflowY: 'auto',
+                          zIndex: 60,
+                          padding: '4px'
+                        }}>
+                          {loadingSchools && schoolSuggestions.length === 0 ? (
+                            <div style={{ padding: '12px', textAlign: 'center', fontSize: '11px', color: isDark ? '#94a3b8' : '#64748b' }}>
+                              Searching agap_schools...
+                            </div>
+                          ) : schoolSuggestions.length > 0 ? (
+                            schoolSuggestions.map((school) => {
+                              const isSelected = String(manualNoscaSchoolId) === String(school.school_id);
+                              return (
+                                <div
+                                  key={school.school_id}
+                                  onClick={() => handleSelectSchool(school)}
+                                  style={{
+                                    padding: '8px 10px',
+                                    borderRadius: '7px',
+                                    cursor: 'pointer',
+                                    background: isSelected
+                                      ? (isDark ? 'rgba(79, 70, 229, 0.25)' : '#eef2ff')
+                                      : 'transparent',
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    gap: '2px',
+                                    transition: 'background 0.12s ease'
+                                  }}
+                                  onMouseOver={(e) => {
+                                    if (!isSelected) e.currentTarget.style.background = isDark ? 'rgba(51, 65, 85, 0.5)' : '#f1f5f9';
+                                  }}
+                                  onMouseOut={(e) => {
+                                    if (!isSelected) e.currentTarget.style.background = 'transparent';
+                                  }}
+                                >
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    <span style={{
+                                      fontFamily: 'monospace',
+                                      fontWeight: 800,
+                                      fontSize: '11px',
+                                      color: isDark ? '#a5b4fc' : '#4338ca',
+                                      background: isDark ? 'rgba(99, 102, 241, 0.2)' : '#e0e7ff',
+                                      padding: '1px 6px',
+                                      borderRadius: '4px'
+                                    }}>
+                                      {school.school_id}
+                                    </span>
+                                    <span style={{
+                                      fontSize: '11.5px',
+                                      fontWeight: 700,
+                                      color: isDark ? '#f8fafc' : '#0f172a',
+                                      overflow: 'hidden',
+                                      textOverflow: 'ellipsis',
+                                      whiteSpace: 'nowrap'
+                                    }}>
+                                      {school.school_name}
+                                    </span>
+                                  </div>
+                                  <div style={{ fontSize: '10px', color: isDark ? '#94a3b8' : '#64748b', paddingLeft: '2px' }}>
+                                    {school.division ? `Division of ${school.division}` : ''}{school.region ? ` • ${school.region}` : ''}
+                                  </div>
+                                </div>
+                              );
+                            })
+                          ) : (
+                            <div style={{ padding: '12px', textAlign: 'center', fontSize: '11px', color: isDark ? '#94a3b8' : '#64748b' }}>
+                              {manualNoscaSchoolSearch.trim() ? 'No matching schools found.' : 'Type to search schools...'}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                       <div>
                         <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: isDark ? '#cbd5e1' : '#334155', marginBottom: '4px' }}>
                           NOSCA Ref / Serial
@@ -6257,29 +6465,29 @@ export default function ReclassificationPage({ onBack }) {
                           }}
                         />
                       </div>
-                    </div>
 
-                    <div>
-                      <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: isDark ? '#cbd5e1' : '#334155', marginBottom: '4px' }}>
-                        Division / Scope (Optional)
-                      </label>
-                      <input
-                        type="text"
-                        value={manualNoscaDivision}
-                        onChange={(e) => setManualNoscaDivision(e.target.value)}
-                        placeholder={divisionFilter && divisionFilter !== 'ALL' ? divisionFilter : 'Regional Scope'}
-                        style={{
-                          width: '100%',
-                          padding: '7px 8px',
-                          borderRadius: '8px',
-                          fontSize: '11.5px',
-                          border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid #cbd5e1',
-                          background: isDark ? 'rgba(15, 23, 42, 0.6)' : '#f8fafc',
-                          color: isDark ? '#f8fafc' : '#0f172a',
-                          outline: 'none',
-                          boxSizing: 'border-box'
-                        }}
-                      />
+                      <div>
+                        <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: isDark ? '#cbd5e1' : '#334155', marginBottom: '4px' }}>
+                          Division / Scope (Optional)
+                        </label>
+                        <input
+                          type="text"
+                          value={manualNoscaDivision}
+                          onChange={(e) => setManualNoscaDivision(e.target.value)}
+                          placeholder={divisionFilter && divisionFilter !== 'ALL' ? divisionFilter : 'Regional Scope'}
+                          style={{
+                            width: '100%',
+                            padding: '7px 8px',
+                            borderRadius: '8px',
+                            fontSize: '11.5px',
+                            border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid #cbd5e1',
+                            background: isDark ? 'rgba(15, 23, 42, 0.6)' : '#f8fafc',
+                            color: isDark ? '#f8fafc' : '#0f172a',
+                            outline: 'none',
+                            boxSizing: 'border-box'
+                          }}
+                        />
+                      </div>
                     </div>
 
                     <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>

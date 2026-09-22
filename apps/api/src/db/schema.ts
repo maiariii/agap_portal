@@ -594,6 +594,7 @@ export const reclassificationNoscaItems = pgTable("reclassification_nosca_items"
 	category: varchar("category", { length: 50 }).default('ELEMENTARY'),
 	positionTitle: varchar("position_title", { length: 255 }).default('School Counselor Associate I'),
 	division: varchar("division", { length: 255 }),
+	schoolId: varchar("school_id", { length: 50 }),
 	schoolName: varchar("school_name", { length: 255 }),
 	assignmentStatus: varchar("assignment_status", { length: 50 }).default('AVAILABLE'),
 	assignedToIncumbentId: integer("assigned_to_incumbent_id").references(() => incumbentGuidanceCounselors.id, { onDelete: "set null" }),

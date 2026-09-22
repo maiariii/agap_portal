@@ -1162,6 +1162,7 @@ export async function getNoscaItems(req, res) {
         category,
         position_title,
         division,
+        school_id,
         school_name,
         assignment_status,
         assigned_to_incumbent_id,
@@ -1200,6 +1201,55 @@ export async function getNoscaItems(req, res) {
 }
 
 /**
+ * Autocomplete search schools from agap_schools table
+ */
+export async function searchSchools(req, res) {
+  try {
+    const { q } = req.query;
+    if (!q || !q.trim()) {
+      const defaultRows = await pool.query(
+        'SELECT school_id, school_name, division, region FROM agap_schools WHERE school_id IS NOT NULL ORDER BY school_name ASC LIMIT 20'
+      );
+      return res.json(defaultRows.rows);
+    }
+
+    const cleanQ = q.trim();
+    const isNumeric = /^\d+$/.test(cleanQ);
+
+    let query;
+    let params;
+
+    if (isNumeric) {
+      query = `
+        SELECT school_id, school_name, division, region
+        FROM agap_schools
+        WHERE CAST(school_id AS TEXT) LIKE $1
+        ORDER BY school_id ASC
+        LIMIT 25
+      `;
+      params = [`${cleanQ}%`];
+    } else {
+      query = `
+        SELECT school_id, school_name, division, region
+        FROM agap_schools
+        WHERE school_name ILIKE $1 OR CAST(school_id AS TEXT) LIKE $1
+        ORDER BY 
+          CASE WHEN school_name ILIKE $2 THEN 1 ELSE 2 END,
+          school_name ASC
+        LIMIT 25
+      `;
+      params = [`%${cleanQ}%`, `${cleanQ}%`];
+    }
+
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('[Reclass Controller - searchSchools]', error);
+    res.status(500).json({ error: error.message || 'Failed to search schools' });
+  }
+}
+
+/**
  * Commit selected NOSCA plantilla items into reclassification_nosca_items table
  */
 export async function importNoscaItems(req, res) {
@@ -1216,7 +1266,7 @@ export async function importNoscaItems(req, res) {
       return res.status(403).json({ error: 'Access denied: Only Regional Office personnel may import NOSCA items.' });
     }
 
-    const { serialNo, division, schoolName, position, items, categoryBreakdown } = req.body;
+    const { serialNo, division, schoolId, schoolName, position, items, categoryBreakdown } = req.body;
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'No plantilla items selected for import.' });
     }
@@ -1261,12 +1311,13 @@ export async function importNoscaItems(req, res) {
           `UPDATE reclassification_nosca_items
            SET serial_no = COALESCE($1, serial_no),
                division = COALESCE($2, division),
-               school_name = COALESCE($3, school_name),
-               position_title = COALESCE($4, position_title),
-               category = COALESCE($5, category),
+               school_id = COALESCE($3, school_id),
+               school_name = COALESCE($4, school_name),
+               position_title = COALESCE($5, position_title),
+               category = COALESCE($6, category),
                updated_at = NOW()
-           WHERE id = $6`,
-          [serialNo || null, divName, schName, position || 'School Counselor Associate I', itemCategory, row.id]
+           WHERE id = $7`,
+          [serialNo || null, divName, schoolId ? String(schoolId) : null, schName, position || 'School Counselor Associate I', itemCategory, row.id]
         );
         updated++;
       } else {
@@ -1277,17 +1328,19 @@ export async function importNoscaItems(req, res) {
             category,
             position_title,
             division,
+            school_id,
             school_name,
             assignment_status,
             created_at,
             updated_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, 'AVAILABLE', NOW(), NOW())`,
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'AVAILABLE', NOW(), NOW())`,
           [
             serialNo || null,
             trimmedItem,
             itemCategory,
             position || 'School Counselor Associate I',
             divName,
+            schoolId ? String(schoolId) : null,
             schName
           ]
         );

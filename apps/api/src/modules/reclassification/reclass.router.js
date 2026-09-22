@@ -14,7 +14,8 @@ import {
   downloadReclassTemplate,
   scanReclassNosca,
   importNoscaItems,
-  getNoscaItems
+  getNoscaItems,
+  searchSchools
 } from './reclass.controller.js';
 import { authenticateToken } from '../../middleware/auth.middleware.js';
 
@@ -24,6 +25,7 @@ const router = Router();
 router.post('/scan-nosca', authenticateToken, scanReclassNosca);
 router.post('/import-nosca-items', authenticateToken, importNoscaItems);
 router.get('/nosca-items', authenticateToken, getNoscaItems);
+router.get('/schools/autocomplete', authenticateToken, searchSchools);
 
 // CSV Ingestion & Template Endpoints
 router.post('/upload-csv', authenticateToken, uploadReclassCsv);
