@@ -118,7 +118,8 @@ export async function importInventoryCSV() {
         const salary_grade = row[6] || null;
         const full_name = row[7] || '#N/A';
         const raw_reclass = row[8] || null;
-        const reclass_position = (raw_reclass && raw_reclass !== '#N/A') ? raw_reclass : null;
+        // reclass_position is NULL by default for all personnel
+        const reclass_position = null;
         const remarks = row[9] || null;
 
         // Use plantilla_item_number as employee_id to guarantee unique item binding
@@ -182,13 +183,23 @@ export async function importInventoryCSV() {
           org_cd = EXCLUDED.org_cd,
           remarks = EXCLUDED.remarks,
           stage_of_reclassification = EXCLUDED.stage_of_reclassification,
-          reclass_position = EXCLUDED.reclass_position,
+          reclass_position = incumbent_guidance_counselors.reclass_position,
           updated_at = NOW();
       `;
 
       await client.query(query, values);
       insertedCount += chunk.length;
     }
+
+    // Check reclassification_nosca_items for matching record based on employee ID and set reclass_position
+    await client.query(`
+      UPDATE incumbent_guidance_counselors g
+      SET reclass_position = n.position_title,
+          updated_at = NOW()
+      FROM reclassification_nosca_items n
+      WHERE (n.assigned_to_employee_id = g.employee_id OR n.assigned_to_incumbent_id = g.id)
+        AND n.position_title IS NOT NULL
+    `);
 
     console.log(`[CSV Import] Successfully imported ${insertedCount} rows into incumbent_guidance_counselors!`);
 

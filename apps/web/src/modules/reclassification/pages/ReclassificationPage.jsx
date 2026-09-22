@@ -22,6 +22,54 @@ const NOSCA_POSITION_OPTIONS = [
   'Guidance Coordinator III'
 ];
 
+const DEFAULT_REQUIRED_DOCUMENTS = [
+  { id: 'pds', label: 'Personal Data Sheet (CS Form 212 Revised 2017)', shortLabel: 'PDS (CS Form 212)', required: true },
+  { id: 'tor', label: 'Official Transcript of Records (TOR / CAV)', shortLabel: 'Transcript of Records (TOR)', required: true },
+  { id: 'eligibility', label: 'Proof of Eligibility / CSC or PRC Certificate (RA 1080 / PBET / LET)', shortLabel: 'Proof of Eligibility / Board Cert', required: true },
+  { id: 'training_cert', label: 'Training Certificates / Training Records (Relevant Hours)', shortLabel: 'Training Certificates / Records', required: true },
+  { id: 'seminar_cert', label: 'Certificates of Relevant Seminars / Specialized Workshops', shortLabel: 'Relevant Seminar Certificates', required: true },
+  { id: 'other_docs', label: 'Other Supporting Documents (IPCRF, Service Record, etc.)', shortLabel: 'Other Supporting Documents', required: false }
+];
+
+const POSITION_QS_STANDARDS = {
+  'School Counselor Associate I': {
+    education: "Bachelor's degree in Guidance and Counseling or related Social Sciences (Psychology, Sociology)",
+    experience: "None required (or 1 year of relevant guidance experience)",
+    training: "None required (or 4 hours of relevant training)",
+    eligibility: "Career Service (Professional) / RA 1080 / None required as per CSC MC"
+  },
+  'School Counselor I': {
+    education: "Bachelor's degree in Counseling or Master's units in Guidance and Counseling",
+    experience: "1 year of relevant experience in counseling / guidance services",
+    training: "4 hours of relevant training in counseling, psychological first aid, or guidance",
+    eligibility: "RA 1080 (Registered Guidance Counselor) or PBET / LET with Guidance specialization"
+  },
+  'School Counselor II': {
+    education: "Master's degree in Guidance and Counseling or allied field",
+    experience: "2 years of relevant professional guidance and counseling experience",
+    training: "8 hours of relevant training in counseling or mental health facilitation",
+    eligibility: "RA 1080 (Registered Guidance Counselor - RGC)"
+  },
+  'School Counselor III': {
+    education: "Master's degree in Guidance and Counseling",
+    experience: "3 years of relevant professional guidance and counseling experience",
+    training: "16 hours of relevant training in clinical supervision or counseling management",
+    eligibility: "RA 1080 (Registered Guidance Counselor - RGC)"
+  },
+  'School Counselor IV': {
+    education: "Master's degree in Guidance and Counseling with doctoral units",
+    experience: "4 years of relevant professional guidance and counseling experience",
+    training: "24 hours of relevant advanced training in guidance and administrative leadership",
+    eligibility: "RA 1080 (Registered Guidance Counselor - RGC)"
+  },
+  'Guidance Coordinator III': {
+    education: "Master's degree in Guidance and Counseling",
+    experience: "3 years of relevant experience in coordinating guidance services",
+    training: "16 hours of relevant training",
+    eligibility: "RA 1080 (Registered Guidance Counselor) / PBET / LET"
+  }
+};
+
 export default function ReclassificationPage({ onBack }) {
   const { user } = useAuth();
   const { setToast } = useToast();
@@ -100,13 +148,193 @@ export default function ReclassificationPage({ onBack }) {
   const [modalStage, setModalStage] = useState('For Review');
   const [savingModalChanges, setSavingModalChanges] = useState(false);
 
+  // Document Checklist & QS Evaluation state
+  const [docChecklist, setDocChecklist] = useState([]);
+  const [qsEvaluation, setQsEvaluation] = useState({
+    education: null,
+    experience: null,
+    training: null,
+    eligibility: null
+  });
+  const [evaluatorRemarks, setEvaluatorRemarks] = useState('');
+  const [evaluatorName, setEvaluatorName] = useState('');
+
   // Sync modal state when an incumbent is opened
   useEffect(() => {
     if (selectedIncumbent) {
       setModalTargetPosition(selectedIncumbent.reclass_position || '');
       setModalStage(selectedIncumbent.stage_of_reclassification || 'For Review');
+
+      // Initialize Document Checklist
+      const savedDocs = Array.isArray(selectedIncumbent.document_checklist) && selectedIncumbent.document_checklist.length > 0
+        ? selectedIncumbent.document_checklist
+        : null;
+
+      const attachedDocs = Array.isArray(selectedIncumbent.assessment?.documents)
+        ? selectedIncumbent.assessment.documents
+        : [];
+
+      const initialChecklist = DEFAULT_REQUIRED_DOCUMENTS.map(def => {
+        if (savedDocs) {
+          const match = savedDocs.find(d => d.id === def.id);
+          if (match) {
+            return {
+              ...def,
+              submitted: Boolean(match.submitted),
+              verified: Boolean(match.verified)
+            };
+          }
+        }
+        // Auto-match if candidate has attached documents in assessment.documents
+        const hasAttachment = attachedDocs.some(att => {
+          const name = String(att.label || att.name || att.key || '').toLowerCase();
+          if (def.id === 'pds' && name.includes('pds')) return true;
+          if (def.id === 'tor' && (name.includes('tor') || name.includes('transcript'))) return true;
+          if (def.id === 'eligibility' && (name.includes('elig') || name.includes('board') || name.includes('prc') || name.includes('1080'))) return true;
+          if (def.id === 'training_cert' && (name.includes('train') || name.includes('cert'))) return true;
+          if (def.id === 'seminar_cert' && name.includes('seminar')) return true;
+          return false;
+        });
+
+        return {
+          ...def,
+          submitted: hasAttachment,
+          verified: hasAttachment
+        };
+      });
+      setDocChecklist(initialChecklist);
+
+      // Initialize QS Evaluation
+      if (selectedIncumbent.qs_evaluation && typeof selectedIncumbent.qs_evaluation === 'object') {
+        setQsEvaluation({
+          education: selectedIncumbent.qs_evaluation.education || null,
+          experience: selectedIncumbent.qs_evaluation.experience || null,
+          training: selectedIncumbent.qs_evaluation.training || null,
+          eligibility: selectedIncumbent.qs_evaluation.eligibility || null
+        });
+      } else {
+        setQsEvaluation({
+          education: null,
+          experience: null,
+          training: null,
+          eligibility: null
+        });
+      }
+
+      setEvaluatorRemarks(selectedIncumbent.evaluator_remarks || '');
+      setEvaluatorName(selectedIncumbent.evaluated_by || user?.name || user?.email || 'Division HRMO Evaluator');
     }
-  }, [selectedIncumbent]);
+  }, [selectedIncumbent, user]);
+
+  // Helper callbacks for Document Checklist
+  const handleToggleDocSubmitted = (docId) => {
+    setDocChecklist(prev =>
+      prev.map(item => {
+        if (item.id === docId) {
+          const nextSubmitted = !item.submitted;
+          return {
+            ...item,
+            submitted: nextSubmitted,
+            verified: nextSubmitted ? item.verified : false
+          };
+        }
+        return item;
+      })
+    );
+  };
+
+  const handleToggleDocVerified = (docId) => {
+    setDocChecklist(prev =>
+      prev.map(item => {
+        if (item.id === docId) {
+          const nextVerified = !item.verified;
+          return {
+            ...item,
+            verified: nextVerified,
+            submitted: nextVerified ? true : item.submitted
+          };
+        }
+        return item;
+      })
+    );
+  };
+
+  const handleMarkAllDocsComplete = () => {
+    setDocChecklist(prev =>
+      prev.map(item => ({ ...item, submitted: true, verified: true }))
+    );
+  };
+
+  const handleResetAllDocs = () => {
+    setDocChecklist(prev =>
+      prev.map(item => ({ ...item, submitted: false, verified: false }))
+    );
+  };
+
+  const handleSetQsCriterion = (criterionKey, value) => {
+    setQsEvaluation(prev => ({
+      ...prev,
+      [criterionKey]: prev[criterionKey] === value ? null : value
+    }));
+  };
+
+  // Automated Profile-to-QS Evaluation Suggestion
+  const handleAutoEvaluateQs = () => {
+    if (!selectedIncumbent) return;
+    const targetPos = modalTargetPosition || selectedIncumbent.reclass_position || 'School Counselor I';
+    const eduStr = String(selectedIncumbent.education || selectedIncumbent.assessment?.education || '').toLowerCase();
+    const expVal = Number(selectedIncumbent.years_experience ?? selectedIncumbent.assessment?.years_experience ?? 0);
+    const trnVal = Number(selectedIncumbent.hours_of_training ?? selectedIncumbent.assessment?.hours_of_training ?? 0);
+    const eligStr = String(selectedIncumbent.eligibility || selectedIncumbent.assessment?.eligibility || '').toLowerCase();
+
+    // Education evaluation
+    let eduMeets = false;
+    if (targetPos === 'School Counselor Associate I' || targetPos === 'School Counselor I') {
+      eduMeets = eduStr.length > 5;
+    } else {
+      eduMeets = eduStr.includes('master') || eduStr.includes('ms') || eduStr.includes('ma') || eduStr.includes('phd') || eduStr.includes('doctor') || eduStr.includes('post');
+    }
+
+    // Experience evaluation
+    let reqYears = 1;
+    if (targetPos === 'School Counselor Associate I') reqYears = 0;
+    else if (targetPos === 'School Counselor I') reqYears = 1;
+    else if (targetPos === 'School Counselor II') reqYears = 2;
+    else if (targetPos === 'School Counselor III') reqYears = 3;
+    else if (targetPos === 'School Counselor IV') reqYears = 4;
+    else if (targetPos === 'Guidance Coordinator III') reqYears = 3;
+    const expMeets = expVal >= reqYears;
+
+    // Training evaluation
+    let reqHours = 4;
+    if (targetPos === 'School Counselor Associate I') reqHours = 0;
+    else if (targetPos === 'School Counselor I') reqHours = 4;
+    else if (targetPos === 'School Counselor II') reqHours = 8;
+    else if (targetPos === 'School Counselor III') reqHours = 16;
+    else if (targetPos === 'School Counselor IV') reqHours = 24;
+    else if (targetPos === 'Guidance Coordinator III') reqHours = 16;
+    const trnMeets = trnVal >= reqHours;
+
+    // Eligibility evaluation
+    let eligMeets = false;
+    if (targetPos === 'School Counselor Associate I') {
+      eligMeets = eligStr.length > 0;
+    } else {
+      eligMeets = eligStr.includes('1080') || eligStr.includes('rgc') || eligStr.includes('guidance counselor') || eligStr.includes('pbet') || eligStr.includes('let') || eligStr.includes('licensed');
+    }
+
+    setQsEvaluation({
+      education: eduMeets ? 'Meets' : 'Does Not Meet',
+      experience: expMeets ? 'Meets' : 'Does Not Meet',
+      training: trnMeets ? 'Meets' : 'Does Not Meet',
+      eligibility: eligMeets ? 'Meets' : 'Does Not Meet'
+    });
+
+    setToast({
+      type: 'info',
+      message: `Auto-evaluated standards for ${targetPos} based on candidate records.`
+    });
+  };
 
   // Modals state
   const [selectedApp, setSelectedApp] = useState(null);
@@ -625,6 +853,14 @@ export default function ReclassificationPage({ onBack }) {
     }
   };
 
+  // Calculate QS Evaluation Status
+  const getCalculatedQsStatus = (evalMap = qsEvaluation) => {
+    const values = [evalMap.education, evalMap.experience, evalMap.training, evalMap.eligibility];
+    if (values.some(v => v === 'Does Not Meet')) return 'NOT QUALIFIED';
+    if (values.every(v => v === 'Meets')) return 'QUALIFIED';
+    return 'PENDING';
+  };
+
   // Save assessment changes from modal
   const handleSaveModalChanges = async () => {
     if (!selectedIncumbent) return;
@@ -632,6 +868,8 @@ export default function ReclassificationPage({ onBack }) {
     const incumbentId = selectedIncumbent.id;
     const formattedPos = modalTargetPosition === '' ? null : modalTargetPosition;
     const newStage = modalStage;
+    const overallStatus = getCalculatedQsStatus(qsEvaluation);
+    const nowIso = new Date().toISOString();
 
     try {
       const promises = [];
@@ -652,27 +890,49 @@ export default function ReclassificationPage({ onBack }) {
         );
       }
 
-      if (promises.length > 0) {
-        await Promise.all(promises);
-      }
+      // Save QS evaluation and document checklist
+      promises.push(
+        apiFetch(`/api/reclassification/incumbents/${incumbentId}/qs-evaluation`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            document_checklist: docChecklist,
+            qs_evaluation: qsEvaluation,
+            qs_eval_result: overallStatus,
+            evaluated_by: evaluatorName,
+            evaluator_remarks: evaluatorRemarks
+          })
+        })
+      );
+
+      await Promise.all(promises);
 
       // Optimistic update in table list and active selection
+      const updatedFields = {
+        reclass_position: formattedPos,
+        stage_of_reclassification: newStage,
+        document_checklist: docChecklist,
+        qs_evaluation: qsEvaluation,
+        qs_eval_result: overallStatus,
+        evaluated_by: evaluatorName,
+        evaluated_at: nowIso,
+        evaluator_remarks: evaluatorRemarks
+      };
+
       setIncumbents(prev =>
         prev.map(item =>
           item.id === incumbentId
-            ? { ...item, reclass_position: formattedPos, stage_of_reclassification: newStage }
+            ? { ...item, ...updatedFields }
             : item
         )
       );
       setSelectedIncumbent(prev => ({
         ...prev,
-        reclass_position: formattedPos,
-        stage_of_reclassification: newStage
+        ...updatedFields
       }));
 
       setToast({
         type: 'success',
-        message: `Assessment changes saved for ${selectedIncumbent.full_name}!`
+        message: `Assessment & QS Evaluation saved for ${selectedIncumbent.full_name}! (${overallStatus})`
       });
       setShowAssessmentModal(false);
     } catch (err) {
@@ -3172,6 +3432,34 @@ export default function ReclassificationPage({ onBack }) {
 
                             return (
                               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxWidth: '220px' }}>
+                                {inc.qs_eval_result && (
+                                  <div style={{ marginBottom: '2px' }}>
+                                    <span style={{
+                                      fontSize: '10px',
+                                      fontWeight: 850,
+                                      padding: '2px 7px',
+                                      borderRadius: '5px',
+                                      letterSpacing: '0.03em',
+                                      background: inc.qs_eval_result === 'QUALIFIED'
+                                        ? (isDark ? 'rgba(6, 78, 59, 0.45)' : '#ecfdf5')
+                                        : inc.qs_eval_result === 'NOT QUALIFIED'
+                                          ? (isDark ? 'rgba(127, 29, 29, 0.45)' : '#fef2f2')
+                                          : (isDark ? 'rgba(30, 41, 59, 0.5)' : '#f1f5f9'),
+                                      color: inc.qs_eval_result === 'QUALIFIED'
+                                        ? (isDark ? '#6ee7b7' : '#047857')
+                                        : inc.qs_eval_result === 'NOT QUALIFIED'
+                                          ? (isDark ? '#fca5a5' : '#b91c1c')
+                                          : 'var(--text-secondary, #94a3b8)',
+                                      border: inc.qs_eval_result === 'QUALIFIED'
+                                        ? (isDark ? '1px solid rgba(16, 185, 129, 0.5)' : '1px solid #a7f3d0')
+                                        : inc.qs_eval_result === 'NOT QUALIFIED'
+                                          ? (isDark ? '1px solid rgba(239, 68, 68, 0.5)' : '1px solid #fca5a5')
+                                          : '1px solid var(--line)'
+                                    }}>
+                                      {inc.qs_eval_result === 'QUALIFIED' ? '✓ QS Qualified' : inc.qs_eval_result === 'NOT QUALIFIED' ? '✗ QS Not Qualified' : 'QS Pending'}
+                                    </span>
+                                  </div>
+                                )}
                                 {edu && (
                                   <div style={{ display: 'flex', alignItems: 'center', gap: '5px', overflow: 'hidden' }}>
                                     <span style={{ fontSize: '9.5px', fontWeight: 800, padding: '1.5px 5px', borderRadius: '4px', background: '#eff6ff', color: '#1e40af', flexShrink: 0 }}>ED</span>
@@ -3218,7 +3506,7 @@ export default function ReclassificationPage({ onBack }) {
                               boxShadow: '0 2px 6px rgba(37, 99, 235, 0.25)'
                             }}
                           >
-                            Assess / Docs
+                            Assess / QS
                           </button>
                         </td>
                       </tr>
@@ -4707,20 +4995,20 @@ export default function ReclassificationPage({ onBack }) {
           }}
         >
           <div style={{
-            background: isDark ? 'rgba(15, 23, 42, 0.95)' : 'var(--modal-bg, var(--card))',
-            backdropFilter: 'blur(20px)',
+            background: isDark ? 'rgba(15, 23, 42, 0.96)' : 'var(--modal-bg, var(--card))',
+            backdropFilter: 'blur(24px)',
             borderRadius: '24px',
-            width: 'min(820px, 96vw)',
-            maxHeight: '92vh',
+            width: 'min(1240px, 96vw)',
+            maxHeight: '93vh',
             display: 'flex',
             flexDirection: 'column',
-            boxShadow: isDark ? '0 25px 60px rgba(0, 0, 0, 0.6)' : '0 20px 40px rgba(0, 0, 0, 0.15)',
+            boxShadow: isDark ? '0 25px 70px rgba(0, 0, 0, 0.7)' : '0 25px 50px rgba(0, 0, 0, 0.2)',
             border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid var(--line)',
             overflow: 'hidden'
           }}>
             {/* Modal Header */}
             <div style={{
-              padding: '22px 28px',
+              padding: '20px 28px',
               borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid var(--line)',
               background: isDark ? 'rgba(15, 23, 42, 0.98)' : 'var(--card-subtle)',
               display: 'flex',
@@ -4729,14 +5017,14 @@ export default function ReclassificationPage({ onBack }) {
               gap: '16px'
             }}>
               <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px', flexWrap: 'wrap' }}>
                   <span style={{
                     fontSize: '10.5px',
                     fontWeight: 800,
                     color: isDark ? '#93c5fd' : '#1d4ed8',
                     background: isDark ? 'rgba(30, 58, 138, 0.35)' : '#eff6ff',
                     border: isDark ? '1px solid rgba(59, 130, 246, 0.4)' : '1px solid #bfdbfe',
-                    padding: '2px 8px',
+                    padding: '3px 9px',
                     borderRadius: '6px',
                     letterSpacing: '0.06em',
                     textTransform: 'uppercase'
@@ -4745,22 +5033,45 @@ export default function ReclassificationPage({ onBack }) {
                   </span>
                   <span style={{
                     fontSize: '11px',
-                    fontWeight: 700,
+                    fontWeight: 750,
                     color: 'var(--text-secondary, #94a3b8)',
                     background: isDark ? 'rgba(30, 41, 59, 0.6)' : 'var(--card-solid, #ffffff)',
                     border: '1px solid var(--line)',
-                    padding: '2px 8px',
+                    padding: '3px 9px',
                     borderRadius: '6px',
                     fontFamily: 'monospace'
                   }}>
-                    {selectedIncumbent.employee_id}
+                    Item: {selectedIncumbent.plantilla_item_number || selectedIncumbent.employee_id}
                   </span>
+                  {selectedIncumbent.full_name === '#N/A' && (
+                    <span style={{
+                      fontSize: '10px',
+                      fontWeight: 800,
+                      padding: '3px 8px',
+                      borderRadius: '6px',
+                      background: isDark ? 'rgba(234, 179, 8, 0.2)' : '#fef9c3',
+                      color: isDark ? '#fde047' : '#854d0e',
+                      border: isDark ? '1px solid rgba(234, 179, 8, 0.35)' : '1px solid #fef08a',
+                      letterSpacing: '0.04em',
+                      textTransform: 'uppercase'
+                    }}>
+                      Unfilled / Vacant Item
+                    </span>
+                  )}
                 </div>
-                <h2 style={{ fontSize: '20px', fontWeight: 850, margin: '2px 0 0', color: 'var(--text)' }}>
-                  {selectedIncumbent.full_name}
+                <h2 style={{ fontSize: '22px', fontWeight: 850, margin: '2px 0 0', color: 'var(--text)', letterSpacing: '-0.01em' }}>
+                  {selectedIncumbent.full_name === '#N/A' ? 'Unfilled / Vacant Plantilla Item' : selectedIncumbent.full_name}
                 </h2>
-                <div style={{ fontSize: '12.5px', color: 'var(--text-secondary, #94a3b8)', marginTop: '2px' }}>
-                  <b style={{ color: 'var(--text)' }}>Current:</b> {selectedIncumbent.current_position} • <b style={{ color: 'var(--text)' }}>Station:</b> {selectedIncumbent.station_division}
+                <div style={{ fontSize: '12.5px', color: 'var(--text-secondary, #94a3b8)', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  <span><b style={{ color: 'var(--text)' }}>Current:</b> {selectedIncumbent.current_position}</span>
+                  <span>•</span>
+                  <span><b style={{ color: 'var(--text)' }}>Station:</b> {selectedIncumbent.station_division || selectedIncumbent.uacs_oper_dsc}</span>
+                  {selectedIncumbent.division && (
+                    <>
+                      <span>•</span>
+                      <span><b style={{ color: 'var(--text)' }}>Division:</b> {selectedIncumbent.division} {selectedIncumbent.region ? `(${selectedIncumbent.region})` : ''}</span>
+                    </>
+                  )}
                 </div>
               </div>
 
@@ -4772,9 +5083,9 @@ export default function ReclassificationPage({ onBack }) {
                 style={{
                   background: isDark ? 'rgba(30, 41, 59, 0.6)' : 'var(--card-solid, #ffffff)',
                   border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid var(--line)',
-                  width: '32px',
-                  height: '32px',
-                  borderRadius: '8px',
+                  width: '34px',
+                  height: '34px',
+                  borderRadius: '10px',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -4795,7 +5106,7 @@ export default function ReclassificationPage({ onBack }) {
                   e.currentTarget.style.color = 'var(--text-secondary, #94a3b8)';
                 }}
               >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <line x1="18" y1="6" x2="6" y2="18" />
                   <line x1="6" y1="6" x2="18" y2="18" />
                 </svg>
@@ -4810,140 +5121,936 @@ export default function ReclassificationPage({ onBack }) {
               flexDirection: 'column',
               gap: '20px'
             }}>
-              {/* Card 0: Official Plantilla & Station Profile */}
+              {/* TOP DASHBOARD ROW: 2-Column Responsive Layout */}
               <div style={{
-                background: isDark ? 'rgba(2, 6, 23, 0.6)' : 'var(--card-subtle)',
-                borderRadius: '16px',
-                border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid var(--line)',
-                padding: '18px 20px'
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(440px, 1fr))',
+                gap: '16px'
               }}>
+                {/* Panel A: Official Plantilla Assignment */}
                 <div style={{
-                  fontSize: '11px',
-                  fontWeight: 800,
-                  color: isDark ? '#38bdf8' : '#0284c7',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.06em',
-                  marginBottom: '12px'
+                  background: isDark ? 'rgba(2, 6, 23, 0.6)' : 'var(--card-subtle)',
+                  borderRadius: '16px',
+                  border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid var(--line)',
+                  padding: '18px 20px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between'
                 }}>
-                  Official Plantilla & Station Assignment
-                </div>
-
-                <div style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-                  gap: '12px',
-                  fontSize: '12.5px'
-                }}>
-                  <div style={{ background: isDark ? 'rgba(15, 23, 42, 0.6)' : 'var(--card-solid, #ffffff)', padding: '10px 14px', borderRadius: '10px', border: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid var(--line)' }}>
-                    <div style={{ fontSize: '10.5px', fontWeight: 700, color: 'var(--text-secondary, #94a3b8)', textTransform: 'uppercase' }}>Plantilla Item No.</div>
-                    <div style={{ fontWeight: 800, color: 'var(--text)', marginTop: '2px', fontFamily: 'monospace' }}>
-                      {selectedIncumbent.plantilla_item_number || selectedIncumbent.employee_id}
+                  <div>
+                    <div style={{
+                      fontSize: '11px',
+                      fontWeight: 800,
+                      color: isDark ? '#38bdf8' : '#0284c7',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.06em',
+                      marginBottom: '12px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between'
+                    }}>
+                      <span>Official Plantilla &amp; Station Profile</span>
+                      <span style={{ fontSize: '11px', color: 'var(--text-secondary, #94a3b8)', textTransform: 'none', fontWeight: 650 }}>
+                        {selectedIncumbent.region || 'DepEd Regional'}
+                      </span>
                     </div>
-                  </div>
 
-                  <div style={{ background: isDark ? 'rgba(15, 23, 42, 0.6)' : 'var(--card-solid, #ffffff)', padding: '10px 14px', borderRadius: '10px', border: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid var(--line)' }}>
-                    <div style={{ fontSize: '10.5px', fontWeight: 700, color: 'var(--text-secondary, #94a3b8)', textTransform: 'uppercase' }}>Station / School</div>
-                    <div style={{ fontWeight: 750, color: 'var(--text)', marginTop: '2px' }}>
-                      {selectedIncumbent.uacs_oper_dsc || selectedIncumbent.station_division || '—'}
-                    </div>
-                  </div>
+                    <div style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(2, 1fr)',
+                      gap: '10px',
+                      fontSize: '12px'
+                    }}>
+                      <div style={{ background: isDark ? 'rgba(15, 23, 42, 0.65)' : 'var(--card-solid, #ffffff)', padding: '10px 12px', borderRadius: '10px', border: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid var(--line)' }}>
+                        <div style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-secondary, #94a3b8)', textTransform: 'uppercase' }}>Plantilla Item No.</div>
+                        <div style={{ fontWeight: 800, color: 'var(--text)', marginTop: '2px', fontFamily: 'monospace', fontSize: '11.5px', wordBreak: 'break-all' }}>
+                          {selectedIncumbent.plantilla_item_number || selectedIncumbent.employee_id}
+                        </div>
+                      </div>
 
-                  <div style={{ background: isDark ? 'rgba(15, 23, 42, 0.6)' : 'var(--card-solid, #ffffff)', padding: '10px 14px', borderRadius: '10px', border: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid var(--line)' }}>
-                    <div style={{ fontSize: '10.5px', fontWeight: 700, color: 'var(--text-secondary, #94a3b8)', textTransform: 'uppercase' }}>Division & Region</div>
-                    <div style={{ fontWeight: 700, color: 'var(--text)', marginTop: '2px' }}>
-                      {selectedIncumbent.division || selectedIncumbent.station_division || '—'}
-                      <span style={{ fontSize: '11px', color: 'var(--text-secondary, #94a3b8)', display: 'block' }}>{selectedIncumbent.region}</span>
-                    </div>
-                  </div>
+                      <div style={{ background: isDark ? 'rgba(15, 23, 42, 0.65)' : 'var(--card-solid, #ffffff)', padding: '10px 12px', borderRadius: '10px', border: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid var(--line)' }}>
+                        <div style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-secondary, #94a3b8)', textTransform: 'uppercase' }}>Org Code &amp; Salary Grade</div>
+                        <div style={{ fontWeight: 750, color: 'var(--text)', marginTop: '2px' }}>
+                          {selectedIncumbent.org_cd ? `ORG ${selectedIncumbent.org_cd}` : '—'} • <span style={{ color: '#2563eb', fontWeight: 800 }}>SG {selectedIncumbent.salary_grade || '—'}</span>
+                        </div>
+                      </div>
 
-                  <div style={{ background: isDark ? 'rgba(15, 23, 42, 0.6)' : 'var(--card-solid, #ffffff)', padding: '10px 14px', borderRadius: '10px', border: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid var(--line)' }}>
-                    <div style={{ fontSize: '10.5px', fontWeight: 700, color: 'var(--text-secondary, #94a3b8)', textTransform: 'uppercase' }}>Org Code & Salary Grade</div>
-                    <div style={{ fontWeight: 750, color: 'var(--text)', marginTop: '2px' }}>
-                      {selectedIncumbent.org_cd ? `ORG ${selectedIncumbent.org_cd}` : '—'} • <span style={{ color: '#2563eb' }}>SG {selectedIncumbent.salary_grade || '—'}</span>
+                      <div style={{ background: isDark ? 'rgba(15, 23, 42, 0.65)' : 'var(--card-solid, #ffffff)', padding: '10px 12px', borderRadius: '10px', border: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid var(--line)' }}>
+                        <div style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-secondary, #94a3b8)', textTransform: 'uppercase' }}>Station / School</div>
+                        <div style={{ fontWeight: 750, color: 'var(--text)', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={selectedIncumbent.uacs_oper_dsc || selectedIncumbent.station_division}>
+                          {selectedIncumbent.uacs_oper_dsc || selectedIncumbent.station_division || '—'}
+                        </div>
+                      </div>
+
+                      <div style={{ background: isDark ? 'rgba(15, 23, 42, 0.65)' : 'var(--card-solid, #ffffff)', padding: '10px 12px', borderRadius: '10px', border: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid var(--line)' }}>
+                        <div style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-secondary, #94a3b8)', textTransform: 'uppercase' }}>Division &amp; Region</div>
+                        <div style={{ fontWeight: 700, color: 'var(--text)', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {selectedIncumbent.division || selectedIncumbent.station_division || '—'}
+                        </div>
+                      </div>
                     </div>
                   </div>
 
                   {selectedIncumbent.remarks && (
-                    <div style={{ gridColumn: '1 / -1', background: isDark ? 'rgba(15, 23, 42, 0.6)' : 'var(--card-solid, #ffffff)', padding: '10px 14px', borderRadius: '10px', border: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid var(--line)' }}>
-                      <div style={{ fontSize: '10.5px', fontWeight: 700, color: 'var(--text-secondary, #94a3b8)', textTransform: 'uppercase' }}>Inventory Remarks</div>
-                      <div style={{ fontWeight: 700, color: isDark ? '#cbd5e1' : '#334155', marginTop: '2px' }}>
-                        {selectedIncumbent.remarks}
-                      </div>
+                    <div style={{ marginTop: '10px', background: isDark ? 'rgba(15, 23, 42, 0.5)' : 'var(--card-solid, #ffffff)', padding: '8px 12px', borderRadius: '8px', border: isDark ? '1px solid rgba(51, 65, 85, 0.5)' : '1px solid var(--line)', fontSize: '11.5px' }}>
+                      <span style={{ fontSize: '10px', fontWeight: 750, color: 'var(--text-secondary, #94a3b8)', textTransform: 'uppercase', marginRight: '6px' }}>Remarks:</span>
+                      <span style={{ color: 'var(--text)', fontWeight: 600 }}>{selectedIncumbent.remarks}</span>
                     </div>
                   )}
                 </div>
+
+                {/* Panel B: Reclassification Decisions */}
+                <div style={{
+                  background: isDark ? 'rgba(6, 78, 59, 0.25)' : '#ecfdf5',
+                  borderRadius: '16px',
+                  border: isDark ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #a7f3d0',
+                  padding: '18px 20px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between'
+                }}>
+                  <div>
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      marginBottom: '12px',
+                      gap: '10px'
+                    }}>
+                      <div style={{
+                        fontSize: '11px',
+                        fontWeight: 800,
+                        color: isDark ? '#34d399' : '#047857',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.05em'
+                      }}>
+                        1. Target Position &amp; Workflow Stage
+                      </div>
+                      {isRegionalOffice && (
+                        <span style={{
+                          fontSize: '10.5px',
+                          fontWeight: 750,
+                          padding: '2px 7px',
+                          borderRadius: '6px',
+                          background: isDark ? 'rgba(99, 102, 241, 0.25)' : '#e0e7ff',
+                          color: isDark ? '#c7d2fe' : '#4338ca',
+                          border: isDark ? '1px solid rgba(99, 102, 241, 0.4)' : '1px solid #c7d2fe'
+                        }}>
+                          👁️ View-Only
+                        </span>
+                      )}
+                    </div>
+
+                    <div style={{
+                      display: 'grid',
+                      gridTemplateColumns: '1fr 1fr',
+                      gap: '12px'
+                    }}>
+                      <div>
+                        <label style={{ display: 'block', fontSize: '11.5px', fontWeight: 750, color: 'var(--text)', marginBottom: '5px' }}>
+                          Target Reclassification Position <span style={{ color: '#ef4444' }}>*</span>
+                        </label>
+                        <select
+                          value={modalTargetPosition}
+                          onChange={e => setModalTargetPosition(e.target.value)}
+                          disabled={isRegionalOffice || savingModalChanges}
+                          style={{
+                            width: '100%',
+                            padding: '9px 12px',
+                            borderRadius: '10px',
+                            border: isDark ? '1.5px solid rgba(16, 185, 129, 0.5)' : '1.5px solid #10b981',
+                            background: 'var(--input-bg)',
+                            fontSize: '13px',
+                            fontWeight: 700,
+                            color: isDark ? '#6ee7b7' : '#047857',
+                            cursor: isRegionalOffice ? 'not-allowed' : 'pointer',
+                            outline: 'none',
+                            opacity: isRegionalOffice ? 0.85 : 1
+                          }}
+                        >
+                          <option value="" style={{ background: 'var(--card)', color: 'var(--text)' }}>-- Unassigned --</option>
+                          {RECLASS_POSITIONS_OPTIONS.map(pos => (
+                            <option key={pos} value={pos} style={{ background: 'var(--card)', color: 'var(--text)' }}>{pos}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label style={{ display: 'block', fontSize: '11.5px', fontWeight: 750, color: 'var(--text)', marginBottom: '5px' }}>
+                          Stage of Reclassification
+                        </label>
+                        <select
+                          value={modalStage}
+                          onChange={e => setModalStage(e.target.value)}
+                          disabled={isRegionalOffice || savingModalChanges}
+                          style={{
+                            width: '100%',
+                            padding: '9px 12px',
+                            borderRadius: '10px',
+                            border: isDark ? '1.5px solid rgba(51, 65, 85, 0.8)' : '1.5px solid var(--input-border, var(--line))',
+                            background: 'var(--input-bg)',
+                            fontSize: '13px',
+                            fontWeight: 700,
+                            color: 'var(--input-text, var(--text))',
+                            cursor: isRegionalOffice ? 'not-allowed' : 'pointer',
+                            outline: 'none',
+                            opacity: isRegionalOffice ? 0.85 : 1
+                          }}
+                        >
+                          {(selectedIncumbent?.stage_of_reclassification === 'Approved' || modalStage === 'Approved') ? (
+                            APPROVED_POST_ACTION_STAGES.map(stage => (
+                              <option key={stage} value={stage} style={{ background: 'var(--card)', color: 'var(--text)' }}>
+                                {stage === 'Approved' ? '✓ Approved (via DBM NOSCA)' : stage}
+                              </option>
+                            ))
+                          ) : (
+                            RECLASS_STAGES.map(stage => (
+                              <option key={stage} value={stage} style={{ background: 'var(--card)', color: 'var(--text)' }}>{stage}</option>
+                            ))
+                          )}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ marginTop: '10px', fontSize: '11px', color: 'var(--text-secondary, #94a3b8)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#10b981', flexShrink: 0 }} />
+                    <span>QS benchmarks dynamically loaded for: <b style={{ color: 'var(--text)' }}>{modalTargetPosition || selectedIncumbent.reclass_position || 'School Counselor I'}</b></span>
+                  </div>
+                </div>
               </div>
 
-              {/* Card 1: Read-Only Evaluation Credentials */}
-              <div style={{
-                background: isDark ? 'rgba(2, 6, 23, 0.6)' : 'var(--card-subtle)',
-                borderRadius: '16px',
-                border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid var(--line)',
-                padding: '20px'
-              }}>
-                <div style={{
-                  fontSize: '12px',
-                  fontWeight: 800,
-                  color: isDark ? '#93c5fd' : '#1d4ed8',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.05em',
-                  marginBottom: '14px'
-                }}>
-                  Evaluation Credentials (QS Compliance)
-                </div>
+              {/* Card 2: Required Documents Checklist Section */}
+              {(() => {
+                const missingRequiredDocs = docChecklist.filter(d => d.required && (!d.submitted || !d.verified));
+                const isDocComplete = missingRequiredDocs.length === 0;
+                const verifiedCount = docChecklist.filter(d => d.submitted && d.verified).length;
 
-                <div style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-                  gap: '14px'
-                }}>
-                  <div style={{ background: isDark ? 'rgba(15, 23, 42, 0.6)' : 'var(--card-solid, #ffffff)', padding: '12px 16px', borderRadius: '12px', border: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid var(--line)' }}>
-                    <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary, #94a3b8)', textTransform: 'uppercase' }}>
-                      Highest Educational Attainment
+                return (
+                  <div style={{
+                    background: isDark ? 'rgba(15, 23, 42, 0.6)' : 'var(--card-subtle)',
+                    borderRadius: '16px',
+                    border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid var(--line)',
+                    padding: '20px',
+                    boxShadow: isDark ? '0 8px 32px rgba(0, 0, 0, 0.2)' : '0 4px 12px rgba(0, 0, 0, 0.03)'
+                  }}>
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      marginBottom: '14px',
+                      flexWrap: 'wrap',
+                      gap: '10px'
+                    }}>
+                      <div>
+                        <div style={{
+                          fontSize: '12px',
+                          fontWeight: 800,
+                          color: isDark ? '#38bdf8' : '#0284c7',
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.05em'
+                        }}>
+                          2. Required Documents Submission Checklist
+                        </div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-secondary, #94a3b8)', marginTop: '2px' }}>
+                          Verify that all mandated personnel credentials and certificates are submitted and authenticated.
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{
+                          fontSize: '11.5px',
+                          fontWeight: 800,
+                          padding: '3px 10px',
+                          borderRadius: '8px',
+                          background: isDocComplete
+                            ? (isDark ? 'rgba(6, 78, 59, 0.4)' : '#ecfdf5')
+                            : (isDark ? 'rgba(180, 83, 9, 0.35)' : '#fffbeb'),
+                          color: isDocComplete
+                            ? (isDark ? '#6ee7b7' : '#047857')
+                            : (isDark ? '#fcd34d' : '#b45309'),
+                          border: isDocComplete
+                            ? (isDark ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #a7f3d0')
+                            : (isDark ? '1px solid rgba(245, 158, 11, 0.4)' : '1px solid #fde68a')
+                        }}>
+                          {verifiedCount} of {docChecklist.length} Verified
+                        </span>
+
+                        {!isRegionalOffice && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={handleMarkAllDocsComplete}
+                              style={{
+                                padding: '4px 10px',
+                                borderRadius: '6px',
+                                border: isDark ? '1px solid rgba(16, 185, 129, 0.5)' : '1px solid #10b981',
+                                background: isDark ? 'rgba(6, 78, 59, 0.35)' : '#ecfdf5',
+                                color: isDark ? '#6ee7b7' : '#047857',
+                                fontSize: '11.5px',
+                                fontWeight: 700,
+                                cursor: 'pointer'
+                              }}
+                            >
+                              ✓ Verify All
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleResetAllDocs}
+                              style={{
+                                padding: '4px 10px',
+                                borderRadius: '6px',
+                                border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid var(--line)',
+                                background: isDark ? 'rgba(30, 41, 59, 0.5)' : 'var(--card-solid, #ffffff)',
+                                color: 'var(--text-secondary, #94a3b8)',
+                                fontSize: '11.5px',
+                                fontWeight: 700,
+                                cursor: 'pointer'
+                              }}
+                            >
+                              ↺ Reset
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </div>
-                    <div style={{ fontSize: '13.5px', fontWeight: 700, color: 'var(--text)', marginTop: '4px', lineHeight: 1.4 }}>
-                      {selectedIncumbent.education || selectedIncumbent.assessment?.education || '— No educational credential recorded yet'}
+
+                    {/* Completion Notice Banner */}
+                    {!isDocComplete ? (
+                      <div style={{
+                        padding: '12px 16px',
+                        borderRadius: '12px',
+                        background: isDark ? 'rgba(120, 53, 15, 0.35)' : '#fffbeb',
+                        border: isDark ? '1px solid rgba(245, 158, 11, 0.5)' : '1px solid #fde68a',
+                        color: isDark ? '#fef3c7' : '#92400e',
+                        fontSize: '12.5px',
+                        lineHeight: 1.5,
+                        marginBottom: '14px',
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        gap: '10px'
+                      }}>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: '2px' }}>
+                          <circle cx="12" cy="12" r="10" />
+                          <line x1="12" y1="8" x2="12" y2="12" />
+                          <line x1="12" y1="16" x2="12.01" y2="16" />
+                        </svg>
+                        <div>
+                          <b style={{ fontWeight: 800 }}>Incomplete Document Submission Notice:</b>
+                          <div style={{ marginTop: '2px' }}>
+                            The following required documents are missing or unverified:{' '}
+                            <span style={{ fontWeight: 750, textDecoration: 'underline' }}>
+                              {missingRequiredDocs.map(d => d.shortLabel || d.label).join(', ')}
+                            </span>
+                            . All mandated documents must be marked as Submitted &amp; Verified before Qualification Standards (QS) Evaluation can be completed.
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{
+                        padding: '10px 16px',
+                        borderRadius: '12px',
+                        background: isDark ? 'rgba(6, 78, 59, 0.35)' : '#ecfdf5',
+                        border: isDark ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #a7f3d0',
+                        color: isDark ? '#a7f3d0' : '#065f46',
+                        fontSize: '12.5px',
+                        fontWeight: 700,
+                        marginBottom: '14px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px'
+                      }}>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                        All required documents are submitted and verified. Qualification Standards (QS) Evaluation is unlocked.
+                      </div>
+                    )}
+
+                    {/* Document Checklist Table */}
+                    <div style={{
+                      overflowX: 'auto',
+                      border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid var(--line)',
+                      borderRadius: '12px',
+                      background: isDark ? 'rgba(15, 23, 42, 0.5)' : 'var(--card-solid, #ffffff)'
+                    }}>
+                      <table style={{ width: '100%', minWidth: '780px', borderCollapse: 'collapse', fontSize: '12.5px' }}>
+                        <thead>
+                          <tr style={{
+                            borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid var(--line)',
+                            background: isDark ? 'rgba(30, 41, 59, 0.5)' : 'var(--card-subtle)',
+                            color: 'var(--text-secondary, #94a3b8)',
+                            fontSize: '11px',
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.04em'
+                          }}>
+                            <th style={{ padding: '10px 16px', textAlign: 'left', whiteSpace: 'nowrap' }}>Required Document</th>
+                            <th style={{ padding: '10px 14px', textAlign: 'center', width: '120px', minWidth: '120px', whiteSpace: 'nowrap' }}>Requirement</th>
+                            <th style={{ padding: '10px 14px', textAlign: 'center', width: '130px', minWidth: '130px', whiteSpace: 'nowrap' }}>Submitted</th>
+                            <th style={{ padding: '10px 14px', textAlign: 'center', width: '130px', minWidth: '130px', whiteSpace: 'nowrap' }}>Verified</th>
+                            <th style={{ padding: '10px 16px', textAlign: 'right', width: '190px', minWidth: '190px', whiteSpace: 'nowrap' }}>Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {docChecklist.map((doc) => {
+                            const isSubmitted = Boolean(doc.submitted);
+                            const isVerified = Boolean(doc.verified);
+
+                            return (
+                              <tr
+                                key={doc.id}
+                                style={{
+                                  borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.4)' : '1px solid var(--line)',
+                                  background: (doc.required && (!isSubmitted || !isVerified))
+                                    ? (isDark ? 'rgba(120, 53, 15, 0.08)' : 'rgba(254, 243, 199, 0.3)')
+                                    : 'transparent'
+                                }}
+                              >
+                                <td style={{ padding: '10px 16px', verticalAlign: 'middle' }}>
+                                  <div style={{ fontWeight: 750, color: 'var(--text)' }}>
+                                    {doc.label}
+                                  </div>
+                                </td>
+                                <td style={{ padding: '10px 14px', textAlign: 'center', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                                  {doc.required ? (
+                                    <span style={{
+                                      fontSize: '10px',
+                                      fontWeight: 800,
+                                      padding: '3px 8px',
+                                      borderRadius: '5px',
+                                      background: isDark ? 'rgba(239, 68, 68, 0.2)' : '#fee2e2',
+                                      color: isDark ? '#fca5a5' : '#b91c1c',
+                                      border: isDark ? '1px solid rgba(239, 68, 68, 0.4)' : '1px solid #fca5a5',
+                                      whiteSpace: 'nowrap',
+                                      display: 'inline-block'
+                                    }}>
+                                      MANDATORY
+                                    </span>
+                                  ) : (
+                                    <span style={{
+                                      fontSize: '10px',
+                                      fontWeight: 700,
+                                      padding: '3px 8px',
+                                      borderRadius: '5px',
+                                      background: isDark ? 'rgba(100, 116, 139, 0.2)' : '#f1f5f9',
+                                      color: 'var(--text-secondary, #94a3b8)',
+                                      whiteSpace: 'nowrap',
+                                      display: 'inline-block'
+                                    }}>
+                                      OPTIONAL
+                                    </span>
+                                  )}
+                                </td>
+                                <td style={{ padding: '10px 14px', textAlign: 'center', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                                  <label style={{ display: 'inline-flex', alignItems: 'center', cursor: isRegionalOffice ? 'not-allowed' : 'pointer', gap: '6px', whiteSpace: 'nowrap' }}>
+                                    <input
+                                      type="checkbox"
+                                      checked={isSubmitted}
+                                      onChange={() => handleToggleDocSubmitted(doc.id)}
+                                      disabled={isRegionalOffice}
+                                      style={{ width: '16px', height: '16px', accentColor: '#2563eb', cursor: isRegionalOffice ? 'not-allowed' : 'pointer', margin: 0, flexShrink: 0 }}
+                                    />
+                                    <span style={{ fontSize: '12px', fontWeight: 650, color: isSubmitted ? '#2563eb' : 'var(--text-secondary, #94a3b8)', whiteSpace: 'nowrap' }}>
+                                      {isSubmitted ? 'Submitted' : 'Missing'}
+                                    </span>
+                                  </label>
+                                </td>
+                                <td style={{ padding: '10px 14px', textAlign: 'center', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                                  <label style={{ display: 'inline-flex', alignItems: 'center', cursor: (isRegionalOffice || !isSubmitted) ? 'not-allowed' : 'pointer', gap: '6px', whiteSpace: 'nowrap' }}>
+                                    <input
+                                      type="checkbox"
+                                      checked={isVerified}
+                                      onChange={() => handleToggleDocVerified(doc.id)}
+                                      disabled={isRegionalOffice || !isSubmitted}
+                                      style={{ width: '16px', height: '16px', accentColor: '#10b981', cursor: (isRegionalOffice || !isSubmitted) ? 'not-allowed' : 'pointer', margin: 0, flexShrink: 0 }}
+                                    />
+                                    <span style={{ fontSize: '12px', fontWeight: 650, color: isVerified ? '#10b981' : 'var(--text-secondary, #94a3b8)', whiteSpace: 'nowrap' }}>
+                                      {isVerified ? 'Verified' : 'Pending'}
+                                    </span>
+                                  </label>
+                                </td>
+                                <td style={{ padding: '10px 16px', textAlign: 'right', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                                  {isSubmitted && isVerified ? (
+                                    <span style={{
+                                      fontSize: '11px',
+                                      fontWeight: 800,
+                                      padding: '3px 10px',
+                                      borderRadius: '6px',
+                                      background: isDark ? 'rgba(6, 78, 59, 0.4)' : '#ecfdf5',
+                                      color: isDark ? '#6ee7b7' : '#047857',
+                                      border: isDark ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #a7f3d0',
+                                      whiteSpace: 'nowrap',
+                                      display: 'inline-block'
+                                    }}>
+                                      ☑ Submitted &amp; Verified
+                                    </span>
+                                  ) : isSubmitted ? (
+                                    <span style={{
+                                      fontSize: '11px',
+                                      fontWeight: 750,
+                                      padding: '3px 10px',
+                                      borderRadius: '6px',
+                                      background: isDark ? 'rgba(180, 83, 9, 0.3)' : '#fffbeb',
+                                      color: isDark ? '#fcd34d' : '#b45309',
+                                      border: isDark ? '1px solid rgba(245, 158, 11, 0.4)' : '1px solid #fde68a',
+                                      whiteSpace: 'nowrap',
+                                      display: 'inline-block'
+                                    }}>
+                                      ⏳ Submitted (Unverified)
+                                    </span>
+                                  ) : (
+                                    <span style={{
+                                      fontSize: '11px',
+                                      fontWeight: 750,
+                                      padding: '3px 10px',
+                                      borderRadius: '6px',
+                                      background: isDark ? 'rgba(239, 68, 68, 0.2)' : '#fee2e2',
+                                      color: isDark ? '#fca5a5' : '#b91c1c',
+                                      border: isDark ? '1px solid rgba(239, 68, 68, 0.3)' : '1px solid #fca5a5',
+                                      whiteSpace: 'nowrap',
+                                      display: 'inline-block'
+                                    }}>
+                                      ☐ Missing
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
+                );
+              })()}
 
-                  <div style={{ background: isDark ? 'rgba(15, 23, 42, 0.6)' : 'var(--card-solid, #ffffff)', padding: '12px 16px', borderRadius: '12px', border: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid var(--line)' }}>
-                    <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary, #94a3b8)', textTransform: 'uppercase' }}>
-                      Years of Relevant Experience
+              {/* Card 3: Position-Specific Qualification Standards (QS) Evaluation Section */}
+              {(() => {
+                const missingRequiredDocs = docChecklist.filter(d => d.required && (!d.submitted || !d.verified));
+                const isDocComplete = missingRequiredDocs.length === 0;
+                const effectiveTargetPos = modalTargetPosition || selectedIncumbent.reclass_position || 'School Counselor I';
+                const standards = POSITION_QS_STANDARDS[effectiveTargetPos] || POSITION_QS_STANDARDS['School Counselor I'];
+                const overallResult = getCalculatedQsStatus(qsEvaluation);
+
+                const criteriaRows = [
+                  {
+                    key: 'education',
+                    title: 'Education',
+                    standard: standards.education,
+                    candidate: selectedIncumbent.education || selectedIncumbent.assessment?.education || '— No educational credential recorded yet'
+                  },
+                  {
+                    key: 'experience',
+                    title: 'Experience',
+                    standard: standards.experience,
+                    candidate: (selectedIncumbent.years_experience !== null && selectedIncumbent.years_experience !== undefined)
+                      ? `${selectedIncumbent.years_experience} Years relevant guidance experience`
+                      : (selectedIncumbent.assessment?.years_experience !== null && selectedIncumbent.assessment?.years_experience !== undefined)
+                        ? `${selectedIncumbent.assessment.years_experience} Years relevant experience`
+                        : '— 0 Years recorded'
+                  },
+                  {
+                    key: 'training',
+                    title: 'Training',
+                    standard: standards.training,
+                    candidate: (selectedIncumbent.hours_of_training !== null && selectedIncumbent.hours_of_training !== undefined)
+                      ? `${selectedIncumbent.hours_of_training} Hours relevant training`
+                      : (selectedIncumbent.assessment?.hours_of_training !== null && selectedIncumbent.assessment?.hours_of_training !== undefined)
+                        ? `${selectedIncumbent.assessment.hours_of_training} Hours relevant training`
+                        : '— 0 Hours recorded'
+                  },
+                  {
+                    key: 'eligibility',
+                    title: 'Eligibility',
+                    standard: standards.eligibility,
+                    candidate: selectedIncumbent.eligibility || selectedIncumbent.assessment?.eligibility || '— No eligibility certificate recorded yet'
+                  }
+                ];
+
+                const unmetCriteria = criteriaRows.filter(r => qsEvaluation[r.key] === 'Does Not Meet');
+
+                return (
+                  <div style={{
+                    background: isDark ? 'rgba(15, 23, 42, 0.7)' : 'var(--card-subtle)',
+                    borderRadius: '16px',
+                    border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid var(--line)',
+                    padding: '20px',
+                    position: 'relative',
+                    boxShadow: isDark ? '0 8px 32px rgba(0, 0, 0, 0.2)' : '0 4px 12px rgba(0, 0, 0, 0.03)'
+                  }}>
+                    {/* Header with target position QS tag */}
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      marginBottom: '14px',
+                      flexWrap: 'wrap',
+                      gap: '10px'
+                    }}>
+                      <div>
+                        <div style={{
+                          fontSize: '12px',
+                          fontWeight: 800,
+                          color: isDark ? '#a78bfa' : '#7c3aed',
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.05em'
+                        }}>
+                          3. Position-Specific Qualification Standards (QS) Evaluation
+                        </div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-secondary, #94a3b8)', marginTop: '2px' }}>
+                          CSC &amp; DepEd QS benchmarks for: <b style={{ color: 'var(--text)' }}>{effectiveTargetPos}</b>
+                        </div>
+                      </div>
+
+                      {isDocComplete && !isRegionalOffice && (
+                        <button
+                          type="button"
+                          onClick={handleAutoEvaluateQs}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            padding: '6px 14px',
+                            borderRadius: '8px',
+                            background: 'linear-flex(135deg, #4f46e5 0%, #7c3aed 100%)',
+                            backgroundColor: '#6366f1',
+                            border: 'none',
+                            color: '#ffffff',
+                            fontSize: '12px',
+                            fontWeight: 750,
+                            cursor: 'pointer',
+                            boxShadow: '0 2px 6px rgba(99, 102, 241, 0.3)',
+                            transition: 'all 0.15s ease'
+                          }}
+                        >
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+                          </svg>
+                          Auto-Assess from Profile
+                        </button>
+                      )}
                     </div>
-                    <div style={{ fontSize: '18px', fontWeight: 850, color: isDark ? '#60a5fa' : '#2563eb', marginTop: '4px' }}>
-                      {(selectedIncumbent.years_experience !== null && selectedIncumbent.years_experience !== undefined)
-                        ? `${selectedIncumbent.years_experience} Years`
-                        : (selectedIncumbent.assessment?.years_experience !== null && selectedIncumbent.assessment?.years_experience !== undefined)
-                          ? `${selectedIncumbent.assessment.years_experience} Years`
-                          : '—'}
-                    </div>
+
+                    {/* Completion Gating Lock Overlay */}
+                    {!isDocComplete ? (
+                      <div style={{
+                        padding: '36px 24px',
+                        textAlign: 'center',
+                        background: isDark ? 'rgba(15, 23, 42, 0.85)' : 'rgba(248, 250, 252, 0.9)',
+                        borderRadius: '12px',
+                        border: isDark ? '1px dashed rgba(245, 158, 11, 0.5)' : '1px dashed #f59e0b',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '10px'
+                      }}>
+                        <div style={{
+                          width: '48px',
+                          height: '48px',
+                          borderRadius: '50%',
+                          background: isDark ? 'rgba(245, 158, 11, 0.2)' : '#fef3c7',
+                          color: '#f59e0b',
+                          display: 'grid',
+                          placeItems: 'center'
+                        }}>
+                          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                          </svg>
+                        </div>
+                        <div style={{ fontSize: '15px', fontWeight: 800, color: 'var(--text)' }}>
+                          QS Evaluation is Locked
+                        </div>
+                        <div style={{ fontSize: '12.5px', color: 'var(--text-secondary, #94a3b8)', maxWidth: '460px', lineHeight: 1.45 }}>
+                          All mandatory documents in the checklist above must be marked as <b>Submitted &amp; Verified</b> before the Qualification Standards evaluation can be performed.
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        {/* Interactive QS Standards Table */}
+                        <div style={{
+                          overflowX: 'auto',
+                          borderRadius: '12px',
+                          border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid var(--line)',
+                          background: isDark ? 'rgba(15, 23, 42, 0.5)' : 'var(--card-solid, #ffffff)',
+                          marginBottom: '16px'
+                        }}>
+                          <table style={{ width: '100%', minWidth: '780px', borderCollapse: 'collapse', fontSize: '12.5px' }}>
+                            <thead>
+                              <tr style={{
+                                borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid var(--line)',
+                                background: isDark ? 'rgba(30, 41, 59, 0.5)' : 'var(--card-subtle)',
+                                color: 'var(--text-secondary, #94a3b8)',
+                                fontSize: '11px',
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.04em'
+                              }}>
+                                <th style={{ padding: '10px 14px', width: '130px', minWidth: '130px', textAlign: 'left', whiteSpace: 'nowrap' }}>Standard Criterion</th>
+                                <th style={{ padding: '10px 14px', textAlign: 'left', minWidth: '220px' }}>Target QS Requirement ({effectiveTargetPos})</th>
+                                <th style={{ padding: '10px 14px', textAlign: 'left', minWidth: '220px' }}>Personnel Record / Credential</th>
+                                <th style={{ padding: '10px 14px', textAlign: 'center', width: '230px', minWidth: '230px', whiteSpace: 'nowrap' }}>Evaluation</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {criteriaRows.map((crit) => {
+                                const evalValue = qsEvaluation[crit.key];
+                                const isMeets = evalValue === 'Meets';
+                                const isDoesNotMeet = evalValue === 'Does Not Meet';
+
+                                return (
+                                  <tr
+                                    key={crit.key}
+                                    style={{
+                                      borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.4)' : '1px solid var(--line)',
+                                      background: isDoesNotMeet
+                                        ? (isDark ? 'rgba(239, 68, 68, 0.08)' : 'rgba(254, 226, 226, 0.3)')
+                                        : isMeets
+                                          ? (isDark ? 'rgba(16, 185, 129, 0.06)' : 'rgba(236, 253, 245, 0.3)')
+                                          : 'transparent'
+                                    }}
+                                  >
+                                    <td style={{ padding: '12px 14px', verticalAlign: 'top', whiteSpace: 'nowrap' }}>
+                                      <div style={{ fontWeight: 800, color: 'var(--text)', whiteSpace: 'nowrap' }}>
+                                        {crit.title}
+                                      </div>
+                                    </td>
+                                    <td style={{ padding: '12px 14px', verticalAlign: 'top', color: 'var(--text-secondary, #94a3b8)', lineHeight: 1.4 }}>
+                                      {crit.standard}
+                                    </td>
+                                    <td style={{ padding: '12px 14px', verticalAlign: 'top' }}>
+                                      <div style={{ fontWeight: 700, color: 'var(--text)', lineHeight: 1.4 }}>
+                                        {crit.candidate}
+                                      </div>
+                                    </td>
+                                    <td style={{ padding: '12px 14px', textAlign: 'center', verticalAlign: 'middle', whiteSpace: 'nowrap', width: '230px', minWidth: '230px' }}>
+                                      <div style={{ display: 'inline-flex', gap: '6px', alignItems: 'center', whiteSpace: 'nowrap' }}>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleSetQsCriterion(crit.key, 'Meets')}
+                                          disabled={isRegionalOffice}
+                                          style={{
+                                            padding: '5px 12px',
+                                            borderRadius: '6px',
+                                            border: isMeets
+                                              ? (isDark ? '1.5px solid #10b981' : '1.5px solid #059669')
+                                              : (isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid var(--line)'),
+                                            background: isMeets
+                                              ? (isDark ? 'rgba(6, 78, 59, 0.6)' : '#ecfdf5')
+                                              : (isDark ? 'rgba(30, 41, 59, 0.4)' : 'var(--card-solid, #ffffff)'),
+                                            color: isMeets
+                                              ? (isDark ? '#6ee7b7' : '#047857')
+                                              : 'var(--text-secondary, #94a3b8)',
+                                            fontWeight: isMeets ? 800 : 650,
+                                            fontSize: '11.5px',
+                                            cursor: isRegionalOffice ? 'not-allowed' : 'pointer',
+                                            transition: 'all 0.15s ease',
+                                            whiteSpace: 'nowrap'
+                                          }}
+                                        >
+                                          ✓ Meets
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleSetQsCriterion(crit.key, 'Does Not Meet')}
+                                          disabled={isRegionalOffice}
+                                          style={{
+                                            padding: '5px 12px',
+                                            borderRadius: '6px',
+                                            border: isDoesNotMeet
+                                              ? (isDark ? '1.5px solid #ef4444' : '1.5px solid #dc2626')
+                                              : (isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid var(--line)'),
+                                            background: isDoesNotMeet
+                                              ? (isDark ? 'rgba(127, 29, 29, 0.5)' : '#fee2e2')
+                                              : (isDark ? 'rgba(30, 41, 59, 0.4)' : 'var(--card-solid, #ffffff)'),
+                                            color: isDoesNotMeet
+                                              ? (isDark ? '#fca5a5' : '#b91c1c')
+                                              : 'var(--text-secondary, #94a3b8)',
+                                            fontWeight: isDoesNotMeet ? 800 : 650,
+                                            fontSize: '11.5px',
+                                            cursor: isRegionalOffice ? 'not-allowed' : 'pointer',
+                                            transition: 'all 0.15s ease',
+                                            whiteSpace: 'nowrap'
+                                          }}
+                                        >
+                                          ✗ Does Not Meet
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        {/* Overall QS Evaluation Result Summary Card */}
+                        <div style={{
+                          padding: '16px 20px',
+                          borderRadius: '12px',
+                          border: overallResult === 'QUALIFIED'
+                            ? (isDark ? '1.5px solid rgba(16, 185, 129, 0.5)' : '1.5px solid #10b981')
+                            : overallResult === 'NOT QUALIFIED'
+                              ? (isDark ? '1.5px solid rgba(239, 68, 68, 0.5)' : '1.5px solid #ef4444')
+                              : (isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid var(--line)'),
+                          background: overallResult === 'QUALIFIED'
+                            ? (isDark ? 'rgba(6, 78, 59, 0.35)' : '#ecfdf5')
+                            : overallResult === 'NOT QUALIFIED'
+                              ? (isDark ? 'rgba(127, 29, 29, 0.25)' : '#fef2f2')
+                              : (isDark ? 'rgba(30, 41, 59, 0.4)' : 'var(--card-solid, #ffffff)'),
+                          marginBottom: '16px'
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
+                            <div style={{ fontSize: '12px', fontWeight: 800, textTransform: 'uppercase', color: 'var(--text-secondary, #94a3b8)' }}>
+                              Overall Qualification Standards Assessment Result
+                            </div>
+                            <span style={{
+                              fontSize: '13px',
+                              fontWeight: 900,
+                              padding: '4px 14px',
+                              borderRadius: '8px',
+                              letterSpacing: '0.04em',
+                              background: overallResult === 'QUALIFIED'
+                                ? '#10b981'
+                                : overallResult === 'NOT QUALIFIED'
+                                  ? '#ef4444'
+                                  : (isDark ? 'rgba(100, 116, 139, 0.4)' : '#64748b'),
+                              color: '#ffffff',
+                              boxShadow: overallResult === 'QUALIFIED'
+                                ? '0 2px 10px rgba(16, 185, 129, 0.35)'
+                                : overallResult === 'NOT QUALIFIED'
+                                  ? '0 2px 10px rgba(239, 68, 68, 0.35)'
+                                  : 'none'
+                            }}>
+                              {overallResult === 'QUALIFIED' ? '✓ QUALIFIED' : overallResult === 'NOT QUALIFIED' ? '✗ NOT QUALIFIED' : 'PENDING EVALUATION'}
+                            </span>
+                          </div>
+
+                          {overallResult === 'QUALIFIED' && (
+                            <div style={{ fontSize: '13px', color: isDark ? '#a7f3d0' : '#047857', fontWeight: 700 }}>
+                              Candidate satisfies all Civil Service Commission (CSC) and DepEd Qualification Standards (Education, Experience, Training, Eligibility) for <b>{effectiveTargetPos}</b>.
+                            </div>
+                          )}
+
+                          {overallResult === 'NOT QUALIFIED' && (
+                            <div style={{ fontSize: '12.5px', color: isDark ? '#fca5a5' : '#991b1b' }}>
+                              <b style={{ fontWeight: 800 }}>Candidate does not satisfy the following qualification standards:</b>
+                              <ul style={{ margin: '6px 0 0 18px', padding: 0 }}>
+                                {unmetCriteria.map(u => (
+                                  <li key={u.key} style={{ marginTop: '2px' }}>
+                                    <b>{u.title}</b>: Required [{u.standard}] — Submitted [{u.candidate}]
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+
+                          {overallResult === 'PENDING' && (
+                            <div style={{ fontSize: '12.5px', color: 'var(--text-secondary, #94a3b8)' }}>
+                              Mark all 4 criteria above as "Meets" or "Does Not Meet" to establish final reclassification qualification.
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Audit Trail & Remarks Section */}
+                        <div style={{
+                          background: isDark ? 'rgba(2, 6, 23, 0.4)' : 'var(--card-subtle)',
+                          borderRadius: '12px',
+                          border: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid var(--line)',
+                          padding: '16px'
+                        }}>
+                          <div style={{
+                            fontSize: '11px',
+                            fontWeight: 800,
+                            color: 'var(--text-secondary, #94a3b8)',
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.05em',
+                            marginBottom: '10px'
+                          }}>
+                            Evaluation Audit Trail &amp; Remarks
+                          </div>
+
+                          <div style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
+                            gap: '14px',
+                            alignItems: 'flex-start'
+                          }}>
+                            <div>
+                              <label style={{ display: 'block', fontSize: '11.5px', fontWeight: 750, color: 'var(--text)', marginBottom: '5px' }}>
+                                Evaluator Name / Account
+                              </label>
+                              <input
+                                type="text"
+                                value={evaluatorName}
+                                onChange={e => setEvaluatorName(e.target.value)}
+                                disabled={isRegionalOffice}
+                                placeholder="HRMO Evaluator Name"
+                                style={{
+                                  width: '100%',
+                                  padding: '9px 12px',
+                                  borderRadius: '8px',
+                                  border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid var(--line)',
+                                  background: 'var(--input-bg)',
+                                  color: 'var(--text)',
+                                  fontSize: '12.5px',
+                                  outline: 'none'
+                                }}
+                              />
+                            </div>
+
+                            <div>
+                              <label style={{ display: 'block', fontSize: '11.5px', fontWeight: 750, color: 'var(--text)', marginBottom: '5px' }}>
+                                Evaluation Timestamp
+                              </label>
+                              <div style={{
+                                padding: '9px 12px',
+                                borderRadius: '8px',
+                                border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid var(--line)',
+                                background: isDark ? 'rgba(15, 23, 42, 0.6)' : 'var(--card-solid, #ffffff)',
+                                color: 'var(--text-secondary, #94a3b8)',
+                                fontSize: '12.5px',
+                                fontFamily: 'monospace'
+                              }}>
+                                {selectedIncumbent.evaluated_at
+                                  ? new Date(selectedIncumbent.evaluated_at).toLocaleString()
+                                  : 'Auto-recorded upon saving'}
+                              </div>
+                            </div>
+
+                            <div>
+                              <label style={{ display: 'block', fontSize: '11.5px', fontWeight: 750, color: 'var(--text)', marginBottom: '5px' }}>
+                                Evaluator Remarks &amp; Justification
+                              </label>
+                              <textarea
+                                value={evaluatorRemarks}
+                                onChange={e => setEvaluatorRemarks(e.target.value)}
+                                disabled={isRegionalOffice}
+                                rows={1}
+                                placeholder="Add assessment notes, board resolution, or justification..."
+                                style={{
+                                  width: '100%',
+                                  padding: '8px 12px',
+                                  borderRadius: '8px',
+                                  border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid var(--line)',
+                                  background: 'var(--input-bg)',
+                                  color: 'var(--text)',
+                                  fontSize: '12.5px',
+                                  resize: 'vertical',
+                                  outline: 'none',
+                                  fontFamily: 'inherit'
+                                }}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      </>
+                    )}
                   </div>
+                );
+              })()}
 
-                  <div style={{ background: isDark ? 'rgba(15, 23, 42, 0.6)' : 'var(--card-solid, #ffffff)', padding: '12px 16px', borderRadius: '12px', border: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid var(--line)' }}>
-                    <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary, #94a3b8)', textTransform: 'uppercase' }}>
-                      Hours of Relevant Training
-                    </div>
-                    <div style={{ fontSize: '18px', fontWeight: 850, color: isDark ? '#34d399' : '#059669', marginTop: '4px' }}>
-                      {(selectedIncumbent.hours_of_training !== null && selectedIncumbent.hours_of_training !== undefined)
-                        ? `${selectedIncumbent.hours_of_training} Hours`
-                        : (selectedIncumbent.assessment?.hours_of_training !== null && selectedIncumbent.assessment?.hours_of_training !== undefined)
-                          ? `${selectedIncumbent.assessment.hours_of_training} Hours`
-                          : '—'}
-                    </div>
-                  </div>
-
-                  <div style={{ background: isDark ? 'rgba(15, 23, 42, 0.6)' : 'var(--card-solid, #ffffff)', padding: '12px 16px', borderRadius: '12px', border: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid var(--line)' }}>
-                    <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary, #94a3b8)', textTransform: 'uppercase' }}>
-                      Civil Service / Professional Board Eligibility
-                    </div>
-                    <div style={{ fontSize: '13.5px', fontWeight: 700, color: 'var(--text)', marginTop: '4px', lineHeight: 1.4 }}>
-                      {selectedIncumbent.eligibility || selectedIncumbent.assessment?.eligibility || '— No eligibility recorded yet'}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Card 2: View Documents Section (AGAP SCA I Workflow) */}
+              {/* Card 4: Supporting Attached Files */}
               <div style={{
                 background: isDark ? 'rgba(2, 6, 23, 0.6)' : 'var(--card-subtle)',
                 borderRadius: '16px',
@@ -4965,10 +6072,10 @@ export default function ReclassificationPage({ onBack }) {
                       textTransform: 'uppercase',
                       letterSpacing: '0.05em'
                     }}>
-                      Supporting Attached Documents
+                      4. Supporting Attached Documents Preview
                     </div>
                     <div style={{ fontSize: '12px', color: 'var(--text-secondary, #94a3b8)', marginTop: '2px' }}>
-                      Click "View Document" to inspect attached credentials in full screen (PDS, TOR, Training Certificates, Eligibility Card).
+                      Click "View Document" to inspect candidate-attached credentials in full screen (PDS, TOR, Training Certificates, Eligibility Card).
                     </div>
                   </div>
                   <span style={{
@@ -4986,14 +6093,14 @@ export default function ReclassificationPage({ onBack }) {
 
                 {(!selectedIncumbent.assessment?.documents || selectedIncumbent.assessment.documents.length === 0) ? (
                   <div style={{
-                    padding: '24px',
+                    padding: '20px',
                     textAlign: 'center',
                     background: isDark ? 'rgba(15, 23, 42, 0.5)' : 'var(--card-solid, #ffffff)',
                     borderRadius: '12px',
                     color: 'var(--text-secondary, #94a3b8)',
-                    fontSize: '13px'
+                    fontSize: '12.5px'
                   }}>
-                    No supporting documents attached for this incumbent guidance counselor.
+                    No external PDF/image files uploaded for this incumbent. Checklist records above serve as evaluation basis.
                   </div>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -5038,7 +6145,7 @@ export default function ReclassificationPage({ onBack }) {
                             color: isDark ? '#6ee7b7' : '#047857',
                             border: isDark ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #a7f3d0'
                           }}>
-                            ✓ Verified Attachment
+                            ✓ Attachment
                           </span>
 
                           <button
@@ -5077,126 +6184,6 @@ export default function ReclassificationPage({ onBack }) {
                     ))}
                   </div>
                 )}
-              </div>
-
-              {/* Card 3: Target Reclassification Position Selection & Quick Stage Edit */}
-              <div style={{
-                background: isDark ? 'rgba(6, 78, 59, 0.25)' : '#ecfdf5',
-                borderRadius: '16px',
-                border: isDark ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #a7f3d0',
-                padding: '20px'
-              }}>
-                <div style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  marginBottom: '14px',
-                  gap: '10px'
-                }}>
-                  <div style={{
-                    fontSize: '12px',
-                    fontWeight: 800,
-                    color: isDark ? '#34d399' : '#047857',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.05em'
-                  }}>
-                    Reclassification Decisions
-                  </div>
-                  {isRegionalOffice && (
-                    <span style={{
-                      fontSize: '11px',
-                      fontWeight: 750,
-                      padding: '2px 8px',
-                      borderRadius: '6px',
-                      background: isDark ? 'rgba(99, 102, 241, 0.25)' : '#e0e7ff',
-                      color: isDark ? '#c7d2fe' : '#4338ca',
-                      border: isDark ? '1px solid rgba(99, 102, 241, 0.4)' : '1px solid #c7d2fe'
-                    }}>
-                      👁️ View-Only (HRMO Managed)
-                    </span>
-                  )}
-                </div>
-
-                <div style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-                  gap: '16px'
-                }}>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 750, color: 'var(--text)', marginBottom: '6px' }}>
-                      Target Reclassification Position
-                    </label>
-                    <select
-                      value={modalTargetPosition}
-                      onChange={e => setModalTargetPosition(e.target.value)}
-                      disabled={isRegionalOffice || savingModalChanges}
-                      style={{
-                        width: '100%',
-                        padding: '10px 14px',
-                        borderRadius: '10px',
-                        border: isDark ? '1.5px solid rgba(16, 185, 129, 0.5)' : '1.5px solid #10b981',
-                        background: 'var(--input-bg)',
-                        fontSize: '13.5px',
-                        fontWeight: 700,
-                        color: isDark ? '#6ee7b7' : '#047857',
-                        cursor: isRegionalOffice ? 'not-allowed' : 'pointer',
-                        outline: 'none',
-                        opacity: isRegionalOffice ? 0.85 : 1
-                      }}
-                    >
-                      <option value="" style={{ background: 'var(--card)', color: 'var(--text)' }}>-- Unassigned (Select Target Position) --</option>
-                      {RECLASS_POSITIONS_OPTIONS.map(pos => (
-                        <option key={pos} value={pos} style={{ background: 'var(--card)', color: 'var(--text)' }}>{pos}</option>
-                      ))}
-                    </select>
-                    <span style={{ fontSize: '11px', color: 'var(--text-secondary, #94a3b8)', display: 'block', marginTop: '4px' }}>
-                      {isRegionalOffice ? 'Designated target plantilla position assigned by Division HRMO.' : 'Designate target plantilla position (School Counselor I, II, III, IV).'}
-                    </span>
-                  </div>
-
-                  <div>
-                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 750, color: 'var(--text)', marginBottom: '6px' }}>
-                      Stage of Reclassification
-                    </label>
-                    <select
-                      value={modalStage}
-                      onChange={e => setModalStage(e.target.value)}
-                      disabled={isRegionalOffice || savingModalChanges}
-                      style={{
-                        width: '100%',
-                        padding: '10px 14px',
-                        borderRadius: '10px',
-                        border: isDark ? '1.5px solid rgba(51, 65, 85, 0.8)' : '1.5px solid var(--input-border, var(--line))',
-                        background: 'var(--input-bg)',
-                        fontSize: '13.5px',
-                        fontWeight: 700,
-                        color: 'var(--input-text, var(--text))',
-                        cursor: isRegionalOffice ? 'not-allowed' : 'pointer',
-                        outline: 'none',
-                        opacity: isRegionalOffice ? 0.85 : 1
-                      }}
-                    >
-                      {(selectedIncumbent?.stage_of_reclassification === 'Approved' || modalStage === 'Approved') ? (
-                        APPROVED_POST_ACTION_STAGES.map(stage => (
-                          <option key={stage} value={stage} style={{ background: 'var(--card)', color: 'var(--text)' }}>
-                            {stage === 'Approved' ? '✓ Approved (via DBM NOSCA)' : stage}
-                          </option>
-                        ))
-                      ) : (
-                        RECLASS_STAGES.map(stage => (
-                          <option key={stage} value={stage} style={{ background: 'var(--card)', color: 'var(--text)' }}>{stage}</option>
-                        ))
-                      )}
-                    </select>
-                    <span style={{ fontSize: '11px', color: 'var(--text-secondary, #94a3b8)', display: 'block', marginTop: '4px' }}>
-                      {(selectedIncumbent?.stage_of_reclassification === 'Approved' || modalStage === 'Approved')
-                        ? 'Approved item: HRMO may transition status to "Unfilled / Vacant" or "Abolition" if required.'
-                        : isRegionalOffice
-                          ? 'Workflow endorsement status recorded by Division HRMO.'
-                          : 'Workflow status automatically syncs across modal & main table view.'}
-                    </span>
-                  </div>
-                </div>
               </div>
             </div>
 

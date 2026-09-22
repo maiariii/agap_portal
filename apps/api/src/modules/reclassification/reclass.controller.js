@@ -417,11 +417,25 @@ export async function getIncumbents(req, res) {
         g.org_cd,
         g.remarks,
         g.stage_of_reclassification,
-        g.reclass_position,
+        COALESCE(nosca.position_title, g.reclass_position) AS reclass_position,
         g.dbm_status,
+        g.document_checklist,
+        g.qs_evaluation,
+        g.qs_eval_result,
+        g.evaluated_by,
+        g.evaluated_at,
+        g.evaluator_remarks,
         g.created_at,
         g.updated_at
       FROM incumbent_guidance_counselors g
+      LEFT JOIN LATERAL (
+        SELECT position_title
+        FROM reclassification_nosca_items n
+        WHERE (n.assigned_to_employee_id = g.employee_id OR n.assigned_to_incumbent_id = g.id)
+          AND n.position_title IS NOT NULL
+        ORDER BY n.updated_at DESC
+        LIMIT 1
+      ) nosca ON true
       WHERE 1=1
     `;
 
@@ -433,8 +447,12 @@ export async function getIncumbents(req, res) {
     }
 
     if (position) {
-      params.push(position);
-      query += ` AND g.reclass_position = $${params.length}`;
+      if (position === 'UNASSIGNED') {
+        query += ` AND COALESCE(nosca.position_title, g.reclass_position) IS NULL`;
+      } else {
+        params.push(position);
+        query += ` AND COALESCE(nosca.position_title, g.reclass_position) = $${params.length}`;
+      }
     }
 
     if (division) {
@@ -449,6 +467,7 @@ export async function getIncumbents(req, res) {
         g.plantilla_item_number ILIKE $${params.length} OR
         g.full_name ILIKE $${params.length} OR
         g.current_position ILIKE $${params.length} OR
+        COALESCE(nosca.position_title, g.reclass_position) ILIKE $${params.length} OR
         g.station_division ILIKE $${params.length} OR
         g.division ILIKE $${params.length} OR
         g.region ILIKE $${params.length} OR
@@ -478,6 +497,12 @@ export async function getIncumbents(req, res) {
         stage_of_reclassification: row.stage_of_reclassification,
         reclass_position: row.reclass_position,
         dbm_status: row.dbm_status || null,
+        document_checklist: row.document_checklist || [],
+        qs_evaluation: row.qs_evaluation || {},
+        qs_eval_result: row.qs_eval_result || 'PENDING',
+        evaluated_by: row.evaluated_by || null,
+        evaluated_at: row.evaluated_at || null,
+        evaluator_remarks: row.evaluator_remarks || null,
         created_at: row.created_at,
         updated_at: row.updated_at,
         assessment: {
@@ -586,6 +611,65 @@ export async function updateIncumbentPosition(req, res) {
 }
 
 /**
+ * Save incumbent counselor's document checklist and QS evaluation results
+ */
+export async function saveIncumbentQsEvaluation(req, res) {
+  try {
+    if (isUserRegionalOffice(req)) {
+      return res.status(403).json({ error: 'Access denied: Step 2 (Assessment Workbench) is restricted to Division HRMO.' });
+    }
+
+    const { id } = req.params;
+    const {
+      document_checklist,
+      qs_evaluation,
+      qs_eval_result,
+      evaluator_remarks,
+      reclass_position,
+      stage_of_reclassification
+    } = req.body;
+
+    const evaluatedBy = req.user?.name || req.user?.fullName || req.user?.username || req.user?.email || 'Division HRMO';
+    const evalResult = qs_eval_result || 'PENDING';
+
+    const updateQuery = `
+      UPDATE incumbent_guidance_counselors
+      SET document_checklist = COALESCE($1, document_checklist),
+          qs_evaluation = COALESCE($2, qs_evaluation),
+          qs_eval_result = $3,
+          evaluator_remarks = $4,
+          evaluated_by = $5,
+          evaluated_at = NOW(),
+          reclass_position = COALESCE($6, reclass_position),
+          stage_of_reclassification = COALESCE($7, stage_of_reclassification),
+          updated_at = NOW()
+      WHERE id = $8
+      RETURNING *;
+    `;
+
+    const result = await pool.query(updateQuery, [
+      document_checklist ? JSON.stringify(document_checklist) : null,
+      qs_evaluation ? JSON.stringify(qs_evaluation) : null,
+      evalResult,
+      evaluator_remarks || null,
+      evaluatedBy,
+      reclass_position || null,
+      stage_of_reclassification || null,
+      id
+    ]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Incumbent counselor not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('[Reclass Controller - saveIncumbentQsEvaluation]', error);
+    res.status(500).json({ error: error.message || 'Failed to save QS evaluation' });
+  }
+}
+
+/**
  * Update incumbent counselor's DBM status ('With DBM Request' or 'With DBM NOSCA')
  * and assign / link corresponding plantilla item in reclassification_nosca_items
  */
@@ -630,8 +714,8 @@ export async function updateIncumbentDbmStatus(req, res) {
              assigned_to_employee_id = NULL,
              assigned_at = NULL,
              updated_at = NOW()
-         WHERE assigned_to_incumbent_id = $1`,
-        [id]
+         WHERE assigned_to_incumbent_id = $1 OR assigned_to_employee_id = $2`,
+        [id, incumbent.employee_id]
       );
     }
 
@@ -639,16 +723,24 @@ export async function updateIncumbentDbmStatus(req, res) {
     let queryParams;
 
     if (isNosca && cleanItemNo) {
+      // Check reclassification_nosca_items for matching record and get its position_title
+      const noscaItemRes = await client.query(
+        `SELECT position_title FROM reclassification_nosca_items WHERE plantilla_item_number = $1 LIMIT 1`,
+        [cleanItemNo]
+      );
+      const matchedPosition = noscaItemRes.rows[0]?.position_title || incumbent.reclass_position || 'School Counselor Associate I';
+
       updateQuery = `
         UPDATE incumbent_guidance_counselors
         SET dbm_status = $1,
             stage_of_reclassification = 'Approved',
             plantilla_item_number = $2,
+            reclass_position = $3,
             updated_at = NOW()
-        WHERE id = $3
+        WHERE id = $4
         RETURNING *;
       `;
-      queryParams = [valueToSet, cleanItemNo, id];
+      queryParams = [valueToSet, cleanItemNo, matchedPosition, id];
     } else if (isNosca) {
       updateQuery = `
         UPDATE incumbent_guidance_counselors
@@ -667,6 +759,7 @@ export async function updateIncumbentDbmStatus(req, res) {
               WHEN stage_of_reclassification = 'Approved' THEN 'Endorsed'
               ELSE stage_of_reclassification
             END,
+            reclass_position = NULL,
             updated_at = NOW()
         WHERE id = $2
         RETURNING *;
@@ -914,7 +1007,8 @@ export async function uploadReclassCsv(req, res) {
         const remarks = row[remarksIdx] || null;
 
         const full_name = (!rawName || rawName.toUpperCase() === '#N/A') ? '#N/A' : rawName;
-        const reclass_position = (rawReclass && rawReclass.toUpperCase() !== '#N/A') ? rawReclass : null;
+        // reclass_position is NULL by default for all personnel
+        const reclass_position = null;
 
         // Determine employee_id and station_division
         const employee_id = plantilla_item_number || `ITEM-${i + j + 1}-${Date.now()}`;
@@ -985,13 +1079,23 @@ export async function uploadReclassCsv(req, res) {
             org_cd = EXCLUDED.org_cd,
             remarks = EXCLUDED.remarks,
             stage_of_reclassification = EXCLUDED.stage_of_reclassification,
-            reclass_position = COALESCE(EXCLUDED.reclass_position, incumbent_guidance_counselors.reclass_position),
+            reclass_position = incumbent_guidance_counselors.reclass_position,
             updated_at = NOW();
         `;
         await client.query(query, values);
         insertedOrUpdated += chunk.length;
       }
     }
+
+    // Check reclassification_nosca_items for matching record based on employee ID and set reclass_position
+    await client.query(`
+      UPDATE incumbent_guidance_counselors g
+      SET reclass_position = n.position_title,
+          updated_at = NOW()
+      FROM reclassification_nosca_items n
+      WHERE (n.assigned_to_employee_id = g.employee_id OR n.assigned_to_incumbent_id = g.id)
+        AND n.position_title IS NOT NULL
+    `);
 
     const countRes = await client.query('SELECT COUNT(*) as total FROM incumbent_guidance_counselors');
 

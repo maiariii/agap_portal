@@ -15,7 +15,8 @@ import {
   scanReclassNosca,
   importNoscaItems,
   getNoscaItems,
-  searchSchools
+  searchSchools,
+  saveIncumbentQsEvaluation
 } from './reclass.controller.js';
 import { authenticateToken } from '../../middleware/auth.middleware.js';
 
@@ -37,6 +38,7 @@ router.put('/incumbents/:id/stage', authenticateToken, updateIncumbentStage);
 router.put('/incumbents/:id/position', authenticateToken, updateIncumbentPosition);
 router.put('/incumbents/:id/dbm-status', authenticateToken, updateIncumbentDbmStatus);
 router.get('/incumbents/:id/documents', authenticateToken, getIncumbentDocuments);
+router.put('/incumbents/:id/qs-evaluation', authenticateToken, saveIncumbentQsEvaluation);
 
 // Reclassification Endpoints
 router.get('/', authenticateToken, getReclassApplications);
