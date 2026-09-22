@@ -19,6 +19,7 @@ import { runMigration as runReclassMigration } from './db/migration_reclassifica
 import { runMigration as runCarTeacherHiringMigration } from './db/migration_car_teacher_hiring.js';
 import { runMigration as runCollaboratorsMigration } from './db/migration_collaborators.js';
 import { runMigration as runIncumbentCounselorsMigration } from './db/migration_incumbent_counselors.js';
+import { runMigration as runNoscaMigration } from './db/migration_nosca_items.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -36,6 +37,7 @@ const PORT = process.env.PORT || 5000;
     await runCarTeacherHiringMigration();
     await runCollaboratorsMigration();
     await runIncumbentCounselorsMigration();
+    await runNoscaMigration();
   } catch (err) {
     console.error('[Server Startup Migration Error]', err.message);
   }

@@ -8,11 +8,13 @@ import {
   getIncumbents,
   updateIncumbentStage,
   updateIncumbentPosition,
+  updateIncumbentDbmStatus,
   getIncumbentDocuments,
   uploadReclassCsv,
   downloadReclassTemplate,
   scanReclassNosca,
-  importNoscaItems
+  importNoscaItems,
+  getNoscaItems
 } from './reclass.controller.js';
 import { authenticateToken } from '../../middleware/auth.middleware.js';
 
@@ -21,6 +23,7 @@ const router = Router();
 // Regional Office NOSCA Scanner & Import Endpoints
 router.post('/scan-nosca', authenticateToken, scanReclassNosca);
 router.post('/import-nosca-items', authenticateToken, importNoscaItems);
+router.get('/nosca-items', authenticateToken, getNoscaItems);
 
 // CSV Ingestion & Template Endpoints
 router.post('/upload-csv', authenticateToken, uploadReclassCsv);
@@ -30,6 +33,7 @@ router.get('/template-csv', downloadReclassTemplate);
 router.get('/incumbents', authenticateToken, getIncumbents);
 router.put('/incumbents/:id/stage', authenticateToken, updateIncumbentStage);
 router.put('/incumbents/:id/position', authenticateToken, updateIncumbentPosition);
+router.put('/incumbents/:id/dbm-status', authenticateToken, updateIncumbentDbmStatus);
 router.get('/incumbents/:id/documents', authenticateToken, getIncumbentDocuments);
 
 // Reclassification Endpoints

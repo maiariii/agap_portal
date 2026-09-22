@@ -19,8 +19,7 @@ export default function ReclassificationPage({ onBack }) {
   const isRegionalOffice = 
     user?.role === 'regional_office' || 
     user?.role === 'regional_director' || 
-    user?.role === 'admin' ||
-    String(user?.role || '').toLowerCase().includes('regional') ||
+    (String(user?.role || '').toLowerCase().includes('regional') && user?.role !== 'admin') ||
     String(user?.position || '').toLowerCase().trim() === 'regional office';
 
   // Regional Office NOSCA Scanner & Modal state
@@ -36,6 +35,15 @@ export default function ReclassificationPage({ onBack }) {
   const [confirmRemoveState, setConfirmRemoveState] = useState({ open: false, item: null, isBulk: false });
   const [showConfirmAddModal, setShowConfirmAddModal] = useState(false);
   const [importingNoscaItems, setImportingNoscaItems] = useState(false);
+  const [noscaInputMode, setNoscaInputMode] = useState('upload'); // 'upload' | 'manual'
+  const [manualNoscaItemInput, setManualNoscaItemInput] = useState('');
+  const [manualNoscaCategory, setManualNoscaCategory] = useState('ELEMENTARY');
+  const [manualNoscaSerial, setManualNoscaSerial] = useState('');
+  const [manualNoscaDivision, setManualNoscaDivision] = useState('');
+  const [manuallyAddedNoscaItems, setManuallyAddedNoscaItems] = useState(new Set());
+  const [showQuickAddInline, setShowQuickAddInline] = useState(false);
+  const [quickAddInlineInput, setQuickAddInlineInput] = useState('');
+  const [quickAddInlineCategory, setQuickAddInlineCategory] = useState('ELEMENTARY');
   const noscaFileInputRef = React.useRef(null);
 
   const [applications, setApplications] = useState([]);
@@ -55,7 +63,16 @@ export default function ReclassificationPage({ onBack }) {
   const [incumbentPositionFilter, setIncumbentPositionFilter] = useState('');
   const [incumbentRegionFilter, setIncumbentRegionFilter] = useState('');
   const [updatingStageId, setUpdatingStageId] = useState(null);
+  const [updatingDbmStatusId, setUpdatingDbmStatusId] = useState(null);
   const [updatingPosition, setUpdatingPosition] = useState(false);
+  const [noscaItems, setNoscaItems] = useState([]);
+  const [loadingNoscaItems, setLoadingNoscaItems] = useState(false);
+  const [noscaItemAssignModal, setNoscaItemAssignModal] = useState({ open: false, personnel: null });
+  const [selectedNoscaItemNo, setSelectedNoscaItemNo] = useState('');
+  const [customPlantillaNo, setCustomPlantillaNo] = useState('');
+  const [isCustomItemNo, setIsCustomItemNo] = useState(false);
+  const [itemSearchTerm, setItemSearchTerm] = useState('');
+  const [assigningItemLoading, setAssigningItemLoading] = useState(false);
   const [currentPageIncumbents, setCurrentPageIncumbents] = useState(1);
   const [pageSizeIncumbents, setPageSizeIncumbents] = useState(10);
 
@@ -92,7 +109,12 @@ export default function ReclassificationPage({ onBack }) {
   const [isDragging, setIsDragging] = useState(false);
 
   // Workflow Stepper state: 1 = CSV Ingestion, 2 = Assessment Workbench, 3 = DBM Endorsement
-  const [currentStep, setCurrentStep] = useState(1);
+  // Regional Office defaults to Step 3, with View-Only permissions for Steps 1 & 2
+  const [currentStep, setCurrentStep] = useState(() => isRegionalOffice ? 3 : 1);
+
+  const handleStepClick = (targetStep) => {
+    setCurrentStep(targetStep);
+  };
 
   // Form states for re-evaluation
   const [reevalResult, setReevalResult] = useState('Qualified (CSC QS)');
@@ -293,9 +315,25 @@ export default function ReclassificationPage({ onBack }) {
     }
   };
 
+  // Load Available NOSCA Plantilla Items from dedicated table
+  const fetchNoscaItems = async () => {
+    setLoadingNoscaItems(true);
+    try {
+      const data = await apiFetch('/api/reclassification/nosca-items?status=AVAILABLE');
+      if (Array.isArray(data)) {
+        setNoscaItems(data);
+      }
+    } catch (err) {
+      console.error('[Reclass] Error loading NOSCA items:', err);
+    } finally {
+      setLoadingNoscaItems(false);
+    }
+  };
+
   useEffect(() => {
     fetchApplications();
     fetchIncumbents();
+    fetchNoscaItems();
   }, []);
 
   // Update incumbent counselor stage of reclassification
@@ -334,6 +372,157 @@ export default function ReclassificationPage({ onBack }) {
       });
     } finally {
       setUpdatingStageId(null);
+    }
+  };
+
+  // Available Item Nos from uploaded/scanned NOSCA and dedicated reclassification_nosca_items table
+  const availableNoscaItemOptions = useMemo(() => {
+    const list = [];
+    const seen = new Set();
+
+    // 1. From active scanned / uploaded NOSCA batch in current session
+    if (scannedNoscaResult?.items && Array.isArray(scannedNoscaResult.items)) {
+      scannedNoscaResult.items.forEach(item => {
+        const str = String(item).trim();
+        if (str && !seen.has(str.toLowerCase())) {
+          seen.add(str.toLowerCase());
+          list.push({
+            itemNo: str,
+            source: scannedNoscaResult.serial_no ? `NOSCA #${scannedNoscaResult.serial_no}` : (scannedNoscaResult.fileName || 'Scanned NOSCA'),
+            division: scannedNoscaResult.division || '',
+            category: 'NOSCA Allocation',
+            isNA: str.toUpperCase() === '#N/A' || str.toUpperCase() === 'N/A'
+          });
+        }
+      });
+    }
+
+    // 2. From dedicated reclassification_nosca_items table (Available items)
+    if (Array.isArray(noscaItems)) {
+      noscaItems.forEach(item => {
+        const itemNo = (item.plantilla_item_number || '').trim();
+        if (itemNo && !seen.has(itemNo.toLowerCase())) {
+          seen.add(itemNo.toLowerCase());
+          list.push({
+            itemNo,
+            source: item.serial_no ? `NOSCA #${item.serial_no}` : 'NOSCA Allocation',
+            division: item.division || '',
+            category: item.category || 'ELEMENTARY',
+            isNA: itemNo.toUpperCase() === '#N/A' || itemNo.toUpperCase() === 'N/A'
+          });
+        }
+      });
+    }
+
+    return list;
+  }, [scannedNoscaResult, noscaItems]);
+
+  // Update incumbent counselor DBM status ('With DBM Request' or 'With DBM NOSCA')
+  const handleUpdateIncumbentDbmStatus = async (incumbentId, newStatus, assignedItemNo = null, e = null) => {
+    if (e) e.stopPropagation();
+    const previousIncumbents = [...incumbents];
+    const formattedStatus = (newStatus === '' || newStatus === 'None') ? null : newStatus;
+    const isNosca = formattedStatus === 'With DBM NOSCA';
+    const cleanItem = (typeof assignedItemNo === 'string' && assignedItemNo.trim()) ? assignedItemNo.trim() : null;
+
+    // Optimistic UI update
+    setIncumbents(prev =>
+      prev.map(item => {
+        if (item.id === incumbentId) {
+          return {
+            ...item,
+            dbm_status: formattedStatus,
+            ...(isNosca ? { stage_of_reclassification: 'Approved' } : {}),
+            ...(cleanItem ? { plantilla_item_number: cleanItem } : {})
+          };
+        }
+        return item;
+      })
+    );
+    if (selectedIncumbent && selectedIncumbent.id === incumbentId) {
+      setSelectedIncumbent(prev => ({
+        ...prev,
+        dbm_status: formattedStatus,
+        ...(isNosca ? { stage_of_reclassification: 'Approved' } : {}),
+        ...(cleanItem ? { plantilla_item_number: cleanItem } : {})
+      }));
+    }
+
+    setUpdatingDbmStatusId(incumbentId);
+    try {
+      const payload = { dbm_status: formattedStatus };
+      if (cleanItem) {
+        payload.plantilla_item_number = cleanItem;
+      }
+      const updated = await apiFetch(`/api/reclassification/incumbents/${incumbentId}/dbm-status`, {
+        method: 'PUT',
+        body: JSON.stringify(payload)
+      });
+      if (updated && updated.stage_of_reclassification) {
+        setIncumbents(prev =>
+          prev.map(item => item.id === incumbentId ? { ...item, ...updated } : item)
+        );
+      }
+      fetchNoscaItems();
+      setToast({
+        type: 'success',
+        message: isNosca
+          ? `DBM status set to "With DBM NOSCA"${cleanItem ? ` (Item: ${cleanItem})` : ''} and stage updated to "Approved"!`
+          : (formattedStatus ? `DBM status set to "${formattedStatus}"` : 'DBM status reset')
+      });
+    } catch (err) {
+      console.error('[Reclass] Error updating DBM status:', err);
+      setIncumbents(previousIncumbents);
+      if (selectedIncumbent && selectedIncumbent.id === incumbentId) {
+        const orig = previousIncumbents.find(i => i.id === incumbentId);
+        if (orig) setSelectedIncumbent(orig);
+      }
+      setToast({
+        type: 'error',
+        message: err.message || 'Failed to update DBM status'
+      });
+    } finally {
+      setUpdatingDbmStatusId(null);
+    }
+  };
+
+  // Open item assignment modal if With DBM NOSCA is selected
+  const handleDbmStatusSelectChange = (counselor, newStatus, e) => {
+    if (e) e.stopPropagation();
+    if (newStatus === 'With DBM NOSCA') {
+      const currentItem = (counselor.plantilla_item_number || '').trim();
+      const isItemNA = !currentItem || currentItem.toUpperCase() === '#N/A' || currentItem.toUpperCase() === 'N/A';
+      setNoscaItemAssignModal({ open: true, personnel: counselor });
+      setSelectedNoscaItemNo(isItemNA ? '' : currentItem);
+      setCustomPlantillaNo(isItemNA ? '' : currentItem);
+      setIsCustomItemNo(isItemNA || availableNoscaItemOptions.length === 0);
+      setItemSearchTerm('');
+    } else {
+      handleUpdateIncumbentDbmStatus(counselor.id, newStatus, null, e);
+    }
+  };
+
+  // Confirm NOSCA Item Assignment
+  const handleConfirmNoscaItemAssignment = async () => {
+    if (!noscaItemAssignModal.personnel) return;
+    const counselor = noscaItemAssignModal.personnel;
+    const finalItem = isCustomItemNo ? customPlantillaNo.trim() : selectedNoscaItemNo.trim();
+
+    if (!finalItem || finalItem.toUpperCase() === '#N/A' || finalItem.toUpperCase() === 'N/A') {
+      setToast({
+        type: 'warning',
+        message: 'Please select an available Plantilla Item No. or enter a new authorized Item Number.'
+      });
+      return;
+    }
+
+    setAssigningItemLoading(true);
+    try {
+      await handleUpdateIncumbentDbmStatus(counselor.id, 'With DBM NOSCA', finalItem);
+      setNoscaItemAssignModal({ open: false, personnel: null });
+      fetchNoscaItems();
+    } finally {
+      setAssigningItemLoading(false);
     }
   };
 
@@ -502,11 +691,12 @@ export default function ReclassificationPage({ onBack }) {
         if (showDocModal) setShowDocModal(false);
         if (showNewAppModal) setShowNewAppModal(false);
         if (showCsvModal) setShowCsvModal(false);
+        if (noscaItemAssignModal.open) setNoscaItemAssignModal({ open: false, personnel: null });
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [showAssessmentModal, showReevalModal, showDocModal, showNewAppModal, showCsvModal]);
+  }, [showAssessmentModal, showReevalModal, showDocModal, showNewAppModal, showCsvModal, noscaItemAssignModal]);
 
   const getStageBadge = (stage) => {
     switch (stage) {
@@ -925,6 +1115,90 @@ export default function ReclassificationPage({ onBack }) {
     setConfirmRemoveState({ open: false, item: null, isBulk: false });
   };
 
+  // Add a single Plantilla / Item No manually to active NOSCA batch
+  const handleAddManualNoscaItems = (inputString, targetCat, customSerial, customDiv) => {
+    const rawString = inputString !== undefined ? inputString : manualNoscaItemInput;
+    const cleanItem = String(rawString || '').trim();
+
+    if (!cleanItem) {
+      setToast({ title: 'Item No. Required', message: 'Please enter a Plantilla Item Number.', type: 'error' });
+      return;
+    }
+
+    // Check if multiple items were entered (comma, newline, or semicolon)
+    const tokens = cleanItem.split(/[\n,;]+/).map(s => s.trim()).filter(Boolean);
+    if (tokens.length > 1) {
+      setToast({ 
+        title: 'Single Item Only', 
+        message: 'Only one Plantilla Item Number is allowed per entry. Please enter one item at a time.', 
+        type: 'warning' 
+      });
+      return;
+    }
+
+    const itemNo = tokens[0] || cleanItem;
+    const cat = targetCat || manualNoscaCategory || 'ELEMENTARY';
+    const serial = (customSerial !== undefined ? customSerial : manualNoscaSerial).trim() || (scannedNoscaResult?.serial_no || 'MANUAL-NOSCA');
+    const div = (customDiv !== undefined ? customDiv : manualNoscaDivision).trim() || (scannedNoscaResult?.division || (divisionFilter && divisionFilter !== 'ALL' ? divisionFilter : 'Regional Scope'));
+
+    // Track manually added items for visual badges
+    setManuallyAddedNoscaItems(prev => {
+      const next = new Set(prev);
+      next.add(itemNo);
+      return next;
+    });
+
+    if (!scannedNoscaResult) {
+      const breakdown = {
+        ELEMENTARY: cat === 'ELEMENTARY' ? [itemNo] : [],
+        JHS: cat === 'JHS' ? [itemNo] : [],
+        SHS: cat === 'SHS' ? [itemNo] : [],
+        ALS: cat === 'ALS' ? [itemNo] : []
+      };
+
+      setScannedNoscaResult({
+        serial_no: serial,
+        fileName: 'Manual Entry',
+        division: div,
+        schoolName: 'Division / Regional Inventory',
+        position: 'School Counselor Associate I',
+        items: [itemNo],
+        count: 1,
+        category_breakdown: breakdown
+      });
+      setSelectedNoscaItems([itemNo]);
+    } else {
+      const existing = scannedNoscaResult.items || [];
+      if (existing.includes(itemNo)) {
+        setToast({ title: 'Already Exists', message: `Item "${itemNo}" is already in the list.`, type: 'info' });
+        return;
+      }
+
+      const merged = [...existing, itemNo];
+      const newBreakdown = { ...(scannedNoscaResult.category_breakdown || {}) };
+      newBreakdown[cat] = [...(newBreakdown[cat] || []), itemNo];
+
+      setScannedNoscaResult(prev => ({
+        ...prev,
+        serial_no: prev.serial_no || serial,
+        division: prev.division || div,
+        items: merged,
+        count: merged.length,
+        category_breakdown: newBreakdown
+      }));
+      setSelectedNoscaItems(prev => [...prev, itemNo]);
+    }
+
+    setToast({
+      title: 'Plantilla Item Added',
+      message: `Successfully added ${itemNo} to the plantilla list.`,
+      type: 'success'
+    });
+    setManualNoscaItemInput('');
+    setQuickAddInlineInput('');
+    setShowQuickAddInline(false);
+  };
+
   // Trigger Add / Commit Confirmation Layer
   const handleRequestAddItems = () => {
     if (selectedNoscaItems.length === 0) {
@@ -947,7 +1221,8 @@ export default function ReclassificationPage({ onBack }) {
           division: scannedNoscaResult.division,
           schoolName: scannedNoscaResult.school_name,
           position: scannedNoscaResult.position,
-          items: selectedNoscaItems
+          items: selectedNoscaItems,
+          categoryBreakdown: scannedNoscaResult.category_breakdown
         })
       });
 
@@ -961,6 +1236,7 @@ export default function ReclassificationPage({ onBack }) {
         setShowNoscaModal(false);
         fetchIncumbents();
         fetchApplications();
+        fetchNoscaItems();
       } else {
         throw new Error(res?.error || 'Failed to import NOSCA plantilla items.');
       }
@@ -1324,6 +1600,7 @@ export default function ReclassificationPage({ onBack }) {
           }
         `}</style>
 
+
         <div style={{
           background: isDark ? 'rgba(15, 23, 42, 0.75)' : '#ffffff',
           borderRadius: '16px',
@@ -1342,7 +1619,7 @@ export default function ReclassificationPage({ onBack }) {
           {/* Step 1: Inventory CSV Ingestion */}
           <div
             className="reclass-stepper-btn"
-            onClick={() => setCurrentStep(1)}
+            onClick={() => handleStepClick(1)}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -1397,10 +1674,26 @@ export default function ReclassificationPage({ onBack }) {
                   fontSize: '13px',
                   fontWeight: 800,
                   color: currentStep === 1 ? (isDark ? '#60a5fa' : '#1d4ed8') : (currentStep > 1 ? (isDark ? '#f8fafc' : '#1e293b') : (isDark ? '#94a3b8' : '#64748b')),
-                  lineHeight: 1.2
+                  lineHeight: 1.2,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
                 }}
               >
-                Step 1: Inventory CSV Ingestion
+                <span>Step 1: Inventory CSV Ingestion</span>
+                {isRegionalOffice && (
+                  <span style={{
+                    fontSize: '9.5px',
+                    fontWeight: 700,
+                    padding: '1px 6px',
+                    borderRadius: '4px',
+                    background: isDark ? 'rgba(99, 102, 241, 0.2)' : '#e0e7ff',
+                    color: isDark ? '#a5b4fc' : '#4338ca',
+                    border: isDark ? '1px solid rgba(99, 102, 241, 0.35)' : '1px solid #c7d2fe'
+                  }}>
+                    👁️ View Only
+                  </span>
+                )}
               </div>
               <div
                 className="reclass-stepper-text"
@@ -1411,7 +1704,7 @@ export default function ReclassificationPage({ onBack }) {
                   marginTop: '1px'
                 }}
               >
-                {isStep1Done ? `${incumbents.length} Records Loaded` : 'Template & Master Inventory Sync'}
+                {isRegionalOffice ? 'Review Loaded Master Inventory' : (isStep1Done ? `${incumbents.length} Records Loaded` : 'Template & Master Inventory Sync')}
               </div>
             </div>
           </div>
@@ -1442,7 +1735,7 @@ export default function ReclassificationPage({ onBack }) {
           {/* Step 2: Counselor Assessment & Workbench */}
           <div
             className="reclass-stepper-btn"
-            onClick={() => setCurrentStep(2)}
+            onClick={() => handleStepClick(2)}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -1497,10 +1790,26 @@ export default function ReclassificationPage({ onBack }) {
                   fontSize: '13px',
                   fontWeight: 800,
                   color: currentStep === 2 ? (isDark ? '#60a5fa' : '#1d4ed8') : (currentStep > 2 ? (isDark ? '#f8fafc' : '#1e293b') : (isDark ? '#94a3b8' : '#64748b')),
-                  lineHeight: 1.2
+                  lineHeight: 1.2,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
                 }}
               >
-                Step 2: Assessment Workbench
+                <span>Step 2: Assessment Workbench</span>
+                {isRegionalOffice && (
+                  <span style={{
+                    fontSize: '9.5px',
+                    fontWeight: 700,
+                    padding: '1px 6px',
+                    borderRadius: '4px',
+                    background: isDark ? 'rgba(99, 102, 241, 0.2)' : '#e0e7ff',
+                    color: isDark ? '#a5b4fc' : '#4338ca',
+                    border: isDark ? '1px solid rgba(99, 102, 241, 0.35)' : '1px solid #c7d2fe'
+                  }}>
+                    👁️ View Only
+                  </span>
+                )}
               </div>
               <div
                 className="reclass-stepper-text"
@@ -1511,7 +1820,7 @@ export default function ReclassificationPage({ onBack }) {
                   marginTop: '1px'
                 }}
               >
-                {isStep2Done ? 'Assessments & Position Assigned' : 'Stage Progression & Reclass Decisions'}
+                {isRegionalOffice ? 'Review Counselor Assessments & Stages' : (isStep2Done ? 'Assessments & Position Assigned' : 'Stage Progression & Reclass Decisions')}
               </div>
             </div>
           </div>
@@ -1560,7 +1869,7 @@ export default function ReclassificationPage({ onBack }) {
                 ? (isDark ? '0 0 16px rgba(59, 130, 246, 0.25)' : '0 2px 10px rgba(37, 99, 235, 0.15)')
                 : 'none',
               transform: currentStep === 3 ? 'translateY(-1px)' : 'translateY(0)',
-              opacity: currentStep === 3 ? 1 : 0.55,
+              opacity: 1,
               flexShrink: 0,
               userSelect: 'none'
             }}
@@ -1597,10 +1906,26 @@ export default function ReclassificationPage({ onBack }) {
                   fontSize: '13px',
                   fontWeight: 800,
                   color: currentStep === 3 ? (isDark ? '#60a5fa' : '#1d4ed8') : (isDark ? '#94a3b8' : '#64748b'),
-                  lineHeight: 1.2
+                  lineHeight: 1.2,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
                 }}
               >
-                Step 3: DBM Endorsement
+                <span>Step 3: DBM Endorsement</span>
+                {isRegionalOffice && (
+                  <span style={{
+                    fontSize: '9.5px',
+                    fontWeight: 700,
+                    padding: '1px 6px',
+                    borderRadius: '4px',
+                    background: isDark ? 'rgba(16, 185, 129, 0.2)' : '#dcfce7',
+                    color: isDark ? '#6ee7b7' : '#059669',
+                    border: isDark ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #bbf7d0'
+                  }}>
+                    RO Action
+                  </span>
+                )}
               </div>
               <div
                 className="reclass-stepper-text"
@@ -1611,7 +1936,7 @@ export default function ReclassificationPage({ onBack }) {
                   marginTop: '1px'
                 }}
               >
-                {isStep3Done ? 'Ready for Transmittal' : 'Summary & DBM Spreadsheet'}
+                {isStep3Done ? 'Ready for Transmittal' : (isRegionalOffice ? 'NOSCA Allocation & DBM Endorsement' : 'Summary & DBM Spreadsheet')}
               </div>
             </div>
           </div>
@@ -1657,25 +1982,27 @@ export default function ReclassificationPage({ onBack }) {
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <button
-                    type="button"
-                    onClick={() => handleExecuteCsvIngestion(true)}
-                    disabled={isUploadingCsv}
-                    style={{
-                      background: isDark ? 'rgba(30, 41, 59, 0.8)' : '#ffffff',
-                      border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid #cbd5e1',
-                      padding: '7px 14px',
-                      borderRadius: '8px',
-                      fontSize: '12px',
-                      fontWeight: 700,
-                      color: isDark ? '#f8fafc' : '#0f172a',
-                      cursor: isUploadingCsv ? 'not-allowed' : 'pointer'
-                    }}
-                  >
-                    {isUploadingCsv ? 'Syncing...' : 'Re-sync Master Inventory'}
-                  </button>
-                </div>
+                {!isRegionalOffice && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <button
+                      type="button"
+                      onClick={() => handleExecuteCsvIngestion(true)}
+                      disabled={isUploadingCsv}
+                      style={{
+                        background: isDark ? 'rgba(30, 41, 59, 0.8)' : '#ffffff',
+                        border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid #cbd5e1',
+                        padding: '7px 14px',
+                        borderRadius: '8px',
+                        fontSize: '12px',
+                        fontWeight: 700,
+                        color: isDark ? '#f8fafc' : '#0f172a',
+                        cursor: isUploadingCsv ? 'not-allowed' : 'pointer'
+                      }}
+                    >
+                      {isUploadingCsv ? 'Syncing...' : 'Re-sync Master Inventory'}
+                    </button>
+                  </div>
+                )}
               </div>
             ) : (
               <div style={{
@@ -1713,24 +2040,26 @@ export default function ReclassificationPage({ onBack }) {
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => handleExecuteCsvIngestion(true)}
-                  disabled={isUploadingCsv}
-                  style={{
-                    background: '#2563eb',
-                    border: 'none',
-                    padding: '8px 18px',
-                    borderRadius: '8px',
-                    fontSize: '12.5px',
-                    fontWeight: 750,
-                    color: '#ffffff',
-                    cursor: isUploadingCsv ? 'not-allowed' : 'pointer',
-                    boxShadow: '0 2px 10px rgba(37, 99, 235, 0.25)'
-                  }}
-                >
-                  {isUploadingCsv ? 'Syncing Records...' : 'Sync Master Inventory Now'}
-                </button>
+                {!isRegionalOffice && (
+                  <button
+                    type="button"
+                    onClick={() => handleExecuteCsvIngestion(true)}
+                    disabled={isUploadingCsv}
+                    style={{
+                      background: '#2563eb',
+                      border: 'none',
+                      padding: '8px 18px',
+                      borderRadius: '8px',
+                      fontSize: '12.5px',
+                      fontWeight: 750,
+                      color: '#ffffff',
+                      cursor: isUploadingCsv ? 'not-allowed' : 'pointer',
+                      boxShadow: '0 2px 10px rgba(37, 99, 235, 0.25)'
+                    }}
+                  >
+                    {isUploadingCsv ? 'Syncing Records...' : 'Sync Master Inventory Now'}
+                  </button>
+                )}
               </div>
             )}
 
@@ -1782,75 +2111,106 @@ export default function ReclassificationPage({ onBack }) {
                 </button>
               </div>
 
-              {/* Drag & Drop Area */}
-              <div
-                onDragOver={e => {
-                  e.preventDefault();
-                  setIsDragging(true);
-                }}
-                onDragLeave={() => setIsDragging(false)}
-                onDrop={e => {
-                  e.preventDefault();
-                  setIsDragging(false);
-                  if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-                    handleSelectCsvFile(e.dataTransfer.files[0]);
-                  }
-                }}
-                onClick={() => document.getElementById('step1-reclass-csv-input')?.click()}
-                style={{
-                  border: isDragging
-                    ? '2px dashed #3b82f6'
-                    : (isDark ? '2px dashed rgba(71, 85, 105, 0.8)' : '2px dashed #cbd5e1'),
+              {/* Drag & Drop Area / View-Only Display */}
+              {isRegionalOffice ? (
+                <div style={{
+                  border: isDark ? '1.5px dashed rgba(99, 102, 241, 0.4)' : '1.5px dashed #c7d2fe',
                   borderRadius: '14px',
                   padding: '36px 20px',
                   textAlign: 'center',
-                  background: isDragging
-                    ? (isDark ? 'rgba(37, 99, 235, 0.15)' : '#eff6ff')
-                    : (isDark ? 'rgba(30, 41, 59, 0.35)' : '#f8fafc'),
-                  transition: 'all 0.2s ease',
-                  cursor: 'pointer'
-                }}
-              >
-                <input
-                  id="step1-reclass-csv-input"
-                  type="file"
-                  accept=".csv"
-                  onChange={e => {
-                    if (e.target.files && e.target.files[0]) {
-                      handleSelectCsvFile(e.target.files[0]);
+                  background: isDark ? 'rgba(30, 41, 59, 0.35)' : '#f8fafc'
+                }}>
+                  <div style={{
+                    width: '52px',
+                    height: '52px',
+                    borderRadius: '50%',
+                    background: isDark ? 'rgba(99, 102, 241, 0.2)' : '#e0e7ff',
+                    color: isDark ? '#a5b4fc' : '#4f46e5',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    margin: '0 auto 12px',
+                    fontSize: '24px'
+                  }}>
+                    📋
+                  </div>
+                  <div style={{ fontSize: '15px', fontWeight: 750, color: isDark ? '#f8fafc' : '#0f172a', marginBottom: '4px' }}>
+                    CSV Ingestion & Uploads Managed by Division HRMO
+                  </div>
+                  <div style={{ fontSize: '12.5px', color: isDark ? '#94a3b8' : '#64748b', maxWidth: '520px', margin: '0 auto' }}>
+                    Regional Office accounts have view-only access to monitor loaded records and preview CSV structure. File uploads and master database mutations are restricted to Division HRMO officers.
+                  </div>
+                </div>
+              ) : (
+                <div
+                  onDragOver={e => {
+                    e.preventDefault();
+                    setIsDragging(true);
+                  }}
+                  onDragLeave={() => setIsDragging(false)}
+                  onDrop={e => {
+                    e.preventDefault();
+                    setIsDragging(false);
+                    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                      handleSelectCsvFile(e.dataTransfer.files[0]);
                     }
                   }}
-                  style={{ display: 'none' }}
-                />
+                  onClick={() => document.getElementById('step1-reclass-csv-input')?.click()}
+                  style={{
+                    border: isDragging
+                      ? '2px dashed #3b82f6'
+                      : (isDark ? '2px dashed rgba(71, 85, 105, 0.8)' : '2px dashed #cbd5e1'),
+                    borderRadius: '14px',
+                    padding: '36px 20px',
+                    textAlign: 'center',
+                    background: isDragging
+                      ? (isDark ? 'rgba(37, 99, 235, 0.15)' : '#eff6ff')
+                      : (isDark ? 'rgba(30, 41, 59, 0.35)' : '#f8fafc'),
+                    transition: 'all 0.2s ease',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <input
+                    id="step1-reclass-csv-input"
+                    type="file"
+                    accept=".csv"
+                    onChange={e => {
+                      if (e.target.files && e.target.files[0]) {
+                        handleSelectCsvFile(e.target.files[0]);
+                      }
+                    }}
+                    style={{ display: 'none' }}
+                  />
 
-                <div style={{
-                  width: '52px',
-                  height: '52px',
-                  borderRadius: '50%',
-                  background: isDark ? 'rgba(59, 130, 246, 0.2)' : '#e0f2fe',
-                  color: isDark ? '#60a5fa' : '#0284c7',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  margin: '0 auto 12px'
-                }}>
-                  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                    <polyline points="14 2 14 8 20 8" />
-                    <line x1="12" y1="18" x2="12" y2="12" />
-                    <line x1="9" y1="15" x2="15" y2="15" />
-                  </svg>
-                </div>
+                  <div style={{
+                    width: '52px',
+                    height: '52px',
+                    borderRadius: '50%',
+                    background: isDark ? 'rgba(59, 130, 246, 0.2)' : '#e0f2fe',
+                    color: isDark ? '#60a5fa' : '#0284c7',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    margin: '0 auto 12px'
+                  }}>
+                    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                      <polyline points="14 2 14 8 20 8" />
+                      <line x1="12" y1="18" x2="12" y2="12" />
+                      <line x1="9" y1="15" x2="15" y2="15" />
+                    </svg>
+                  </div>
 
-                <div style={{ fontSize: '15px', fontWeight: 750, color: isDark ? '#f8fafc' : '#0f172a', marginBottom: '4px' }}>
-                  {csvFileName ? `Selected: ${csvFileName}` : 'Drag and drop your .csv file here, or click to browse'}
+                  <div style={{ fontSize: '15px', fontWeight: 750, color: isDark ? '#f8fafc' : '#0f172a', marginBottom: '4px' }}>
+                    {csvFileName ? `Selected: ${csvFileName}` : 'Drag and drop your .csv file here, or click to browse'}
+                  </div>
+                  <div style={{ fontSize: '12.5px', color: isDark ? '#94a3b8' : '#64748b' }}>
+                    {csvTotalRowsCount > 0
+                      ? `✓ ${csvTotalRowsCount.toLocaleString()} data records parsed and ready for ingestion`
+                      : 'Supports standard CSV files with commas and quoted text fields'}
+                  </div>
                 </div>
-                <div style={{ fontSize: '12.5px', color: isDark ? '#94a3b8' : '#64748b' }}>
-                  {csvTotalRowsCount > 0
-                    ? `✓ ${csvTotalRowsCount.toLocaleString()} data records parsed and ready for ingestion`
-                    : 'Supports standard CSV files with commas and quoted text fields'}
-                </div>
-              </div>
+              )}
 
               {/* Data Preview Table */}
               {csvPreviewRows.length > 0 && (
@@ -2002,31 +2362,33 @@ export default function ReclassificationPage({ onBack }) {
 
               {/* Execution Action Footer */}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '12px' }}>
-                <button
-                  type="button"
-                  onClick={() => handleExecuteCsvIngestion(false)}
-                  disabled={isUploadingCsv || (!csvContent && !csvFile)}
-                  style={{
-                    padding: '10px 24px',
-                    borderRadius: '10px',
-                    border: 'none',
-                    background: (!csvContent && !csvFile) || isUploadingCsv
-                      ? '#64748b'
-                      : 'linear-gradient(135deg, #1e40af 0%, #2563eb 100%)',
-                    color: '#ffffff',
-                    fontSize: '13px',
-                    fontWeight: 750,
-                    cursor: (!csvContent && !csvFile) || isUploadingCsv ? 'not-allowed' : 'pointer',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    boxShadow: (!csvContent && !csvFile) || isUploadingCsv ? 'none' : '0 4px 14px rgba(37, 99, 235, 0.35)'
-                  }}
-                >
-                  {isUploadingCsv ? 'Ingesting CSV Records...' : (csvTotalRowsCount > 0 ? `Ingest ${csvTotalRowsCount.toLocaleString()} Records` : 'Start CSV Ingestion')}
-                </button>
+                {!isRegionalOffice && (
+                  <button
+                    type="button"
+                    onClick={() => handleExecuteCsvIngestion(false)}
+                    disabled={isUploadingCsv || (!csvContent && !csvFile)}
+                    style={{
+                      padding: '10px 24px',
+                      borderRadius: '10px',
+                      border: 'none',
+                      background: (!csvContent && !csvFile) || isUploadingCsv
+                        ? '#64748b'
+                        : 'linear-gradient(135deg, #1e40af 0%, #2563eb 100%)',
+                      color: '#ffffff',
+                      fontSize: '13px',
+                      fontWeight: 750,
+                      cursor: (!csvContent && !csvFile) || isUploadingCsv ? 'not-allowed' : 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      boxShadow: (!csvContent && !csvFile) || isUploadingCsv ? 'none' : '0 4px 14px rgba(37, 99, 235, 0.35)'
+                    }}
+                  >
+                    {isUploadingCsv ? 'Ingesting CSV Records...' : (csvTotalRowsCount > 0 ? `Ingest ${csvTotalRowsCount.toLocaleString()} Records` : 'Start CSV Ingestion')}
+                  </button>
+                )}
 
-                {isStep1Done && (
+                {(isStep1Done || isRegionalOffice) && (
                   <button
                     type="button"
                     onClick={() => setCurrentStep(2)}
@@ -2607,33 +2969,51 @@ export default function ReclassificationPage({ onBack }) {
                           </div>
                         </td>
                         <td style={{ padding: '14px 18px', verticalAlign: 'middle' }} onClick={e => e.stopPropagation()}>
-                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                            <select
-                              value={inc.stage_of_reclassification || 'For Review'}
-                              onChange={e => handleUpdateIncumbentStage(inc.id, e.target.value, e)}
-                              disabled={updatingStageId === inc.id}
-                              style={{
-                                padding: '5px 10px',
-                                borderRadius: '8px',
-                                border: `1.5px solid ${badgeStyle.border}`,
-                                background: badgeStyle.bg,
-                                color: badgeStyle.text,
-                                fontSize: '12px',
-                                fontWeight: 750,
-                                cursor: 'pointer',
-                                outline: 'none'
-                              }}
-                            >
-                              {RECLASS_STAGES.map(s => (
-                                <option key={s} value={s} style={{ background: 'var(--card)', color: 'var(--text)' }}>{s}</option>
-                              ))}
-                            </select>
-                            {updatingStageId === inc.id && (
-                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2.5" style={{ animation: 'spin 1s linear infinite' }}>
-                                <circle cx="12" cy="12" r="10" strokeDasharray="32" strokeDashoffset="10" />
-                              </svg>
-                            )}
-                          </div>
+                          {isRegionalOffice ? (
+                            <span style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              padding: '5px 10px',
+                              borderRadius: '8px',
+                              border: `1.5px solid ${badgeStyle.border}`,
+                              background: badgeStyle.bg,
+                              color: badgeStyle.text,
+                              fontSize: '12px',
+                              fontWeight: 750
+                            }}>
+                              <span>{badgeStyle.icon}</span>
+                              <span>{inc.stage_of_reclassification || 'For Review'}</span>
+                            </span>
+                          ) : (
+                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                              <select
+                                value={inc.stage_of_reclassification || 'For Review'}
+                                onChange={e => handleUpdateIncumbentStage(inc.id, e.target.value, e)}
+                                disabled={updatingStageId === inc.id}
+                                style={{
+                                  padding: '5px 10px',
+                                  borderRadius: '8px',
+                                  border: `1.5px solid ${badgeStyle.border}`,
+                                  background: badgeStyle.bg,
+                                  color: badgeStyle.text,
+                                  fontSize: '12px',
+                                  fontWeight: 750,
+                                  cursor: 'pointer',
+                                  outline: 'none'
+                                }}
+                              >
+                                {RECLASS_STAGES.map(s => (
+                                  <option key={s} value={s} style={{ background: 'var(--card)', color: 'var(--text)' }}>{s}</option>
+                                ))}
+                              </select>
+                              {updatingStageId === inc.id && (
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2.5" style={{ animation: 'spin 1s linear infinite' }}>
+                                  <circle cx="12" cy="12" r="10" strokeDasharray="32" strokeDashoffset="10" />
+                                </svg>
+                              )}
+                            </div>
+                          )}
                         </td>
                         <td style={{ padding: '14px 18px', verticalAlign: 'middle' }}>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
@@ -3071,6 +3451,7 @@ export default function ReclassificationPage({ onBack }) {
                     <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569' }}>Target Position</th>
                     <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569' }}>Division</th>
                     <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569' }}>Stage</th>
+                    <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569' }}>DBM Status</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -3081,7 +3462,30 @@ export default function ReclassificationPage({ onBack }) {
                       const badge = getStageBadge(counselor.stage_of_reclassification);
                       return (
                         <tr key={counselor.id || idx} style={{ borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.4)' : '1px solid #f1f5f9' }}>
-                          <td style={{ padding: '10px 14px', fontWeight: 650, color: isDark ? '#f8fafc' : '#0f172a' }}>{counselor.plantilla_item_number || counselor.employee_id}</td>
+                          <td style={{ padding: '10px 14px' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                              <span style={{ fontWeight: 750, color: isDark ? '#f8fafc' : '#0f172a', fontFamily: 'monospace', fontSize: '12.5px' }}>
+                                {counselor.plantilla_item_number || counselor.employee_id}
+                              </span>
+                              {counselor.dbm_status === 'With DBM NOSCA' && (
+                                <span style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                  width: 'fit-content',
+                                  padding: '2px 7px',
+                                  borderRadius: '4px',
+                                  fontSize: '10px',
+                                  fontWeight: 800,
+                                  background: isDark ? 'rgba(16, 185, 129, 0.2)' : '#dcfce7',
+                                  color: isDark ? '#6ee7b7' : '#059669',
+                                  border: isDark ? '1px solid rgba(16, 185, 129, 0.35)' : '1px solid #bbf7d0'
+                                }}>
+                                  ✓ NOSCA Assigned
+                                </span>
+                              )}
+                            </div>
+                          </td>
                           <td style={{ padding: '10px 14px', color: isDark ? '#cbd5e1' : '#334155', fontWeight: 700 }}>{counselor.full_name}</td>
                           <td style={{ padding: '10px 14px', color: isDark ? '#94a3b8' : '#64748b' }}>{counselor.current_position}</td>
                           <td style={{ padding: '10px 14px' }}>
@@ -3110,12 +3514,87 @@ export default function ReclassificationPage({ onBack }) {
                               {badge.icon} {counselor.stage_of_reclassification}
                             </span>
                           </td>
+                          <td style={{ padding: '8px 14px', verticalAlign: 'middle' }} onClick={e => e.stopPropagation()}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                                <select
+                                  value={counselor.dbm_status || ''}
+                                  onChange={e => handleDbmStatusSelectChange(counselor, e.target.value, e)}
+                                  disabled={updatingDbmStatusId === counselor.id}
+                                  style={{
+                                    padding: '5px 10px',
+                                    borderRadius: '8px',
+                                    border: counselor.dbm_status === 'With DBM NOSCA'
+                                      ? (isDark ? '1.5px solid rgba(16, 185, 129, 0.6)' : '1.5px solid #10b981')
+                                      : counselor.dbm_status === 'With DBM Request'
+                                        ? (isDark ? '1.5px solid rgba(59, 130, 246, 0.6)' : '1.5px solid #3b82f6')
+                                        : (isDark ? '1px solid rgba(71, 85, 105, 0.6)' : '1px solid #cbd5e1'),
+                                    background: counselor.dbm_status === 'With DBM NOSCA'
+                                      ? (isDark ? 'rgba(6, 78, 59, 0.35)' : '#ecfdf5')
+                                      : counselor.dbm_status === 'With DBM Request'
+                                        ? (isDark ? 'rgba(30, 58, 138, 0.35)' : '#eff6ff')
+                                        : (isDark ? 'rgba(30, 41, 59, 0.6)' : '#ffffff'),
+                                    color: counselor.dbm_status === 'With DBM NOSCA'
+                                      ? (isDark ? '#6ee7b7' : '#047857')
+                                      : counselor.dbm_status === 'With DBM Request'
+                                        ? (isDark ? '#93c5fd' : '#1d4ed8')
+                                        : (isDark ? '#94a3b8' : '#64748b'),
+                                    fontSize: '12px',
+                                    fontWeight: 750,
+                                    cursor: updatingDbmStatusId === counselor.id ? 'not-allowed' : 'pointer',
+                                    outline: 'none'
+                                  }}
+                                >
+                                  <option value="" style={{ background: 'var(--card)', color: 'var(--text)' }}>-- Select Status --</option>
+                                  <option value="With DBM Request" style={{ background: 'var(--card)', color: 'var(--text)' }}>With DBM Request</option>
+                                  <option value="With DBM NOSCA" style={{ background: 'var(--card)', color: 'var(--text)' }}>With DBM NOSCA</option>
+                                </select>
+                                {updatingDbmStatusId === counselor.id && (
+                                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2.5" style={{ animation: 'spin 1s linear infinite' }}>
+                                    <circle cx="12" cy="12" r="10" strokeDasharray="32" strokeDashoffset="10" />
+                                  </svg>
+                                )}
+                              </div>
+
+                              {counselor.dbm_status === 'With DBM NOSCA' && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const currentItem = (counselor.plantilla_item_number || '').trim();
+                                    const isItemNA = !currentItem || currentItem.toUpperCase() === '#N/A' || currentItem.toUpperCase() === 'N/A';
+                                    setNoscaItemAssignModal({ open: true, personnel: counselor });
+                                    setSelectedNoscaItemNo(isItemNA ? '' : currentItem);
+                                    setCustomPlantillaNo(isItemNA ? '' : currentItem);
+                                    setIsCustomItemNo(isItemNA || availableNoscaItemOptions.length === 0);
+                                    setItemSearchTerm('');
+                                  }}
+                                  style={{
+                                    background: 'none',
+                                    border: 'none',
+                                    padding: '0',
+                                    color: isDark ? '#93c5fd' : '#2563eb',
+                                    fontSize: '11px',
+                                    fontWeight: 700,
+                                    cursor: 'pointer',
+                                    textAlign: 'left',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                    textDecoration: 'underline'
+                                  }}
+                                  title="Click to select or assign specific DBM NOSCA Item No."
+                                >
+                                  ✏️ {counselor.plantilla_item_number ? `Assigned: ${counselor.plantilla_item_number}` : 'Assign Item No.'}
+                                </button>
+                              )}
+                            </div>
+                          </td>
                         </tr>
                       );
                     })}
                   {incumbents.filter(i => i.stage_of_reclassification === 'Endorsed' || i.stage_of_reclassification === 'Approved').length === 0 && (
                     <tr>
-                      <td colSpan={6} style={{ padding: '24px', textAlign: 'center', color: isDark ? '#94a3b8' : '#64748b' }}>
+                      <td colSpan={7} style={{ padding: '24px', textAlign: 'center', color: isDark ? '#94a3b8' : '#64748b' }}>
                         No counselors have been marked as Endorsed or Approved yet. Move candidates to Endorsed/Approved in Step 2.
                       </td>
                     </tr>
@@ -3150,6 +3629,317 @@ export default function ReclassificationPage({ onBack }) {
         </div>
       )}
     </main>
+
+      {/* MODAL: ASSIGN DBM NOSCA PLANTILLA ITEM */}
+      {noscaItemAssignModal.open && noscaItemAssignModal.personnel && (
+        <div
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !assigningItemLoading) {
+              setNoscaItemAssignModal({ open: false, personnel: null });
+            }
+          }}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: isDark ? 'rgba(2, 6, 23, 0.78)' : 'rgba(15, 23, 42, 0.5)',
+            backdropFilter: 'blur(10px)',
+            display: 'grid',
+            placeItems: 'center',
+            zIndex: 110,
+            padding: '16px'
+          }}
+        >
+          <div style={{
+            background: isDark ? 'rgba(15, 23, 42, 0.98)' : 'var(--modal-bg, #ffffff)',
+            backdropFilter: 'blur(20px)',
+            borderRadius: '20px',
+            width: 'min(580px, 95vw)',
+            padding: '26px 30px',
+            boxShadow: isDark ? '0 25px 60px rgba(0,0,0,0.65)' : '0 20px 40px rgba(0,0,0,0.15)',
+            border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid var(--line)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '18px'
+          }}>
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '14px' }}>
+              <div>
+                <div style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontSize: '11px',
+                  fontWeight: 800,
+                  color: isDark ? '#34d399' : '#059669',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.08em',
+                  background: isDark ? 'rgba(16, 185, 129, 0.15)' : '#ecfdf5',
+                  border: isDark ? '1px solid rgba(16, 185, 129, 0.35)' : '1px solid #a7f3d0',
+                  padding: '3px 8px',
+                  borderRadius: '6px',
+                  marginBottom: '6px'
+                }}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                  </svg>
+                  DBM NOSCA Plantilla Assignment
+                </div>
+                <h3 style={{ fontSize: '18px', fontWeight: 850, margin: 0, color: 'var(--text)' }}>
+                  Assign Authorized Item No.
+                </h3>
+                <div style={{ fontSize: '12px', color: 'var(--text-secondary, #94a3b8)', marginTop: '2px' }}>
+                  Select or enter the specific Plantilla Item No. issued for this personnel under DBM NOSCA.
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setNoscaItemAssignModal({ open: false, personnel: null })}
+                disabled={assigningItemLoading}
+                style={{
+                  background: isDark ? 'rgba(30, 41, 59, 0.6)' : '#f1f5f9',
+                  border: '1px solid var(--line)',
+                  width: '32px',
+                  height: '32px',
+                  borderRadius: '8px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'var(--text-secondary, #94a3b8)',
+                  cursor: assigningItemLoading ? 'not-allowed' : 'pointer'
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Personnel Context Card */}
+            <div style={{
+              background: isDark ? 'rgba(30, 41, 59, 0.45)' : '#f8fafc',
+              border: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid #e2e8f0',
+              borderRadius: '12px',
+              padding: '14px 16px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '8px'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                <div>
+                  <div style={{ fontSize: '14.5px', fontWeight: 800, color: 'var(--text)' }}>
+                    {noscaItemAssignModal.personnel.full_name}
+                  </div>
+                  <div style={{ fontSize: '12px', color: 'var(--text-secondary, #94a3b8)' }}>
+                    {noscaItemAssignModal.personnel.current_position} • {noscaItemAssignModal.personnel.division || noscaItemAssignModal.personnel.station_division}
+                  </div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <span style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    padding: '3px 8px',
+                    borderRadius: '6px',
+                    background: isDark ? 'rgba(59, 130, 246, 0.2)' : '#eff6ff',
+                    color: isDark ? '#93c5fd' : '#1d4ed8',
+                    fontSize: '11px',
+                    fontWeight: 750
+                  }}>
+                    Target: {noscaItemAssignModal.personnel.reclass_position || 'School Counselor'}
+                  </span>
+                </div>
+              </div>
+
+              <div style={{ fontSize: '11.5px', color: isDark ? '#cbd5e1' : '#64748b', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span>Current Plantilla Item:</span>
+                <code style={{
+                  padding: '1px 6px',
+                  borderRadius: '4px',
+                  background: isDark ? 'rgba(15, 23, 42, 0.6)' : '#e2e8f0',
+                  color: isDark ? '#93c5fd' : '#1e293b',
+                  fontSize: '11.5px',
+                  fontWeight: 700
+                }}>
+                  {noscaItemAssignModal.personnel.plantilla_item_number || 'Unassigned / N/A'}
+                </code>
+              </div>
+            </div>
+
+            {/* NOSCA Available Items Selector */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 750, color: 'var(--text)', marginBottom: '6px' }}>
+                  Select Plantilla Item No. to Assign
+                </label>
+
+                {availableNoscaItemOptions.length > 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <select
+                      value={isCustomItemNo ? '__CUSTOM__' : selectedNoscaItemNo}
+                      onChange={e => {
+                        const val = e.target.value;
+                        if (val === '__CUSTOM__') {
+                          setIsCustomItemNo(true);
+                        } else {
+                          setSelectedNoscaItemNo(val);
+                          const isNA = val.toUpperCase() === '#N/A' || val.toUpperCase() === 'N/A';
+                          if (isNA) {
+                            setIsCustomItemNo(true);
+                            setCustomPlantillaNo('');
+                          } else {
+                            setIsCustomItemNo(false);
+                            setCustomPlantillaNo(val);
+                          }
+                        }
+                      }}
+                      style={{
+                        width: '100%',
+                        padding: '10px 14px',
+                        borderRadius: '10px',
+                        border: isDark ? '1.5px solid rgba(59, 130, 246, 0.5)' : '1.5px solid #3b82f6',
+                        background: 'var(--input-bg)',
+                        color: 'var(--text)',
+                        fontSize: '13px',
+                        fontWeight: 700,
+                        outline: 'none',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <option value="">-- Choose from available DBM NOSCA allocations --</option>
+                      {availableNoscaItemOptions.map(opt => (
+                        <option key={opt.itemNo} value={opt.itemNo}>
+                          {opt.itemNo} {opt.isNA ? '(Marked N/A - requires new Item No)' : `• [${opt.source}${opt.division ? ` - ${opt.division}` : ''}]`}
+                        </option>
+                      ))}
+                      <option value="__CUSTOM__">+ Assign New Plantilla No. / Manual Entry...</option>
+                    </select>
+
+                    <div style={{ fontSize: '11px', color: isDark ? '#94a3b8' : '#64748b' }}>
+                      {scannedNoscaResult
+                        ? `✓ ${availableNoscaItemOptions.length} Item Numbers loaded from active scanned NOSCA (${scannedNoscaResult.fileName || 'NOSCA PDF'}) & database.`
+                        : `Found ${availableNoscaItemOptions.length} available items from DBM NOSCA allocations.`}
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{
+                    padding: '12px 14px',
+                    borderRadius: '10px',
+                    background: isDark ? 'rgba(30, 41, 59, 0.4)' : '#f8fafc',
+                    border: '1px solid var(--line)',
+                    fontSize: '12px',
+                    color: isDark ? '#94a3b8' : '#64748b',
+                    marginBottom: '4px'
+                  }}>
+                    No NOSCA items currently available in database. Enter the new authorized Plantilla Item No. directly below.
+                  </div>
+                )}
+              </div>
+
+              {/* Custom / New Plantilla Item Number Input Field */}
+              {(isCustomItemNo || availableNoscaItemOptions.length === 0 || selectedNoscaItemNo.toUpperCase() === '#N/A' || selectedNoscaItemNo.toUpperCase() === 'N/A') && (
+                <div style={{
+                  padding: '14px',
+                  borderRadius: '12px',
+                  background: isDark ? 'rgba(37, 99, 235, 0.1)' : '#eff6ff',
+                  border: isDark ? '1.5px solid rgba(59, 130, 246, 0.4)' : '1.5px solid #bfdbfe',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '6px'
+                }}>
+                  <label style={{ fontSize: '12px', fontWeight: 750, color: isDark ? '#93c5fd' : '#1d4ed8' }}>
+                    New / Authorized Plantilla Item Number:
+                  </label>
+                  <input
+                    type="text"
+                    value={customPlantillaNo}
+                    onChange={e => setCustomPlantillaNo(e.target.value)}
+                    placeholder="e.g. OSEC-DECSB-GCOUI-30001-2026"
+                    style={{
+                      padding: '9px 12px',
+                      borderRadius: '8px',
+                      border: isDark ? '1px solid rgba(59, 130, 246, 0.5)' : '1px solid #93c5fd',
+                      background: 'var(--card)',
+                      color: 'var(--text)',
+                      fontSize: '13px',
+                      fontWeight: 700,
+                      outline: 'none',
+                      fontFamily: 'monospace'
+                    }}
+                  />
+                  <div style={{ fontSize: '11px', color: isDark ? '#cbd5e1' : '#3b82f6' }}>
+                    {selectedNoscaItemNo.toUpperCase() === '#N/A' || selectedNoscaItemNo.toUpperCase() === 'N/A'
+                      ? 'Selected item is marked N/A. Please specify the new Plantilla Item Number to assign.'
+                      : 'Assign a new Plantilla Item Number to be registered in the personnel record.'}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Actions */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'flex-end',
+              gap: '10px',
+              paddingTop: '8px',
+              borderTop: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid #e2e8f0'
+            }}>
+              <button
+                type="button"
+                onClick={() => setNoscaItemAssignModal({ open: false, personnel: null })}
+                disabled={assigningItemLoading}
+                style={{
+                  padding: '9px 18px',
+                  borderRadius: '10px',
+                  border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid #cbd5e1',
+                  background: isDark ? 'rgba(30, 41, 59, 0.6)' : '#ffffff',
+                  color: 'var(--text)',
+                  fontSize: '12.5px',
+                  fontWeight: 700,
+                  cursor: assigningItemLoading ? 'not-allowed' : 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={handleConfirmNoscaItemAssignment}
+                disabled={assigningItemLoading}
+                style={{
+                  padding: '9px 22px',
+                  borderRadius: '10px',
+                  border: 'none',
+                  background: assigningItemLoading
+                    ? '#64748b'
+                    : 'linear-gradient(135deg, #059669 0%, #10b981 100%)',
+                  color: '#ffffff',
+                  fontSize: '13px',
+                  fontWeight: 750,
+                  cursor: assigningItemLoading ? 'not-allowed' : 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  boxShadow: '0 4px 14px rgba(16, 185, 129, 0.3)'
+                }}
+              >
+                {assigningItemLoading ? (
+                  <>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ animation: 'spin 1s linear infinite' }}>
+                      <circle cx="12" cy="12" r="10" strokeDasharray="32" strokeDashoffset="10" />
+                    </svg>
+                    Assigning Item...
+                  </>
+                ) : (
+                  <>
+                    <span>✓</span> Confirm & Assign Item No.
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* MODAL 1: RE-EVALUATION AGAINST CSC QS */}
       {showReevalModal && selectedApp && (
@@ -4144,14 +4934,34 @@ export default function ReclassificationPage({ onBack }) {
                 padding: '20px'
               }}>
                 <div style={{
-                  fontSize: '12px',
-                  fontWeight: 800,
-                  color: isDark ? '#34d399' : '#047857',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.05em',
-                  marginBottom: '14px'
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  marginBottom: '14px',
+                  gap: '10px'
                 }}>
-                  Reclassification Decisions
+                  <div style={{
+                    fontSize: '12px',
+                    fontWeight: 800,
+                    color: isDark ? '#34d399' : '#047857',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em'
+                  }}>
+                    Reclassification Decisions
+                  </div>
+                  {isRegionalOffice && (
+                    <span style={{
+                      fontSize: '11px',
+                      fontWeight: 750,
+                      padding: '2px 8px',
+                      borderRadius: '6px',
+                      background: isDark ? 'rgba(99, 102, 241, 0.25)' : '#e0e7ff',
+                      color: isDark ? '#c7d2fe' : '#4338ca',
+                      border: isDark ? '1px solid rgba(99, 102, 241, 0.4)' : '1px solid #c7d2fe'
+                    }}>
+                      👁️ View-Only (HRMO Managed)
+                    </span>
+                  )}
                 </div>
 
                 <div style={{
@@ -4166,7 +4976,7 @@ export default function ReclassificationPage({ onBack }) {
                     <select
                       value={modalTargetPosition}
                       onChange={e => setModalTargetPosition(e.target.value)}
-                      disabled={savingModalChanges}
+                      disabled={isRegionalOffice || savingModalChanges}
                       style={{
                         width: '100%',
                         padding: '10px 14px',
@@ -4176,8 +4986,9 @@ export default function ReclassificationPage({ onBack }) {
                         fontSize: '13.5px',
                         fontWeight: 700,
                         color: isDark ? '#6ee7b7' : '#047857',
-                        cursor: 'pointer',
-                        outline: 'none'
+                        cursor: isRegionalOffice ? 'not-allowed' : 'pointer',
+                        outline: 'none',
+                        opacity: isRegionalOffice ? 0.85 : 1
                       }}
                     >
                       <option value="" style={{ background: 'var(--card)', color: 'var(--text)' }}>-- Unassigned (Select Target Position) --</option>
@@ -4186,7 +4997,7 @@ export default function ReclassificationPage({ onBack }) {
                       ))}
                     </select>
                     <span style={{ fontSize: '11px', color: 'var(--text-secondary, #94a3b8)', display: 'block', marginTop: '4px' }}>
-                      Designate target plantilla position (School Counselor I, II, III, IV).
+                      {isRegionalOffice ? 'Designated target plantilla position assigned by Division HRMO.' : 'Designate target plantilla position (School Counselor I, II, III, IV).'}
                     </span>
                   </div>
 
@@ -4197,7 +5008,7 @@ export default function ReclassificationPage({ onBack }) {
                     <select
                       value={modalStage}
                       onChange={e => setModalStage(e.target.value)}
-                      disabled={savingModalChanges}
+                      disabled={isRegionalOffice || savingModalChanges}
                       style={{
                         width: '100%',
                         padding: '10px 14px',
@@ -4207,8 +5018,9 @@ export default function ReclassificationPage({ onBack }) {
                         fontSize: '13.5px',
                         fontWeight: 700,
                         color: 'var(--input-text, var(--text))',
-                        cursor: 'pointer',
-                        outline: 'none'
+                        cursor: isRegionalOffice ? 'not-allowed' : 'pointer',
+                        outline: 'none',
+                        opacity: isRegionalOffice ? 0.85 : 1
                       }}
                     >
                       {RECLASS_STAGES.map(stage => (
@@ -4216,7 +5028,7 @@ export default function ReclassificationPage({ onBack }) {
                       ))}
                     </select>
                     <span style={{ fontSize: '11px', color: 'var(--text-secondary, #94a3b8)', display: 'block', marginTop: '4px' }}>
-                      Workflow status automatically syncs across modal & main table view.
+                      {isRegionalOffice ? 'Workflow endorsement status recorded by Division HRMO.' : 'Workflow status automatically syncs across modal & main table view.'}
                     </span>
                   </div>
                 </div>
@@ -4254,60 +5066,62 @@ export default function ReclassificationPage({ onBack }) {
                 Close Assessment
               </button>
 
-              <button
-                type="button"
-                onClick={handleSaveModalChanges}
-                disabled={savingModalChanges}
-                style={{
-                  padding: '9px 24px',
-                  borderRadius: '10px',
-                  border: 'none',
-                  background: savingModalChanges
-                    ? '#64748b'
-                    : 'linear-gradient(135deg, #1e40af 0%, #2563eb 100%)',
-                  color: '#ffffff',
-                  fontSize: '13px',
-                  fontWeight: 750,
-                  cursor: savingModalChanges ? 'not-allowed' : 'pointer',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  boxShadow: savingModalChanges
-                    ? 'none'
-                    : '0 4px 12px rgba(37, 99, 235, 0.3)',
-                  transition: 'all 0.15s ease'
-                }}
-                onMouseOver={e => {
-                  if (!savingModalChanges) {
-                    e.currentTarget.style.boxShadow = '0 6px 16px rgba(37, 99, 235, 0.4)';
-                    e.currentTarget.style.transform = 'translateY(-1px)';
-                  }
-                }}
-                onMouseOut={e => {
-                  if (!savingModalChanges) {
-                    e.currentTarget.style.boxShadow = '0 4px 12px rgba(37, 99, 235, 0.3)';
-                    e.currentTarget.style.transform = 'none';
-                  }
-                }}
-              >
-                {savingModalChanges ? (
-                  <>
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ animation: 'spin 1s linear infinite' }}>
-                      <circle cx="12" cy="12" r="10" strokeDasharray="32" strokeDashoffset="10" />
-                    </svg>
-                    Saving Changes...
-                  </>
-                ) : (
-                  <>
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
-                      <polyline points="17 21 17 13 7 13 7 21" />
-                      <polyline points="7 3 7 8 15 8" />
-                    </svg>
-                    Save Changes
-                  </>
-                )}
-              </button>
+              {!isRegionalOffice && (
+                <button
+                  type="button"
+                  onClick={handleSaveModalChanges}
+                  disabled={savingModalChanges}
+                  style={{
+                    padding: '9px 24px',
+                    borderRadius: '10px',
+                    border: 'none',
+                    background: savingModalChanges
+                      ? '#64748b'
+                      : 'linear-gradient(135deg, #1e40af 0%, #2563eb 100%)',
+                    color: '#ffffff',
+                    fontSize: '13px',
+                    fontWeight: 750,
+                    cursor: savingModalChanges ? 'not-allowed' : 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    boxShadow: savingModalChanges
+                      ? 'none'
+                      : '0 4px 12px rgba(37, 99, 235, 0.3)',
+                    transition: 'all 0.15s ease'
+                  }}
+                  onMouseOver={e => {
+                    if (!savingModalChanges) {
+                      e.currentTarget.style.boxShadow = '0 6px 16px rgba(37, 99, 235, 0.4)';
+                      e.currentTarget.style.transform = 'translateY(-1px)';
+                    }
+                  }}
+                  onMouseOut={e => {
+                    if (!savingModalChanges) {
+                      e.currentTarget.style.boxShadow = '0 4px 12px rgba(37, 99, 235, 0.3)';
+                      e.currentTarget.style.transform = 'none';
+                    }
+                  }}
+                >
+                  {savingModalChanges ? (
+                    <>
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ animation: 'spin 1s linear infinite' }}>
+                        <circle cx="12" cy="12" r="10" strokeDasharray="32" strokeDashoffset="10" />
+                      </svg>
+                      Saving Changes...
+                    </>
+                  ) : (
+                    <>
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                        <polyline points="17 21 17 13 7 13 7 21" />
+                        <polyline points="7 3 7 8 15 8" />
+                      </svg>
+                      Save Changes
+                    </>
+                  )}
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -4826,17 +5640,12 @@ export default function ReclassificationPage({ onBack }) {
                   </svg>
                 </div>
                 <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontSize: '10px', fontWeight: 800, padding: '2px 8px', borderRadius: '6px', background: isDark ? 'rgba(99, 102, 241, 0.25)' : '#e0e7ff', color: isDark ? '#a5b4fc' : '#4338ca', letterSpacing: '0.5px', textTransform: 'uppercase' }}>
-                      Regional Office Privilege
-                    </span>
-                    <span style={{ fontSize: '11px', color: isDark ? '#94a3b8' : '#64748b', fontWeight: 600 }}>
-                      AI/pdfplumber Parser
-                    </span>
-                  </div>
-                  <h3 style={{ fontSize: '16px', fontWeight: 850, margin: '2px 0 0', color: isDark ? '#f8fafc' : '#1e1b4b' }}>
-                    Notice of Organization, Staffing, and Compensation Action (NOSCA)
+                  <h3 style={{ fontSize: '16.5px', fontWeight: 800, margin: 0, color: isDark ? '#f8fafc' : '#1e1b4b' }}>
+                    DBM NOSCA Management
                   </h3>
+                  <div style={{ fontSize: '11.5px', color: isDark ? '#94a3b8' : '#64748b', marginTop: '2px' }}>
+                    Regional Office • Plantilla Item Allocations
+                  </div>
                 </div>
               </div>
 
@@ -4932,215 +5741,500 @@ export default function ReclassificationPage({ onBack }) {
                 alignItems: 'start'
               }}
             >
-              {/* LEFT COLUMN: UPLOAD & ACTIVE DOCUMENT INFO */}
+              {/* LEFT COLUMN: UPLOAD / MANUAL ENTRY CONTROLS */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                {scannedNoscaResult && (
+                {/* Mode Switcher: Upload PDF vs Manual Entry */}
+                <div style={{
+                  display: 'flex',
+                  background: isDark ? 'rgba(15, 23, 42, 0.6)' : '#eef2ff',
+                  padding: '4px',
+                  borderRadius: '12px',
+                  border: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid #e0e7ff',
+                  gap: '4px'
+                }}>
+                  <button
+                    type="button"
+                    onClick={() => setNoscaInputMode('upload')}
+                    style={{
+                      flex: 1,
+                      padding: '8px 12px',
+                      borderRadius: '8px',
+                      border: 'none',
+                      fontSize: '12px',
+                      fontWeight: 750,
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '6px',
+                      background: noscaInputMode === 'upload' ? (isDark ? '#4f46e5' : '#ffffff') : 'transparent',
+                      color: noscaInputMode === 'upload' ? (isDark ? '#ffffff' : '#4338ca') : (isDark ? '#94a3b8' : '#64748b'),
+                      boxShadow: noscaInputMode === 'upload' ? (isDark ? '0 2px 8px rgba(79, 70, 229, 0.4)' : '0 2px 6px rgba(0,0,0,0.08)') : 'none',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                      <polyline points="14 2 14 8 20 8" />
+                      <line x1="12" y1="18" x2="12" y2="12" />
+                      <line x1="9" y1="15" x2="15" y2="15" />
+                    </svg>
+                    Upload NOSCA PDF
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNoscaInputMode('manual')}
+                    style={{
+                      flex: 1,
+                      padding: '8px 12px',
+                      borderRadius: '8px',
+                      border: 'none',
+                      fontSize: '12px',
+                      fontWeight: 750,
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '6px',
+                      background: noscaInputMode === 'manual' ? (isDark ? '#4f46e5' : '#ffffff') : 'transparent',
+                      color: noscaInputMode === 'manual' ? (isDark ? '#ffffff' : '#4338ca') : (isDark ? '#94a3b8' : '#64748b'),
+                      boxShadow: noscaInputMode === 'manual' ? (isDark ? '0 2px 8px rgba(79, 70, 229, 0.4)' : '0 2px 6px rgba(0,0,0,0.08)') : 'none',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3">
+                      <path d="M12 20h9" />
+                      <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+                    </svg>
+                    Add Manually
+                  </button>
+                </div>
+
+                {noscaInputMode === 'upload' ? (
+                  <>
+                    {scannedNoscaResult && (
+                      <div style={{
+                        background: isDark ? 'rgba(30, 41, 59, 0.45)' : '#f8fafc',
+                        border: isDark ? '1px solid rgba(99, 102, 241, 0.35)' : '1px solid #e0e7ff',
+                        borderRadius: '16px',
+                        padding: '18px 20px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '14px',
+                        boxShadow: isDark ? '0 4px 16px rgba(0,0,0,0.2)' : '0 2px 8px rgba(99, 102, 241, 0.05)'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                          <div style={{
+                            width: '42px',
+                            height: '42px',
+                            borderRadius: '12px',
+                            background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            color: '#ffffff',
+                            boxShadow: '0 4px 12px rgba(79, 70, 229, 0.3)',
+                            flexShrink: 0
+                          }}>
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                              <polyline points="14 2 14 8 20 8" />
+                            </svg>
+                          </div>
+                          <div style={{ overflow: 'hidden' }}>
+                            <div style={{ fontSize: '13.5px', fontWeight: 800, color: isDark ? '#f8fafc' : '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              {noscaFileName || 'NOSCA Document.pdf'}
+                            </div>
+                            <div style={{ fontSize: '11px', color: isDark ? '#6ee7b7' : '#059669', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                              <span>● Document Loaded & Parsed</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '12px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.4)' : '1px solid #f1f5f9' }}>
+                            <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>Serial Number</span>
+                            <span style={{ fontWeight: 800, color: isDark ? '#c4b5fd' : '#4f46e5' }}>{scannedNoscaResult.serial_no || 'N/A'}</span>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.4)' : '1px solid #f1f5f9' }}>
+                            <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>Division</span>
+                            <span style={{ fontWeight: 700, color: isDark ? '#f8fafc' : '#0f172a', textAlign: 'right' }}>{scannedNoscaResult.division ? `Division of ${scannedNoscaResult.division}` : 'Regional Scope'}</span>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.4)' : '1px solid #f1f5f9' }}>
+                            <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>Station</span>
+                            <span style={{ fontWeight: 650, color: isDark ? '#cbd5e1' : '#334155', textAlign: 'right', maxWidth: '180px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{scannedNoscaResult.school_name || 'All Stations'}</span>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.4)' : '1px solid #f1f5f9' }}>
+                            <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>Target Position</span>
+                            <span style={{ fontWeight: 700, color: isDark ? '#f8fafc' : '#0f172a', textAlign: 'right' }}>{scannedNoscaResult.position || 'School Counselor Associate I'}</span>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.4)' : '1px solid #f1f5f9' }}>
+                            <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>Total Plantilla Items</span>
+                            <span style={{ fontWeight: 800, color: isDark ? '#f8fafc' : '#0f172a' }}>{scannedNoscaResult.count || 0}</span>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0' }}>
+                            <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>Selected for Import</span>
+                            <span style={{ fontWeight: 800, color: '#10b981' }}>{selectedNoscaItems.length} items</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Upload Dropzone */}
+                    <div
+                      onDragOver={(e) => { e.preventDefault(); setIsNoscaDragOver(true); }}
+                      onDragLeave={() => setIsNoscaDragOver(false)}
+                      onDrop={handleNoscaDrop}
+                      onClick={() => !scanningNosca && noscaFileInputRef.current?.click()}
+                      style={{
+                        border: isNoscaDragOver
+                          ? '2px dashed #6366f1'
+                          : (isDark ? '2px dashed rgba(99, 102, 241, 0.45)' : '2px dashed #c7d2fe'),
+                        borderRadius: '16px',
+                        padding: scannedNoscaResult ? '24px 18px' : '44px 22px',
+                        textAlign: 'center',
+                        background: isNoscaDragOver
+                          ? (isDark ? 'rgba(99, 102, 241, 0.18)' : '#eef2ff')
+                          : (isDark
+                              ? 'linear-gradient(180deg, rgba(30, 41, 59, 0.4) 0%, rgba(15, 23, 42, 0.6) 100%)'
+                              : 'linear-gradient(180deg, #fbfcfe 0%, #f4f7fb 100%)'),
+                        boxShadow: isNoscaDragOver
+                          ? '0 0 0 4px rgba(99, 102, 241, 0.18)'
+                          : (isDark ? 'none' : '0 2px 8px rgba(99, 102, 241, 0.04)'),
+                        cursor: scanningNosca ? 'wait' : 'pointer',
+                        transition: 'all 0.2s ease'
+                      }}
+                    >
+                      {scanningNosca ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '14px' }}>
+                          <div style={{
+                            width: '46px',
+                            height: '46px',
+                            borderRadius: '50%',
+                            border: '3.5px solid rgba(99, 102, 241, 0.2)',
+                            borderTopColor: '#6366f1',
+                            animation: 'spin 0.8s linear infinite'
+                          }} />
+                          <div>
+                            <div style={{ fontSize: '15px', fontWeight: 800, color: isDark ? '#f8fafc' : '#0f172a' }}>
+                              Scanning NOSCA PDF...
+                            </div>
+                            <div style={{ fontSize: '12px', color: isDark ? '#94a3b8' : '#64748b', marginTop: '4px' }}>
+                              Parsing plantilla allocations...
+                            </div>
+                          </div>
+                        </div>
+                      ) : scannedNoscaResult ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+                          <div style={{
+                            width: '38px',
+                            height: '38px',
+                            borderRadius: '10px',
+                            background: isDark ? 'rgba(99, 102, 241, 0.2)' : '#e0e7ff',
+                            color: '#6366f1',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                          }}>
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                              <polyline points="17 8 12 3 7 8" />
+                              <line x1="12" y1="3" x2="12" y2="15" />
+                            </svg>
+                          </div>
+                          <div style={{ fontSize: '13px', fontWeight: 750, color: isDark ? '#c4b5fd' : '#4f46e5' }}>
+                            Scan or Drop Another NOSCA PDF
+                          </div>
+                          <div style={{ fontSize: '11.5px', color: isDark ? '#94a3b8' : '#64748b' }}>
+                            Click to choose a replacement file
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
+                          {/* Floating Upload Icon with Glow */}
+                          <div style={{
+                            width: '64px',
+                            height: '64px',
+                            borderRadius: '18px',
+                            background: isDark
+                              ? 'linear-gradient(135deg, rgba(99, 102, 241, 0.25) 0%, rgba(79, 70, 229, 0.15) 100%)'
+                              : 'linear-gradient(135deg, #e0e7ff 0%, #ede9fe 100%)',
+                            border: isDark ? '1px solid rgba(99, 102, 241, 0.4)' : '1px solid #c7d2fe',
+                            color: isDark ? '#a5b4fc' : '#4f46e5',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            boxShadow: isDark
+                              ? '0 8px 24px rgba(99, 102, 241, 0.25)'
+                              : '0 8px 20px rgba(99, 102, 241, 0.15)'
+                          }}>
+                            <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                              <polyline points="14 2 14 8 20 8" />
+                              <path d="M12 18v-6" />
+                              <path d="M9 15l3-3 3 3" />
+                            </svg>
+                          </div>
+
+                          <div>
+                            <div style={{ fontSize: '17px', fontWeight: 850, color: isDark ? '#f8fafc' : '#0f172a' }}>
+                              Upload NOSCA PDF Here
+                            </div>
+                            <div style={{ fontSize: '12.5px', color: isDark ? '#94a3b8' : '#64748b', marginTop: '6px', lineHeight: 1.5 }}>
+                              Drag and drop your official DBM NOSCA document here, or browse files from your computer.
+                            </div>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (!scanningNosca) noscaFileInputRef.current?.click();
+                            }}
+                            style={{
+                              background: 'linear-gradient(135deg, #4f46e5 0%, #6366f1 100%)',
+                              border: 'none',
+                              padding: '8px 20px',
+                              borderRadius: '10px',
+                              color: '#ffffff',
+                              fontSize: '12.5px',
+                              fontWeight: 700,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '7px',
+                              cursor: 'pointer',
+                              boxShadow: '0 4px 14px rgba(79, 70, 229, 0.3)'
+                            }}
+                          >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                              <polyline points="7 10 12 15 17 10" />
+                              <line x1="12" y1="3" x2="12" y2="15" />
+                            </svg>
+                            Browse NOSCA Document
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    <div style={{ textAlign: 'center', padding: '2px 0' }}>
+                      <button
+                        type="button"
+                        onClick={() => setNoscaInputMode('manual')}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: isDark ? '#a5b4fc' : '#4f46e5',
+                          fontSize: '12px',
+                          fontWeight: 750,
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px'
+                        }}
+                        onMouseOver={e => e.currentTarget.style.textDecoration = 'underline'}
+                        onMouseOut={e => e.currentTarget.style.textDecoration = 'none'}
+                      >
+                        <span>Don't have a PDF? Add Plantilla / Item No. manually</span>
+                        <span>→</span>
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  /* MANUAL ENTRY FORM */
                   <div style={{
-                    background: isDark ? 'rgba(30, 41, 59, 0.45)' : '#f8fafc',
-                    border: isDark ? '1px solid rgba(99, 102, 241, 0.35)' : '1px solid #e0e7ff',
+                    background: isDark ? 'rgba(30, 41, 59, 0.55)' : '#ffffff',
+                    border: isDark ? '1px solid rgba(99, 102, 241, 0.4)' : '1px solid #c7d2fe',
                     borderRadius: '16px',
-                    padding: '18px 20px',
+                    padding: '20px',
                     display: 'flex',
                     flexDirection: 'column',
                     gap: '14px',
-                    boxShadow: isDark ? '0 4px 16px rgba(0,0,0,0.2)' : '0 2px 8px rgba(99, 102, 241, 0.05)'
+                    boxShadow: isDark ? '0 4px 16px rgba(0,0,0,0.25)' : '0 2px 10px rgba(99, 102, 241, 0.08)'
                   }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                       <div style={{
-                        width: '42px',
-                        height: '42px',
-                        borderRadius: '12px',
+                        width: '38px',
+                        height: '38px',
+                        borderRadius: '10px',
                         background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
                         color: '#ffffff',
-                        boxShadow: '0 4px 12px rgba(79, 70, 229, 0.3)',
+                        boxShadow: '0 3px 10px rgba(79, 70, 229, 0.35)',
                         flexShrink: 0
                       }}>
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
-                          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                          <polyline points="14 2 14 8 20 8" />
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3">
+                          <path d="M12 20h9" />
+                          <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
                         </svg>
                       </div>
-                      <div style={{ overflow: 'hidden' }}>
-                        <div style={{ fontSize: '13.5px', fontWeight: 800, color: isDark ? '#f8fafc' : '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {noscaFileName || 'NOSCA Document.pdf'}
+                      <div>
+                        <div style={{ fontSize: '14px', fontWeight: 800, color: isDark ? '#f8fafc' : '#0f172a' }}>
+                          Add Plantilla / Item No. Manually
                         </div>
-                        <div style={{ fontSize: '11px', color: isDark ? '#6ee7b7' : '#059669', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px' }}>
-                          <span>● Document Loaded & Parsed</span>
+                        <div style={{ fontSize: '11px', color: isDark ? '#94a3b8' : '#64748b' }}>
+                          Enter one Plantilla Item Number to add to NOSCA
                         </div>
                       </div>
                     </div>
 
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '12px' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.4)' : '1px solid #f1f5f9' }}>
-                        <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>Serial Number</span>
-                        <span style={{ fontWeight: 800, color: isDark ? '#c4b5fd' : '#4f46e5' }}>{scannedNoscaResult.serial_no || 'N/A'}</span>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '11.5px', fontWeight: 750, color: isDark ? '#cbd5e1' : '#334155', marginBottom: '5px' }}>
+                        Plantilla Item Number <span style={{ color: '#ef4444' }}>*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={manualNoscaItemInput}
+                        onChange={(e) => setManualNoscaItemInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleAddManualNoscaItems();
+                          }
+                        }}
+                        placeholder="e.g. OSEC-DECSB-SCA1-0001-2024"
+                        style={{
+                          width: '100%',
+                          padding: '9px 12px',
+                          borderRadius: '9px',
+                          fontSize: '12px',
+                          fontFamily: 'monospace',
+                          border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid #cbd5e1',
+                          background: isDark ? 'rgba(15, 23, 42, 0.6)' : '#f8fafc',
+                          color: isDark ? '#f8fafc' : '#0f172a',
+                          outline: 'none',
+                          boxSizing: 'border-box'
+                        }}
+                      />
+                      <div style={{ fontSize: '10.5px', color: isDark ? '#94a3b8' : '#64748b', marginTop: '3px' }}>
+                        Enter one authorized Plantilla Item Number at a time.
                       </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.4)' : '1px solid #f1f5f9' }}>
-                        <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>Division</span>
-                        <span style={{ fontWeight: 700, color: isDark ? '#f8fafc' : '#0f172a', textAlign: 'right' }}>{scannedNoscaResult.division ? `Division of ${scannedNoscaResult.division}` : 'Regional Scope'}</span>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                      <div>
+                        <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: isDark ? '#cbd5e1' : '#334155', marginBottom: '4px' }}>
+                          Category
+                        </label>
+                        <select
+                          value={manualNoscaCategory}
+                          onChange={(e) => setManualNoscaCategory(e.target.value)}
+                          style={{
+                            width: '100%',
+                            padding: '7px 8px',
+                            borderRadius: '8px',
+                            fontSize: '11.5px',
+                            border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid #cbd5e1',
+                            background: isDark ? 'rgba(15, 23, 42, 0.6)' : '#f8fafc',
+                            color: isDark ? '#f8fafc' : '#0f172a',
+                            outline: 'none'
+                          }}
+                        >
+                          <option value="ELEMENTARY">Elementary</option>
+                          <option value="JHS">Junior High (JHS)</option>
+                          <option value="SHS">Senior High (SHS)</option>
+                          <option value="ALS">ALS</option>
+                        </select>
                       </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.4)' : '1px solid #f1f5f9' }}>
-                        <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>Station</span>
-                        <span style={{ fontWeight: 650, color: isDark ? '#cbd5e1' : '#334155', textAlign: 'right', maxWidth: '180px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{scannedNoscaResult.school_name || 'All Stations'}</span>
+
+                      <div>
+                        <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: isDark ? '#cbd5e1' : '#334155', marginBottom: '4px' }}>
+                          NOSCA Ref / Serial
+                        </label>
+                        <input
+                          type="text"
+                          value={manualNoscaSerial}
+                          onChange={(e) => setManualNoscaSerial(e.target.value)}
+                          placeholder="e.g. NOSCA-2024-MANUAL"
+                          style={{
+                            width: '100%',
+                            padding: '7px 8px',
+                            borderRadius: '8px',
+                            fontSize: '11.5px',
+                            border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid #cbd5e1',
+                            background: isDark ? 'rgba(15, 23, 42, 0.6)' : '#f8fafc',
+                            color: isDark ? '#f8fafc' : '#0f172a',
+                            outline: 'none',
+                            boxSizing: 'border-box'
+                          }}
+                        />
                       </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.4)' : '1px solid #f1f5f9' }}>
-                        <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>Target Position</span>
-                        <span style={{ fontWeight: 700, color: isDark ? '#f8fafc' : '#0f172a', textAlign: 'right' }}>{scannedNoscaResult.position || 'School Counselor Associate I'}</span>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.4)' : '1px solid #f1f5f9' }}>
-                        <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>Total Plantilla Items</span>
-                        <span style={{ fontWeight: 800, color: isDark ? '#f8fafc' : '#0f172a' }}>{scannedNoscaResult.count || 0}</span>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0' }}>
-                        <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>Selected for Import</span>
-                        <span style={{ fontWeight: 800, color: '#10b981' }}>{selectedNoscaItems.length} items</span>
-                      </div>
+                    </div>
+
+                    <div>
+                      <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: isDark ? '#cbd5e1' : '#334155', marginBottom: '4px' }}>
+                        Division / Scope (Optional)
+                      </label>
+                      <input
+                        type="text"
+                        value={manualNoscaDivision}
+                        onChange={(e) => setManualNoscaDivision(e.target.value)}
+                        placeholder={divisionFilter && divisionFilter !== 'ALL' ? divisionFilter : 'Regional Scope'}
+                        style={{
+                          width: '100%',
+                          padding: '7px 8px',
+                          borderRadius: '8px',
+                          fontSize: '11.5px',
+                          border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid #cbd5e1',
+                          background: isDark ? 'rgba(15, 23, 42, 0.6)' : '#f8fafc',
+                          color: isDark ? '#f8fafc' : '#0f172a',
+                          outline: 'none',
+                          boxSizing: 'border-box'
+                        }}
+                      />
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+                      <button
+                        type="button"
+                        onClick={() => handleAddManualNoscaItems()}
+                        style={{
+                          flex: 1,
+                          padding: '9px 14px',
+                          borderRadius: '9px',
+                          border: 'none',
+                          background: 'linear-gradient(135deg, #4f46e5 0%, #6366f1 100%)',
+                          color: '#ffffff',
+                          fontSize: '12px',
+                          fontWeight: 750,
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '6px',
+                          boxShadow: '0 3px 12px rgba(79, 70, 229, 0.35)'
+                        }}
+                      >
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                          <line x1="12" y1="5" x2="12" y2="19" />
+                          <line x1="5" y1="12" x2="19" y2="12" />
+                        </svg>
+                        Add to Plantilla List
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setNoscaInputMode('upload')}
+                        style={{
+                          padding: '9px 12px',
+                          borderRadius: '9px',
+                          border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid #cbd5e1',
+                          background: 'transparent',
+                          color: isDark ? '#cbd5e1' : '#475569',
+                          fontSize: '11.5px',
+                          fontWeight: 700,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        Switch to PDF
+                      </button>
                     </div>
                   </div>
                 )}
-
-                {/* Upload Dropzone */}
-                <div
-                  onDragOver={(e) => { e.preventDefault(); setIsNoscaDragOver(true); }}
-                  onDragLeave={() => setIsNoscaDragOver(false)}
-                  onDrop={handleNoscaDrop}
-                  onClick={() => !scanningNosca && noscaFileInputRef.current?.click()}
-                  style={{
-                    border: isNoscaDragOver
-                      ? '2px dashed #6366f1'
-                      : (isDark ? '2px dashed rgba(99, 102, 241, 0.45)' : '2px dashed #c7d2fe'),
-                    borderRadius: '16px',
-                    padding: scannedNoscaResult ? '24px 18px' : '44px 22px',
-                    textAlign: 'center',
-                    background: isNoscaDragOver
-                      ? (isDark ? 'rgba(99, 102, 241, 0.18)' : '#eef2ff')
-                      : (isDark
-                          ? 'linear-gradient(180deg, rgba(30, 41, 59, 0.4) 0%, rgba(15, 23, 42, 0.6) 100%)'
-                          : 'linear-gradient(180deg, #fbfcfe 0%, #f4f7fb 100%)'),
-                    boxShadow: isNoscaDragOver
-                      ? '0 0 0 4px rgba(99, 102, 241, 0.18)'
-                      : (isDark ? 'none' : '0 2px 8px rgba(99, 102, 241, 0.04)'),
-                    cursor: scanningNosca ? 'wait' : 'pointer',
-                    transition: 'all 0.2s ease'
-                  }}
-                >
-                  {scanningNosca ? (
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '14px' }}>
-                      <div style={{
-                        width: '46px',
-                        height: '46px',
-                        borderRadius: '50%',
-                        border: '3.5px solid rgba(99, 102, 241, 0.2)',
-                        borderTopColor: '#6366f1',
-                        animation: 'spin 0.8s linear infinite'
-                      }} />
-                      <div>
-                        <div style={{ fontSize: '15px', fontWeight: 800, color: isDark ? '#f8fafc' : '#0f172a' }}>
-                          Scanning NOSCA PDF...
-                        </div>
-                        <div style={{ fontSize: '12px', color: isDark ? '#94a3b8' : '#64748b', marginTop: '4px' }}>
-                          Parsing plantilla allocations...
-                        </div>
-                      </div>
-                    </div>
-                  ) : scannedNoscaResult ? (
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
-                      <div style={{
-                        width: '38px',
-                        height: '38px',
-                        borderRadius: '10px',
-                        background: isDark ? 'rgba(99, 102, 241, 0.2)' : '#e0e7ff',
-                        color: '#6366f1',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center'
-                      }}>
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                          <polyline points="17 8 12 3 7 8" />
-                          <line x1="12" y1="3" x2="12" y2="15" />
-                        </svg>
-                      </div>
-                      <div style={{ fontSize: '13px', fontWeight: 750, color: isDark ? '#c4b5fd' : '#4f46e5' }}>
-                        Scan or Drop Another NOSCA PDF
-                      </div>
-                      <div style={{ fontSize: '11.5px', color: isDark ? '#94a3b8' : '#64748b' }}>
-                        Click to choose a replacement file
-                      </div>
-                    </div>
-                  ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
-                      {/* Floating Upload Icon with Glow */}
-                      <div style={{
-                        width: '64px',
-                        height: '64px',
-                        borderRadius: '18px',
-                        background: isDark
-                          ? 'linear-gradient(135deg, rgba(99, 102, 241, 0.25) 0%, rgba(79, 70, 229, 0.15) 100%)'
-                          : 'linear-gradient(135deg, #e0e7ff 0%, #ede9fe 100%)',
-                        border: isDark ? '1px solid rgba(99, 102, 241, 0.4)' : '1px solid #c7d2fe',
-                        color: isDark ? '#a5b4fc' : '#4f46e5',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        boxShadow: isDark
-                          ? '0 8px 24px rgba(99, 102, 241, 0.25)'
-                          : '0 8px 20px rgba(99, 102, 241, 0.15)'
-                      }}>
-                        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                          <polyline points="14 2 14 8 20 8" />
-                          <path d="M12 18v-6" />
-                          <path d="M9 15l3-3 3 3" />
-                        </svg>
-                      </div>
-
-                      <div>
-                        <div style={{ fontSize: '17px', fontWeight: 850, color: isDark ? '#f8fafc' : '#0f172a' }}>
-                          Upload NOSCA PDF Here
-                        </div>
-                        <div style={{ fontSize: '12.5px', color: isDark ? '#94a3b8' : '#64748b', marginTop: '6px', lineHeight: 1.5 }}>
-                          Drag and drop your official DBM NOSCA document here, or browse files from your computer.
-                        </div>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (!scanningNosca) noscaFileInputRef.current?.click();
-                        }}
-                        style={{
-                          background: 'linear-gradient(135deg, #4f46e5 0%, #6366f1 100%)',
-                          border: 'none',
-                          padding: '8px 20px',
-                          borderRadius: '10px',
-                          color: '#ffffff',
-                          fontSize: '12.5px',
-                          fontWeight: 700,
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '7px',
-                          cursor: 'pointer',
-                          boxShadow: '0 4px 14px rgba(79, 70, 229, 0.3)'
-                        }}
-                      >
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
-                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                          <polyline points="7 10 12 15 17 10" />
-                          <line x1="12" y1="3" x2="12" y2="15" />
-                        </svg>
-                        Browse NOSCA Document
-                      </button>
-                    </div>
-                  )}
-                </div>
               </div>
 
-              {/* RIGHT COLUMN: SCANNED NOSCA RESULTS */}
+              {/* RIGHT COLUMN: SCANNED / MANUALLY ADDED NOSCA RESULTS */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', minWidth: 0 }}>
                 {scannedNoscaResult ? (
                   <>
@@ -5219,7 +6313,7 @@ export default function ReclassificationPage({ onBack }) {
                       </div>
                     </div>
 
-                    {/* Toolbar: Category Filters, Search, Select/Deselect All, and Bulk Remove */}
+                    {/* Toolbar: Category Filters, Search, Select/Deselect All, + Add Manually, and Bulk Remove */}
                     <div style={{
                       display: 'flex',
                       alignItems: 'center',
@@ -5238,7 +6332,10 @@ export default function ReclassificationPage({ onBack }) {
                           { key: 'ELEMENTARY', label: 'Elementary', count: scannedNoscaResult.category_breakdown?.ELEMENTARY?.length || 0 },
                           { key: 'JHS', label: 'JHS', count: scannedNoscaResult.category_breakdown?.JHS?.length || 0 },
                           { key: 'SHS', label: 'SHS', count: scannedNoscaResult.category_breakdown?.SHS?.length || 0 },
-                          { key: 'ALS', label: 'ALS', count: scannedNoscaResult.category_breakdown?.ALS?.length || 0 }
+                          { key: 'ALS', label: 'ALS', count: scannedNoscaResult.category_breakdown?.ALS?.length || 0 },
+                          ...(scannedNoscaResult.category_breakdown?.MANUAL?.length ? [
+                            { key: 'MANUAL', label: 'Manual', count: scannedNoscaResult.category_breakdown.MANUAL.length }
+                          ] : [])
                         ].map((tab) => {
                           const isActive = noscaActiveCategory === tab.key;
                           return (
@@ -5276,7 +6373,7 @@ export default function ReclassificationPage({ onBack }) {
                         })}
                       </div>
 
-                      {/* Action controls: Select All, Search, and Bulk Remove */}
+                      {/* Action controls: Select All, Add Manually, Search, and Bulk Remove */}
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                         <button
                           type="button"
@@ -5303,6 +6400,31 @@ export default function ReclassificationPage({ onBack }) {
                             ? 'Deselect All'
                             : 'Select All'
                           }
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setShowQuickAddInline(prev => !prev)}
+                          style={{
+                            padding: '5px 10px',
+                            borderRadius: '7px',
+                            border: isDark ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #a7f3d0',
+                            background: isDark ? 'rgba(16, 185, 129, 0.15)' : '#ecfdf5',
+                            color: isDark ? '#6ee7b7' : '#047857',
+                            fontSize: '11px',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '5px'
+                          }}
+                          title="Add a Plantilla Item Number directly to this list"
+                        >
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                            <line x1="12" y1="5" x2="12" y2="19" />
+                            <line x1="5" y1="12" x2="19" y2="12" />
+                          </svg>
+                          + Add Manually
                         </button>
 
                         {selectedNoscaItems.length > 0 && (
@@ -5358,37 +6480,135 @@ export default function ReclassificationPage({ onBack }) {
                       </div>
                     </div>
 
+                    {/* Quick Inline Item Add Bar */}
+                    {showQuickAddInline && (
+                      <div style={{
+                        padding: '10px 14px',
+                        borderRadius: '10px',
+                        background: isDark ? 'rgba(30, 41, 59, 0.85)' : '#f0fdf4',
+                        border: isDark ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #bbf7d0',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '10px',
+                        flexWrap: 'wrap'
+                      }}>
+                        <div style={{ fontSize: '11.5px', fontWeight: 800, color: isDark ? '#6ee7b7' : '#047857', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                          <span>Quick Item Entry:</span>
+                        </div>
+                        <input
+                          type="text"
+                          value={quickAddInlineInput}
+                          onChange={(e) => setQuickAddInlineInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              handleAddManualNoscaItems(quickAddInlineInput, quickAddInlineCategory);
+                            }
+                          }}
+                          placeholder="e.g. OSEC-DECSB-SCA1-0001-2024"
+                          style={{
+                            flex: 1,
+                            minWidth: '220px',
+                            padding: '6px 10px',
+                            borderRadius: '7px',
+                            fontSize: '12px',
+                            fontFamily: 'monospace',
+                            border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid #cbd5e1',
+                            background: isDark ? 'rgba(15, 23, 42, 0.7)' : '#ffffff',
+                            color: isDark ? '#f8fafc' : '#0f172a',
+                            outline: 'none'
+                          }}
+                        />
+                        <select
+                          value={quickAddInlineCategory}
+                          onChange={(e) => setQuickAddInlineCategory(e.target.value)}
+                          style={{
+                            padding: '6px 8px',
+                            borderRadius: '7px',
+                            fontSize: '11px',
+                            border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid #cbd5e1',
+                            background: isDark ? 'rgba(15, 23, 42, 0.7)' : '#ffffff',
+                            color: isDark ? '#f8fafc' : '#0f172a',
+                            outline: 'none'
+                          }}
+                        >
+                          <option value="ELEMENTARY">Elementary</option>
+                          <option value="JHS">JHS</option>
+                          <option value="SHS">SHS</option>
+                          <option value="ALS">ALS</option>
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => handleAddManualNoscaItems(quickAddInlineInput, quickAddInlineCategory)}
+                          style={{
+                            padding: '6px 12px',
+                            borderRadius: '7px',
+                            border: 'none',
+                            background: '#10b981',
+                            color: '#ffffff',
+                            fontSize: '11.5px',
+                            fontWeight: 750,
+                            cursor: 'pointer'
+                          }}
+                        >
+                          Add Item
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setShowQuickAddInline(false)}
+                          style={{
+                            padding: '6px 9px',
+                            borderRadius: '7px',
+                            border: 'none',
+                            background: 'transparent',
+                            color: isDark ? '#94a3b8' : '#64748b',
+                            fontSize: '11.5px',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    )}
+
                     {/* Items Selection Table */}
                     <div style={{
                       border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid #e2e8f0',
-                      borderRadius: '12px',
+                      borderRadius: '10px',
                       overflow: 'hidden',
-                      maxHeight: '400px',
+                      maxHeight: '380px',
                       display: 'flex',
                       flexDirection: 'column'
                     }}>
-                      <div style={{ overflowY: 'auto' }}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-                          <thead style={{ position: 'sticky', top: 0, background: isDark ? 'rgba(30, 41, 59, 0.95)' : '#f8fafc', borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid #e2e8f0', zIndex: 2 }}>
+                      <div style={{ overflowY: 'auto', overflowX: 'hidden' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', tableLayout: 'fixed' }}>
+                          <colgroup>
+                            <col style={{ width: '34px' }} />
+                            <col style={{ width: '42%' }} />
+                            <col style={{ width: '22%' }} />
+                            <col style={{ width: '26%' }} />
+                            <col style={{ width: '36px' }} />
+                          </colgroup>
+                          <thead style={{ position: 'sticky', top: 0, background: isDark ? 'rgba(30, 41, 59, 0.98)' : '#f8fafc', borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid #e2e8f0', zIndex: 2 }}>
                             <tr>
-                              <th style={{ width: '38px', padding: '9px 10px', textAlign: 'center' }}>
+                              <th style={{ padding: '6px 4px', textAlign: 'center' }}>
                                 <input
                                   type="checkbox"
                                   checked={filteredNoscaItems.length > 0 && filteredNoscaItems.every(i => selectedNoscaItems.includes(i))}
                                   onChange={toggleSelectAllNoscaItems}
-                                  style={{ width: '14px', height: '14px', cursor: 'pointer', accentColor: '#4f46e5' }}
+                                  style={{ width: '13px', height: '13px', cursor: 'pointer', accentColor: '#4f46e5' }}
                                 />
                               </th>
-                              <th style={{ padding: '9px 12px', textAlign: 'left', fontWeight: 750, color: isDark ? '#94a3b8' : '#475569' }}>
-                                Plantilla Item Number
+                              <th style={{ padding: '6px 8px', textAlign: 'left', fontWeight: 750, color: isDark ? '#94a3b8' : '#475569', fontSize: '10.5px', textTransform: 'uppercase', letterSpacing: '0.3px' }}>
+                                Item Number
                               </th>
-                              <th style={{ padding: '9px 12px', textAlign: 'left', fontWeight: 750, color: isDark ? '#94a3b8' : '#475569' }}>
+                              <th style={{ padding: '6px 6px', textAlign: 'left', fontWeight: 750, color: isDark ? '#94a3b8' : '#475569', fontSize: '10.5px', textTransform: 'uppercase', letterSpacing: '0.3px' }}>
                                 Category
                               </th>
-                              <th style={{ padding: '9px 12px', textAlign: 'left', fontWeight: 750, color: isDark ? '#94a3b8' : '#475569' }}>
-                                Database Status
+                              <th style={{ padding: '6px 6px', textAlign: 'left', fontWeight: 750, color: isDark ? '#94a3b8' : '#475569', fontSize: '10.5px', textTransform: 'uppercase', letterSpacing: '0.3px' }}>
+                                Status
                               </th>
-                              <th style={{ width: '60px', padding: '9px 10px', textAlign: 'center', fontWeight: 750, color: isDark ? '#94a3b8' : '#475569' }}>
+                              <th style={{ padding: '6px 4px', textAlign: 'center', fontWeight: 750, color: isDark ? '#94a3b8' : '#475569', fontSize: '10.5px', textTransform: 'uppercase', letterSpacing: '0.3px' }}>
                                 Action
                               </th>
                             </tr>
@@ -5398,11 +6618,13 @@ export default function ReclassificationPage({ onBack }) {
                               filteredNoscaItems.map((item, idx) => {
                                 const isSelected = selectedNoscaItems.includes(item);
                                 const isMatched = incumbents?.some(inc => inc.plantilla_item_number && String(inc.plantilla_item_number).trim().toLowerCase() === String(item).trim().toLowerCase());
+                                const isManuallyAdded = manuallyAddedNoscaItems.has(item);
                                 
                                 let itemCat = 'ELEMENTARY';
                                 if (scannedNoscaResult.category_breakdown?.JHS?.includes(item)) itemCat = 'JHS';
                                 else if (scannedNoscaResult.category_breakdown?.SHS?.includes(item)) itemCat = 'SHS';
                                 else if (scannedNoscaResult.category_breakdown?.ALS?.includes(item)) itemCat = 'ALS';
+                                else if (scannedNoscaResult.category_breakdown?.MANUAL?.includes(item)) itemCat = 'MANUAL';
 
                                 return (
                                   <tr
@@ -5417,41 +6639,57 @@ export default function ReclassificationPage({ onBack }) {
                                       transition: 'background 0.15s ease'
                                     }}
                                   >
-                                    <td style={{ textAlign: 'center', padding: '9px 10px' }} onClick={(e) => e.stopPropagation()}>
+                                    <td style={{ textAlign: 'center', padding: '5px 4px' }} onClick={(e) => e.stopPropagation()}>
                                       <input
                                         type="checkbox"
                                         checked={isSelected}
                                         onChange={() => toggleSelectNoscaItem(item)}
-                                        style={{ width: '14px', height: '14px', cursor: 'pointer', accentColor: '#4f46e5' }}
+                                        style={{ width: '13px', height: '13px', cursor: 'pointer', accentColor: '#4f46e5' }}
                                       />
                                     </td>
-                                    <td style={{ padding: '9px 12px', fontFamily: 'monospace', fontWeight: 700, color: isDark ? '#f8fafc' : '#0f172a' }}>
-                                      {item}
+                                    <td style={{ padding: '5px 8px', fontFamily: 'monospace', fontWeight: 700, color: isDark ? '#f8fafc' : '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: '11px' }}>
+                                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', maxWidth: '100%', overflow: 'hidden' }}>
+                                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{item}</span>
+                                        {isManuallyAdded && itemCat !== 'MANUAL' && (
+                                          <span style={{
+                                            fontSize: '9px',
+                                            fontWeight: 800,
+                                            padding: '1px 5px',
+                                            borderRadius: '4px',
+                                            background: isDark ? 'rgba(168, 85, 247, 0.25)' : '#f3e8ff',
+                                            color: isDark ? '#d8b4fe' : '#7e22ce',
+                                            border: isDark ? '1px solid rgba(168, 85, 247, 0.4)' : '1px solid #e9d5ff',
+                                            flexShrink: 0
+                                          }}>
+                                            Manual
+                                          </span>
+                                        )}
+                                      </div>
                                     </td>
-                                    <td style={{ padding: '9px 12px' }}>
+                                    <td style={{ padding: '5px 6px', whiteSpace: 'nowrap' }}>
                                       <span style={{
-                                        fontSize: '10.5px',
+                                        fontSize: '9.5px',
                                         fontWeight: 750,
-                                        padding: '2px 7px',
-                                        borderRadius: '5px',
-                                        background: itemCat === 'SHS' ? (isDark ? 'rgba(217, 119, 6, 0.2)' : '#fef3c7') : itemCat === 'JHS' ? (isDark ? 'rgba(37, 99, 235, 0.2)' : '#dbeafe') : itemCat === 'ALS' ? (isDark ? 'rgba(147, 51, 234, 0.2)' : '#f3e8ff') : (isDark ? 'rgba(16, 185, 129, 0.2)' : '#d1fae5'),
-                                        color: itemCat === 'SHS' ? (isDark ? '#fde68a' : '#b45309') : itemCat === 'JHS' ? (isDark ? '#bfdbfe' : '#1d4ed8') : itemCat === 'ALS' ? (isDark ? '#e9d5ff' : '#7e22ce') : (isDark ? '#a7f3d0' : '#047857')
+                                        padding: '1.5px 6px',
+                                        borderRadius: '4px',
+                                        background: itemCat === 'SHS' ? (isDark ? 'rgba(217, 119, 6, 0.2)' : '#fef3c7') : itemCat === 'JHS' ? (isDark ? 'rgba(37, 99, 235, 0.2)' : '#dbeafe') : itemCat === 'ALS' ? (isDark ? 'rgba(147, 51, 234, 0.2)' : '#f3e8ff') : itemCat === 'MANUAL' ? (isDark ? 'rgba(168, 85, 247, 0.2)' : '#f3e8ff') : (isDark ? 'rgba(16, 185, 129, 0.2)' : '#d1fae5'),
+                                        color: itemCat === 'SHS' ? (isDark ? '#fde68a' : '#b45309') : itemCat === 'JHS' ? (isDark ? '#bfdbfe' : '#1d4ed8') : itemCat === 'ALS' ? (isDark ? '#e9d5ff' : '#7e22ce') : itemCat === 'MANUAL' ? (isDark ? '#d8b4fe' : '#7e22ce') : (isDark ? '#a7f3d0' : '#047857')
                                       }}>
                                         {itemCat}
                                       </span>
                                     </td>
-                                    <td style={{ padding: '9px 12px' }}>
+                                    <td style={{ padding: '5px 6px', whiteSpace: 'nowrap' }}>
                                       {isMatched ? (
-                                        <span style={{ fontSize: '10.5px', fontWeight: 800, padding: '2px 7px', borderRadius: '5px', background: isDark ? 'rgba(16, 185, 129, 0.25)' : '#dcfce7', color: isDark ? '#6ee7b7' : '#15803d' }}>
-                                          ✓ In Reclassification DB
+                                        <span style={{ fontSize: '9.5px', fontWeight: 800, padding: '1.5px 6px', borderRadius: '4px', background: isDark ? 'rgba(16, 185, 129, 0.25)' : '#dcfce7', color: isDark ? '#6ee7b7' : '#15803d' }}>
+                                          ✓ In DB
                                         </span>
                                       ) : (
-                                        <span style={{ fontSize: '10.5px', fontWeight: 750, padding: '2px 7px', borderRadius: '5px', background: isDark ? 'rgba(99, 102, 241, 0.2)' : '#e0e7ff', color: isDark ? '#a5b4fc' : '#4338ca' }}>
-                                          + New Allocation
+                                        <span style={{ fontSize: '9.5px', fontWeight: 750, padding: '1.5px 6px', borderRadius: '4px', background: isDark ? 'rgba(99, 102, 241, 0.2)' : '#e0e7ff', color: isDark ? '#a5b4fc' : '#4338ca' }}>
+                                          + New
                                         </span>
                                       )}
                                     </td>
-                                    <td style={{ textAlign: 'center', padding: '9px 10px' }} onClick={(e) => e.stopPropagation()}>
+                                    <td style={{ textAlign: 'center', padding: '5px 4px' }} onClick={(e) => e.stopPropagation()}>
                                       <button
                                         type="button"
                                         onClick={() => handleRequestRemoveItem(item)}
@@ -5460,8 +6698,8 @@ export default function ReclassificationPage({ onBack }) {
                                           background: 'transparent',
                                           cursor: 'pointer',
                                           color: isDark ? '#f87171' : '#ef4444',
-                                          padding: '3px',
-                                          borderRadius: '5px',
+                                          padding: '2px',
+                                          borderRadius: '4px',
                                           display: 'inline-flex',
                                           alignItems: 'center',
                                           justifyContent: 'center',
@@ -5469,7 +6707,7 @@ export default function ReclassificationPage({ onBack }) {
                                         }}
                                         title={`Remove item ${item} from this batch`}
                                       >
-                                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
                                           <polyline points="3 6 5 6 21 6" />
                                           <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
                                         </svg>
@@ -5480,7 +6718,7 @@ export default function ReclassificationPage({ onBack }) {
                               })
                             ) : (
                               <tr>
-                                <td colSpan={5} style={{ padding: '26px', textAlign: 'center', color: isDark ? '#94a3b8' : '#64748b' }}>
+                                <td colSpan={5} style={{ padding: '20px', textAlign: 'center', color: isDark ? '#94a3b8' : '#64748b', fontSize: '11px' }}>
                                   No plantilla items found matching the selected filter.
                                 </td>
                               </tr>
@@ -5526,6 +6764,63 @@ export default function ReclassificationPage({ onBack }) {
                     </div>
                     <div style={{ fontSize: '12.5px', color: isDark ? '#94a3b8' : '#64748b', marginTop: '6px', maxWidth: '380px', lineHeight: 1.55 }}>
                       Upload an official DBM NOSCA PDF on the left. Once parsed, the extracted plantilla items, category breakdown, and item selection controls will appear here.
+                    </div>
+
+                    {/* Manual Entry Callout Option */}
+                    <div style={{
+                      marginTop: '20px',
+                      padding: '14px 18px',
+                      borderRadius: '12px',
+                      background: isDark ? 'rgba(99, 102, 241, 0.12)' : '#eef2ff',
+                      border: isDark ? '1px solid rgba(99, 102, 241, 0.3)' : '1px solid #c7d2fe',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '12px',
+                      maxWidth: '400px',
+                      textAlign: 'left'
+                    }}>
+                      <div style={{
+                        width: '38px',
+                        height: '38px',
+                        borderRadius: '10px',
+                        background: isDark ? 'rgba(99, 102, 241, 0.25)' : '#e0e7ff',
+                        color: isDark ? '#a5b4fc' : '#4f46e5',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0
+                      }}>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3">
+                          <path d="M12 20h9" />
+                          <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+                        </svg>
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: '13px', fontWeight: 800, color: isDark ? '#f8fafc' : '#1e1b4b' }}>
+                          Need to add item numbers manually?
+                        </div>
+                        <div style={{ fontSize: '11.5px', color: isDark ? '#94a3b8' : '#64748b', marginTop: '2px' }}>
+                          Enter or paste Plantilla / Item numbers directly without a PDF file.
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setNoscaInputMode('manual')}
+                        style={{
+                          padding: '7px 14px',
+                          borderRadius: '8px',
+                          border: 'none',
+                          background: 'linear-gradient(135deg, #4f46e5 0%, #6366f1 100%)',
+                          color: '#ffffff',
+                          fontSize: '11.5px',
+                          fontWeight: 750,
+                          cursor: 'pointer',
+                          boxShadow: '0 2px 8px rgba(79, 70, 229, 0.3)',
+                          whiteSpace: 'nowrap'
+                        }}
+                      >
+                        Add Manually
+                      </button>
                     </div>
                   </div>
                 )}
@@ -5579,6 +6874,9 @@ export default function ReclassificationPage({ onBack }) {
                         setSelectedNoscaItems([]);
                         setNoscaFileName('');
                         setNoscaSearchTerm('');
+                        setManuallyAddedNoscaItems(new Set());
+                        setManualNoscaItemInput('');
+                        setShowQuickAddInline(false);
                       }}
                       style={{
                         padding: '8px 14px',

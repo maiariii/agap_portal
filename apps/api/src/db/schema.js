@@ -587,18 +587,26 @@ export const incumbentGuidanceCounselors = pgTable("incumbent_guidance_counselor
 	}
 });
 
-export const incumbentAssessmentData = pgTable("incumbent_assessment_data", {
+export const reclassificationNoscaItems = pgTable("reclassification_nosca_items", {
 	id: serial("id").primaryKey().notNull(),
-	employeeId: text("employee_id").notNull().references(() => incumbentGuidanceCounselors.employeeId, { onDelete: "cascade" }),
-	education: text("education"),
-	yearsExperience: numeric("years_experience", { precision: 5, scale: 2 }),
-	hoursOfTraining: numeric("hours_of_training", { precision: 6, scale: 2 }),
-	eligibility: text("eligibility"),
-	documents: text("documents"),
+	serialNo: varchar("serial_no", { length: 100 }),
+	plantillaItemNumber: varchar("plantilla_item_number", { length: 150 }).notNull(),
+	category: varchar("category", { length: 50 }).default('ELEMENTARY'),
+	positionTitle: varchar("position_title", { length: 255 }).default('School Counselor Associate I'),
+	division: varchar("division", { length: 255 }),
+	schoolName: varchar("school_name", { length: 255 }),
+	assignmentStatus: varchar("assignment_status", { length: 50 }).default('AVAILABLE'),
+	assignedToIncumbentId: integer("assigned_to_incumbent_id").references(() => incumbentGuidanceCounselors.id, { onDelete: "set null" }),
+	assignedToEmployeeId: text("assigned_to_employee_id"),
+	assignedAt: timestamp("assigned_at", { withTimezone: true, mode: 'string' }),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow(),
 },
 (table) => {
 	return {
-		incumbentAssessmentDataEmployeeIdKey: unique("incumbent_assessment_data_employee_id_key").on(table.employeeId),
+		noscaItemNoIdx: index("idx_nosca_items_item_no").on(table.plantillaItemNumber),
+		noscaSerialIdx: index("idx_nosca_items_serial").on(table.serialNo),
+		noscaStatusIdx: index("idx_nosca_items_status").on(table.assignmentStatus),
+		noscaAssignedIdx: index("idx_nosca_items_assigned").on(table.assignedToIncumbentId),
 	}
 });

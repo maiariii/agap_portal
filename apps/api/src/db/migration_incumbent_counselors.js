@@ -3,7 +3,7 @@ import path from 'path';
 import { pool } from '../config/db.js';
 
 export async function runMigration() {
-  console.log('[Migration] Ensuring incumbent_guidance_counselors & incumbent_assessment_data schemas are up to date...');
+  console.log('[Migration] Ensuring incumbent_guidance_counselors schema is up to date...');
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -39,46 +39,21 @@ export async function runMigration() {
       ADD COLUMN IF NOT EXISTS plantilla_item_number VARCHAR(150),
       ADD COLUMN IF NOT EXISTS salary_grade VARCHAR(50),
       ADD COLUMN IF NOT EXISTS remarks TEXT,
+      ADD COLUMN IF NOT EXISTS dbm_status VARCHAR(100),
       ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW(),
       ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
     `);
 
-    // 2. Create incumbent_assessment_data table
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS incumbent_assessment_data (
-        id SERIAL PRIMARY KEY,
-        employee_id TEXT UNIQUE NOT NULL REFERENCES incumbent_guidance_counselors(employee_id) ON DELETE CASCADE,
-        education TEXT,
-        years_experience NUMERIC(5, 2),
-        hours_of_training NUMERIC(6, 2),
-        eligibility TEXT,
-        documents TEXT,
-        updated_at TIMESTAMPTZ DEFAULT NOW()
-      );
-    `);
-
-    await client.query(`
-      ALTER TABLE incumbent_assessment_data
-      ADD COLUMN IF NOT EXISTS employee_id TEXT,
-      ADD COLUMN IF NOT EXISTS education TEXT,
-      ADD COLUMN IF NOT EXISTS years_experience NUMERIC(5, 2),
-      ADD COLUMN IF NOT EXISTS hours_of_training NUMERIC(6, 2),
-      ADD COLUMN IF NOT EXISTS eligibility TEXT,
-      ADD COLUMN IF NOT EXISTS documents TEXT,
-      ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
-    `);
-
-    // 3. Create indexes for quick queries
+    // 2. Create indexes for quick queries
     await client.query(`
       CREATE INDEX IF NOT EXISTS idx_incumbent_emp_id ON incumbent_guidance_counselors(employee_id);
       CREATE INDEX IF NOT EXISTS idx_incumbent_stage ON incumbent_guidance_counselors(stage_of_reclassification);
       CREATE INDEX IF NOT EXISTS idx_incumbent_item_no ON incumbent_guidance_counselors(plantilla_item_number);
       CREATE INDEX IF NOT EXISTS idx_incumbent_region ON incumbent_guidance_counselors(region);
       CREATE INDEX IF NOT EXISTS idx_incumbent_division ON incumbent_guidance_counselors(division);
-      CREATE INDEX IF NOT EXISTS idx_incumbent_assessment_emp_id ON incumbent_assessment_data(employee_id);
     `);
 
-    // 4. Seed records from official CSV if empty or only has test sample
+    // 3. Seed records from official CSV if empty or only has test sample
     const checkCount = await client.query('SELECT COUNT(*) FROM incumbent_guidance_counselors');
     if (parseInt(checkCount.rows[0].count, 10) < 100) {
       console.log('[Migration] Importing official Inventory CSV into incumbent_guidance_counselors...');
@@ -87,7 +62,7 @@ export async function runMigration() {
     }
 
     await client.query('COMMIT');
-    console.log('[Migration] incumbent_guidance_counselors & incumbent_assessment_data schema ready!');
+    console.log('[Migration] incumbent_guidance_counselors schema ready!');
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('[Migration Error - Incumbent Guidance Counselors]', error.message);

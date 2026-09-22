@@ -11,6 +11,19 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 /**
+ * Check if the authenticated user has a Regional Office role/position
+ */
+function isUserRegionalOffice(req) {
+  const userRole = req.user?.role;
+  return (
+    userRole === 'regional_office' ||
+    userRole === 'regional_director' ||
+    (String(userRole || '').toLowerCase().includes('regional') && userRole !== 'admin') ||
+    String(req.user?.position || '').toLowerCase().trim() === 'regional office'
+  );
+}
+
+/**
  * Fetch all reclassification applications with applicant details
  */
 export async function getReclassApplications(req, res) {
@@ -143,6 +156,10 @@ export async function createReclassApplication(req, res) {
  */
 export async function reevaluateCSC(req, res) {
   try {
+    if (isUserRegionalOffice(req)) {
+      return res.status(403).json({ error: 'Access denied: Step 2 (Assessment Workbench) is restricted to Division HRMO.' });
+    }
+
     const { id } = req.params;
     const { csc_approved_qs_eval_result, evaluation_status, remarks } = req.body;
 
@@ -401,16 +418,10 @@ export async function getIncumbents(req, res) {
         g.remarks,
         g.stage_of_reclassification,
         g.reclass_position,
+        g.dbm_status,
         g.created_at,
-        g.updated_at,
-        a.education,
-        a.years_experience,
-        a.hours_of_training,
-        a.eligibility,
-        a.documents,
-        a.updated_at AS assessment_updated_at
+        g.updated_at
       FROM incumbent_guidance_counselors g
-      LEFT JOIN incumbent_assessment_data a ON g.employee_id = a.employee_id
       WHERE 1=1
     `;
 
@@ -451,15 +462,6 @@ export async function getIncumbents(req, res) {
     const result = await pool.query(query, params);
 
     const formatted = result.rows.map(row => {
-      let parsedDocs = [];
-      if (row.documents) {
-        try {
-          parsedDocs = typeof row.documents === 'string' ? JSON.parse(row.documents) : row.documents;
-        } catch (e) {
-          parsedDocs = [];
-        }
-      }
-
       return {
         id: row.id,
         employee_id: row.employee_id,
@@ -475,15 +477,16 @@ export async function getIncumbents(req, res) {
         remarks: row.remarks,
         stage_of_reclassification: row.stage_of_reclassification,
         reclass_position: row.reclass_position,
+        dbm_status: row.dbm_status || null,
         created_at: row.created_at,
         updated_at: row.updated_at,
         assessment: {
-          education: row.education,
-          years_experience: row.years_experience !== null ? parseFloat(row.years_experience) : null,
-          hours_of_training: row.hours_of_training !== null ? parseFloat(row.hours_of_training) : null,
-          eligibility: row.eligibility,
-          documents: parsedDocs,
-          updated_at: row.assessment_updated_at
+          education: null,
+          years_experience: null,
+          hours_of_training: null,
+          eligibility: null,
+          documents: [],
+          updated_at: null
         }
       };
     });
@@ -500,6 +503,10 @@ export async function getIncumbents(req, res) {
  */
 export async function updateIncumbentStage(req, res) {
   try {
+    if (isUserRegionalOffice(req)) {
+      return res.status(403).json({ error: 'Access denied: Step 2 (Assessment Workbench) is restricted to Division HRMO.' });
+    }
+
     const { id } = req.params;
     const { stage_of_reclassification } = req.body;
 
@@ -534,6 +541,10 @@ export async function updateIncumbentStage(req, res) {
  */
 export async function updateIncumbentPosition(req, res) {
   try {
+    if (isUserRegionalOffice(req)) {
+      return res.status(403).json({ error: 'Access denied: Step 2 (Assessment Workbench) is restricted to Division HRMO.' });
+    }
+
     const { id } = req.params;
     const { reclass_position } = req.body;
 
@@ -566,6 +577,148 @@ export async function updateIncumbentPosition(req, res) {
 }
 
 /**
+ * Update incumbent counselor's DBM status ('With DBM Request' or 'With DBM NOSCA')
+ * and assign / link corresponding plantilla item in reclassification_nosca_items
+ */
+export async function updateIncumbentDbmStatus(req, res) {
+  let client;
+  try {
+    const { id } = req.params;
+    const { dbm_status, plantilla_item_number } = req.body;
+
+    const validDbmStatuses = ['With DBM Request', 'With DBM NOSCA', 'None', null, ''];
+    if (dbm_status && !validDbmStatuses.includes(dbm_status)) {
+      return res.status(400).json({
+        error: `Invalid dbm_status. Must be 'With DBM Request', 'With DBM NOSCA', or empty.`
+      });
+    }
+
+    const valueToSet = (dbm_status === 'None' || dbm_status === '' || dbm_status === undefined) ? null : dbm_status;
+    const isNosca = valueToSet === 'With DBM NOSCA';
+    const cleanItemNo = (typeof plantilla_item_number === 'string' && plantilla_item_number.trim()) ? plantilla_item_number.trim() : null;
+
+    client = await pool.connect();
+    await client.query('BEGIN');
+
+    // Retrieve incumbent counselor details
+    const incRes = await client.query('SELECT * FROM incumbent_guidance_counselors WHERE id = $1', [id]);
+    if (incRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Incumbent counselor not found' });
+    }
+    const incumbent = incRes.rows[0];
+
+    // Release any previous NOSCA item assigned to this incumbent if changing item or unsetting NOSCA
+    if (!isNosca || (cleanItemNo && incumbent.plantilla_item_number !== cleanItemNo)) {
+      await client.query(
+        `UPDATE reclassification_nosca_items
+         SET assignment_status = 'AVAILABLE',
+             assigned_to_incumbent_id = NULL,
+             assigned_to_employee_id = NULL,
+             assigned_at = NULL,
+             updated_at = NOW()
+         WHERE assigned_to_incumbent_id = $1`,
+        [id]
+      );
+    }
+
+    let updateQuery;
+    let queryParams;
+
+    if (isNosca && cleanItemNo) {
+      updateQuery = `
+        UPDATE incumbent_guidance_counselors
+        SET dbm_status = $1,
+            stage_of_reclassification = 'Approved',
+            plantilla_item_number = $2,
+            updated_at = NOW()
+        WHERE id = $3
+        RETURNING *;
+      `;
+      queryParams = [valueToSet, cleanItemNo, id];
+    } else if (isNosca) {
+      updateQuery = `
+        UPDATE incumbent_guidance_counselors
+        SET dbm_status = $1,
+            stage_of_reclassification = 'Approved',
+            updated_at = NOW()
+        WHERE id = $2
+        RETURNING *;
+      `;
+      queryParams = [valueToSet, id];
+    } else {
+      updateQuery = `
+        UPDATE incumbent_guidance_counselors
+        SET dbm_status = $1,
+            updated_at = NOW()
+        WHERE id = $2
+        RETURNING *;
+      `;
+      queryParams = [valueToSet, id];
+    }
+
+    const result = await client.query(updateQuery, queryParams);
+    const updatedIncumbent = result.rows[0];
+
+    // If With DBM NOSCA and cleanItemNo, link and mark item in reclassification_nosca_items as ASSIGNED
+    if (isNosca && cleanItemNo) {
+      const updateItemRes = await client.query(
+        `UPDATE reclassification_nosca_items
+         SET assignment_status = 'ASSIGNED',
+             assigned_to_incumbent_id = $1,
+             assigned_to_employee_id = $2,
+             assigned_at = NOW(),
+             updated_at = NOW()
+         WHERE plantilla_item_number = $3`,
+        [id, incumbent.employee_id, cleanItemNo]
+      );
+
+      // If the item wasn't in reclassification_nosca_items yet (e.g. manually entered), insert it as ASSIGNED
+      if (updateItemRes.rowCount === 0) {
+        await client.query(
+          `INSERT INTO reclassification_nosca_items (
+            serial_no,
+            plantilla_item_number,
+            category,
+            position_title,
+            division,
+            school_name,
+            assignment_status,
+            assigned_to_incumbent_id,
+            assigned_to_employee_id,
+            assigned_at,
+            created_at,
+            updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW(), NOW())`,
+          [
+            'MANUAL-ASSIGNMENT',
+            cleanItemNo,
+            'ELEMENTARY',
+            incumbent.reclass_position || 'School Counselor Associate I',
+            incumbent.division || incumbent.station_division || 'SDO Station',
+            incumbent.station_division || incumbent.division || 'SDO Station',
+            'ASSIGNED',
+            id,
+            incumbent.employee_id
+          ]
+        );
+      }
+    }
+
+    await client.query('COMMIT');
+    res.json(updatedIncumbent);
+  } catch (error) {
+    if (client) {
+      try { await client.query('ROLLBACK'); } catch (_) {}
+    }
+    console.error('[Reclass Controller - updateIncumbentDbmStatus]', error);
+    res.status(500).json({ error: error.message || 'Failed to update DBM status' });
+  } finally {
+    if (client) client.release();
+  }
+}
+
+/**
  * Retrieve document attachments for an incumbent counselor
  */
 export async function getIncumbentDocuments(req, res) {
@@ -576,10 +729,8 @@ export async function getIncumbentDocuments(req, res) {
       SELECT 
         g.id,
         g.employee_id,
-        g.full_name,
-        a.documents
+        g.full_name
       FROM incumbent_guidance_counselors g
-      LEFT JOIN incumbent_assessment_data a ON g.employee_id = a.employee_id
       WHERE g.id = $1
     `;
 
@@ -589,22 +740,11 @@ export async function getIncumbentDocuments(req, res) {
       return res.status(404).json({ error: 'Incumbent counselor not found' });
     }
 
-    let docs = [];
-    if (result.rows[0].documents) {
-      try {
-        docs = typeof result.rows[0].documents === 'string'
-          ? JSON.parse(result.rows[0].documents)
-          : result.rows[0].documents;
-      } catch (e) {
-        docs = [];
-      }
-    }
-
     res.json({
       incumbent_id: result.rows[0].id,
       employee_id: result.rows[0].employee_id,
       full_name: result.rows[0].full_name,
-      documents: docs
+      documents: []
     });
   } catch (error) {
     console.error('[Reclass Controller - getIncumbentDocuments]', error);
@@ -665,6 +805,10 @@ function parseCSVRows(csvText) {
 export async function uploadReclassCsv(req, res) {
   let client;
   try {
+    if (isUserRegionalOffice(req)) {
+      return res.status(403).json({ error: 'Access denied: Step 1 (Inventory CSV Ingestion) is restricted to Division HRMO.' });
+    }
+
     const { csvContent, fileName, useDefaultFile, replaceExisting } = req.body;
     let rawCsv = '';
 
@@ -987,7 +1131,59 @@ export async function scanReclassNosca(req, res) {
 }
 
 /**
- * Commit selected NOSCA plantilla items into incumbent_guidance_counselors
+ * Retrieve NOSCA plantilla items from reclassification_nosca_items table
+ */
+export async function getNoscaItems(req, res) {
+  try {
+    const { status, division, serialNo } = req.query;
+
+    let query = `
+      SELECT 
+        id,
+        serial_no,
+        plantilla_item_number,
+        category,
+        position_title,
+        division,
+        school_name,
+        assignment_status,
+        assigned_to_incumbent_id,
+        assigned_to_employee_id,
+        assigned_at,
+        created_at,
+        updated_at
+      FROM reclassification_nosca_items
+      WHERE 1=1
+    `;
+    const params = [];
+
+    if (status) {
+      params.push(status.toUpperCase());
+      query += ` AND assignment_status = $${params.length}`;
+    }
+
+    if (division && division !== 'ALL') {
+      params.push(`%${division}%`);
+      query += ` AND division ILIKE $${params.length}`;
+    }
+
+    if (serialNo) {
+      params.push(serialNo);
+      query += ` AND serial_no = $${params.length}`;
+    }
+
+    query += ` ORDER BY id ASC`;
+
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('[Reclass Controller - getNoscaItems]', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch NOSCA items' });
+  }
+}
+
+/**
+ * Commit selected NOSCA plantilla items into reclassification_nosca_items table
  */
 export async function importNoscaItems(req, res) {
   let client;
@@ -1003,7 +1199,7 @@ export async function importNoscaItems(req, res) {
       return res.status(403).json({ error: 'Access denied: Only Regional Office personnel may import NOSCA items.' });
     }
 
-    const { serialNo, division, schoolName, position, items } = req.body;
+    const { serialNo, division, schoolName, position, items, categoryBreakdown } = req.body;
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'No plantilla items selected for import.' });
     }
@@ -1014,70 +1210,68 @@ export async function importNoscaItems(req, res) {
     let inserted = 0;
     let updated = 0;
 
+    // Helper to determine category for an item if breakdown is provided
+    const getCategoryForItem = (itemNo) => {
+      if (categoryBreakdown && typeof categoryBreakdown === 'object') {
+        for (const [catKey, catItems] of Object.entries(categoryBreakdown)) {
+          if (Array.isArray(catItems) && catItems.includes(itemNo)) {
+            return catKey;
+          }
+        }
+      }
+      return 'ELEMENTARY';
+    };
+
     for (const itemNo of items) {
       const trimmedItem = String(itemNo).trim();
       if (!trimmedItem) continue;
 
-      // Check if item already exists in database
+      const itemCategory = getCategoryForItem(trimmedItem);
+      const divName = division 
+        ? (division.toLowerCase().startsWith('division') ? division : `Division of ${division}`) 
+        : 'Regional Office';
+      const schName = schoolName || 'Regional Allocation Station';
+
+      // Check if item already exists in reclassification_nosca_items
       const existing = await client.query(
-        'SELECT id, employee_id, remarks, reclass_position FROM incumbent_guidance_counselors WHERE plantilla_item_number = $1 LIMIT 1',
+        'SELECT id, assignment_status, assigned_to_incumbent_id FROM reclassification_nosca_items WHERE plantilla_item_number = $1 LIMIT 1',
         [trimmedItem]
       );
 
       if (existing.rows.length > 0) {
         const row = existing.rows[0];
-        const existingRemarks = row.remarks || '';
-        const noscaTag = `NOSCA Ref: ${serialNo || 'N/A'}`;
-        const newRemarks = existingRemarks.includes(noscaTag)
-          ? existingRemarks
-          : (existingRemarks ? `${existingRemarks} | ${noscaTag}` : noscaTag);
-
         await client.query(
-          `UPDATE incumbent_guidance_counselors
-           SET reclass_position = COALESCE($1, reclass_position),
-               remarks = $2,
+          `UPDATE reclassification_nosca_items
+           SET serial_no = COALESCE($1, serial_no),
+               division = COALESCE($2, division),
+               school_name = COALESCE($3, school_name),
+               position_title = COALESCE($4, position_title),
+               category = COALESCE($5, category),
                updated_at = NOW()
-           WHERE id = $3`,
-          [position || 'School Counselor Associate I', newRemarks, row.id]
+           WHERE id = $6`,
+          [serialNo || null, divName, schName, position || 'School Counselor Associate I', itemCategory, row.id]
         );
         updated++;
       } else {
-        const generatedEmpId = `NOSCA-${Date.now().toString().slice(-5)}-${Math.floor(1000 + Math.random() * 9000)}`;
-        const divName = division 
-          ? (division.toLowerCase().startsWith('division') ? division : `Division of ${division}`) 
-          : 'Regional Office';
-        const schName = schoolName || 'Regional Allocation Station';
-
         await client.query(
-          `INSERT INTO incumbent_guidance_counselors (
-            employee_id,
+          `INSERT INTO reclassification_nosca_items (
+            serial_no,
             plantilla_item_number,
-            full_name,
-            current_position,
-            salary_grade,
-            region,
+            category,
+            position_title,
             division,
-            uacs_oper_dsc,
-            station_division,
-            remarks,
-            stage_of_reclassification,
-            reclass_position,
+            school_name,
+            assignment_status,
             created_at,
             updated_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW())`,
+          ) VALUES ($1, $2, $3, $4, $5, $6, 'AVAILABLE', NOW(), NOW())`,
           [
-            generatedEmpId,
+            serialNo || null,
             trimmedItem,
-            'UNFILLED ITEM (NOSCA)',
-            'School Counselor (Unfilled)',
-            '16',
-            'National Capital Region (NCR)',
+            itemCategory,
+            position || 'School Counselor Associate I',
             divName,
-            schName,
-            divName,
-            `Allocated under NOSCA Serial: ${serialNo || 'N/A'}`,
-            'For Review',
-            position || 'School Counselor Associate I'
+            schName
           ]
         );
         inserted++;
@@ -1088,7 +1282,7 @@ export async function importNoscaItems(req, res) {
 
     return res.json({
       success: true,
-      message: `Successfully imported ${items.length} plantilla items (${inserted} newly created, ${updated} existing updated).`,
+      message: `Successfully registered ${items.length} NOSCA plantilla items (${inserted} newly allocated, ${updated} existing updated).`,
       inserted,
       updated,
       total: items.length
