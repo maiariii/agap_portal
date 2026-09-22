@@ -461,24 +461,26 @@ export async function getIncumbents(req, res) {
 
     const result = await pool.query(query, params);
 
-    // Fetch assessment records for incumbents
-    const assessmentsRes = await pool.query('SELECT * FROM incumbent_assessment_data');
-    const assessmentMap = new Map();
-    assessmentsRes.rows.forEach(row => {
-      assessmentMap.set(row.employee_id, {
-        education: row.education,
-        years_experience: row.years_experience ? parseFloat(row.years_experience) : null,
-        hours_of_training: row.hours_of_training ? parseFloat(row.hours_of_training) : null,
-        eligibility: row.eligibility,
-        documents: row.documents ? (typeof row.documents === 'string' ? JSON.parse(row.documents) : row.documents) : []
-      });
-    });
-
     const formatted = result.rows.map(row => {
-      const assessment = assessmentMap.get(row.employee_id);
       return {
-        ...row,
-        assessment: assessment || {
+        id: row.id,
+        employee_id: row.employee_id,
+        plantilla_item_number: row.plantilla_item_number,
+        full_name: row.full_name,
+        current_position: row.current_position,
+        salary_grade: row.salary_grade,
+        region: row.region,
+        division: row.division,
+        uacs_oper_dsc: row.uacs_oper_dsc,
+        station_division: row.station_division,
+        org_cd: row.org_cd,
+        remarks: row.remarks,
+        stage_of_reclassification: row.stage_of_reclassification,
+        reclass_position: row.reclass_position,
+        dbm_status: row.dbm_status || null,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        assessment: {
           education: 'Bachelor of Science in Psychology / Guidance Counseling',
           years_experience: 5.0,
           hours_of_training: 40.0,
