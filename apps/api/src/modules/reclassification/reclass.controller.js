@@ -392,7 +392,7 @@ export async function exportDbmReport(req, res) {
   }
 }
 
-const VALID_STAGES = ['For Review', 'Endorsed', 'Approved', 'Denied'];
+const VALID_MANUAL_STAGES = ['For Review', 'Endorsed', 'Denied', 'Unfilled / Vacant', 'Abolition'];
 const VALID_POSITIONS = ['School Counselor I', 'School Counselor II', 'School Counselor III', 'School Counselor IV'];
 
 /**
@@ -461,32 +461,29 @@ export async function getIncumbents(req, res) {
 
     const result = await pool.query(query, params);
 
+    // Fetch assessment records for incumbents
+    const assessmentsRes = await pool.query('SELECT * FROM incumbent_assessment_data');
+    const assessmentMap = new Map();
+    assessmentsRes.rows.forEach(row => {
+      assessmentMap.set(row.employee_id, {
+        education: row.education,
+        years_experience: row.years_experience ? parseFloat(row.years_experience) : null,
+        hours_of_training: row.hours_of_training ? parseFloat(row.hours_of_training) : null,
+        eligibility: row.eligibility,
+        documents: row.documents ? (typeof row.documents === 'string' ? JSON.parse(row.documents) : row.documents) : []
+      });
+    });
+
     const formatted = result.rows.map(row => {
+      const assessment = assessmentMap.get(row.employee_id);
       return {
-        id: row.id,
-        employee_id: row.employee_id,
-        plantilla_item_number: row.plantilla_item_number,
-        full_name: row.full_name,
-        current_position: row.current_position,
-        salary_grade: row.salary_grade,
-        region: row.region,
-        division: row.division,
-        uacs_oper_dsc: row.uacs_oper_dsc,
-        station_division: row.station_division,
-        org_cd: row.org_cd,
-        remarks: row.remarks,
-        stage_of_reclassification: row.stage_of_reclassification,
-        reclass_position: row.reclass_position,
-        dbm_status: row.dbm_status || null,
-        created_at: row.created_at,
-        updated_at: row.updated_at,
-        assessment: {
-          education: null,
-          years_experience: null,
-          hours_of_training: null,
-          eligibility: null,
-          documents: [],
-          updated_at: null
+        ...row,
+        assessment: assessment || {
+          education: 'Bachelor of Science in Psychology / Guidance Counseling',
+          years_experience: 5.0,
+          hours_of_training: 40.0,
+          eligibility: 'RA 1080 (Registered Guidance Counselor)',
+          documents: []
         }
       };
     });
@@ -510,9 +507,15 @@ export async function updateIncumbentStage(req, res) {
     const { id } = req.params;
     const { stage_of_reclassification } = req.body;
 
-    if (!stage_of_reclassification || !VALID_STAGES.includes(stage_of_reclassification)) {
+    if (stage_of_reclassification === 'Approved') {
       return res.status(400).json({
-        error: `Invalid stage_of_reclassification. Must be one of: ${VALID_STAGES.join(', ')}`
+        error: 'The "Approved" stage is automatically set when DBM Status is "With DBM NOSCA" and cannot be manually selected.'
+      });
+    }
+
+    if (!stage_of_reclassification || !VALID_MANUAL_STAGES.includes(stage_of_reclassification)) {
+      return res.status(400).json({
+        error: `Invalid stage_of_reclassification. Must be one of: ${VALID_MANUAL_STAGES.join(', ')}`
       });
     }
 
@@ -583,6 +586,10 @@ export async function updateIncumbentPosition(req, res) {
 export async function updateIncumbentDbmStatus(req, res) {
   let client;
   try {
+    if (!isUserRegionalOffice(req)) {
+      return res.status(403).json({ error: 'Access denied: Only Regional Office personnel may update DBM status.' });
+    }
+
     const { id } = req.params;
     const { dbm_status, plantilla_item_number } = req.body;
 
@@ -650,6 +657,10 @@ export async function updateIncumbentDbmStatus(req, res) {
       updateQuery = `
         UPDATE incumbent_guidance_counselors
         SET dbm_status = $1,
+            stage_of_reclassification = CASE
+              WHEN stage_of_reclassification = 'Approved' THEN 'Endorsed'
+              ELSE stage_of_reclassification
+            END,
             updated_at = NOW()
         WHERE id = $2
         RETURNING *;

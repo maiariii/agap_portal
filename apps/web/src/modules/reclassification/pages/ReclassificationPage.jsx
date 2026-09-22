@@ -8,7 +8,8 @@ import HqBackground from '../../../components/HqBackground.jsx';
 import ThemeToggle from '../../../components/ThemeToggle.jsx';
 import { useTheme } from '../../../middleware/ThemeProvider.jsx';
 
-const RECLASS_STAGES = ['For Review', 'Endorsed', 'Approved', 'Denied', 'Unfilled / Vacant', 'Abolition'];
+const ALL_RECLASS_STAGES = ['For Review', 'Endorsed', 'Approved', 'Denied', 'Unfilled / Vacant', 'Abolition'];
+const RECLASS_STAGES = ['For Review', 'Endorsed', 'Denied', 'Unfilled / Vacant', 'Abolition'];
 const RECLASS_POSITIONS_OPTIONS = ['School Counselor I', 'School Counselor II', 'School Counselor III', 'School Counselor IV'];
 
 export default function ReclassificationPage({ onBack }) {
@@ -2653,7 +2654,7 @@ export default function ReclassificationPage({ onBack }) {
                 }}
               >
                 <option value="" style={{ background: 'var(--card)', color: 'var(--text)' }}>All Reclassification Stages</option>
-                {RECLASS_STAGES.map(s => (
+                {ALL_RECLASS_STAGES.map(s => (
                   <option key={s} value={s} style={{ background: 'var(--card)', color: 'var(--text)' }}>{s}</option>
                 ))}
               </select>
@@ -2990,7 +2991,7 @@ export default function ReclassificationPage({ onBack }) {
                               <select
                                 value={inc.stage_of_reclassification || 'For Review'}
                                 onChange={e => handleUpdateIncumbentStage(inc.id, e.target.value, e)}
-                                disabled={updatingStageId === inc.id}
+                                disabled={updatingStageId === inc.id || inc.stage_of_reclassification === 'Approved'}
                                 style={{
                                   padding: '5px 10px',
                                   borderRadius: '8px',
@@ -2999,13 +3000,20 @@ export default function ReclassificationPage({ onBack }) {
                                   color: badgeStyle.text,
                                   fontSize: '12px',
                                   fontWeight: 750,
-                                  cursor: 'pointer',
-                                  outline: 'none'
+                                  cursor: inc.stage_of_reclassification === 'Approved' ? 'not-allowed' : 'pointer',
+                                  outline: 'none',
+                                  opacity: inc.stage_of_reclassification === 'Approved' ? 0.9 : 1
                                 }}
+                                title={inc.stage_of_reclassification === 'Approved' ? 'Stage is Approved automatically when DBM Status is "With DBM NOSCA"' : 'Select stage of reclassification'}
                               >
                                 {RECLASS_STAGES.map(s => (
                                   <option key={s} value={s} style={{ background: 'var(--card)', color: 'var(--text)' }}>{s}</option>
                                 ))}
+                                {inc.stage_of_reclassification === 'Approved' && (
+                                  <option value="Approved" disabled style={{ background: 'var(--card)', color: 'var(--text)' }}>
+                                    ✓ Approved (via DBM NOSCA)
+                                  </option>
+                                )}
                               </select>
                               {updatingStageId === inc.id && (
                                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2.5" style={{ animation: 'spin 1s linear infinite' }}>
@@ -3516,76 +3524,149 @@ export default function ReclassificationPage({ onBack }) {
                           </td>
                           <td style={{ padding: '8px 14px', verticalAlign: 'middle' }} onClick={e => e.stopPropagation()}>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                                <select
-                                  value={counselor.dbm_status || ''}
-                                  onChange={e => handleDbmStatusSelectChange(counselor, e.target.value, e)}
-                                  disabled={updatingDbmStatusId === counselor.id}
-                                  style={{
-                                    padding: '5px 10px',
-                                    borderRadius: '8px',
-                                    border: counselor.dbm_status === 'With DBM NOSCA'
-                                      ? (isDark ? '1.5px solid rgba(16, 185, 129, 0.6)' : '1.5px solid #10b981')
-                                      : counselor.dbm_status === 'With DBM Request'
-                                        ? (isDark ? '1.5px solid rgba(59, 130, 246, 0.6)' : '1.5px solid #3b82f6')
-                                        : (isDark ? '1px solid rgba(71, 85, 105, 0.6)' : '1px solid #cbd5e1'),
-                                    background: counselor.dbm_status === 'With DBM NOSCA'
-                                      ? (isDark ? 'rgba(6, 78, 59, 0.35)' : '#ecfdf5')
-                                      : counselor.dbm_status === 'With DBM Request'
-                                        ? (isDark ? 'rgba(30, 58, 138, 0.35)' : '#eff6ff')
-                                        : (isDark ? 'rgba(30, 41, 59, 0.6)' : '#ffffff'),
-                                    color: counselor.dbm_status === 'With DBM NOSCA'
-                                      ? (isDark ? '#6ee7b7' : '#047857')
-                                      : counselor.dbm_status === 'With DBM Request'
-                                        ? (isDark ? '#93c5fd' : '#1d4ed8')
-                                        : (isDark ? '#94a3b8' : '#64748b'),
-                                    fontSize: '12px',
-                                    fontWeight: 750,
-                                    cursor: updatingDbmStatusId === counselor.id ? 'not-allowed' : 'pointer',
-                                    outline: 'none'
-                                  }}
-                                >
-                                  <option value="" style={{ background: 'var(--card)', color: 'var(--text)' }}>-- Select Status --</option>
-                                  <option value="With DBM Request" style={{ background: 'var(--card)', color: 'var(--text)' }}>With DBM Request</option>
-                                  <option value="With DBM NOSCA" style={{ background: 'var(--card)', color: 'var(--text)' }}>With DBM NOSCA</option>
-                                </select>
-                                {updatingDbmStatusId === counselor.id && (
-                                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2.5" style={{ animation: 'spin 1s linear infinite' }}>
-                                    <circle cx="12" cy="12" r="10" strokeDasharray="32" strokeDashoffset="10" />
-                                  </svg>
-                                )}
-                              </div>
+                              {isRegionalOffice ? (
+                                <>
+                                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                                    <select
+                                      value={counselor.dbm_status || ''}
+                                      onChange={e => handleDbmStatusSelectChange(counselor, e.target.value, e)}
+                                      disabled={updatingDbmStatusId === counselor.id}
+                                      style={{
+                                        padding: '5px 10px',
+                                        borderRadius: '8px',
+                                        border: counselor.dbm_status === 'With DBM NOSCA'
+                                          ? (isDark ? '1.5px solid rgba(16, 185, 129, 0.6)' : '1.5px solid #10b981')
+                                          : counselor.dbm_status === 'With DBM Request'
+                                            ? (isDark ? '1.5px solid rgba(59, 130, 246, 0.6)' : '1.5px solid #3b82f6')
+                                            : (isDark ? '1px solid rgba(71, 85, 105, 0.6)' : '1px solid #cbd5e1'),
+                                        background: counselor.dbm_status === 'With DBM NOSCA'
+                                          ? (isDark ? 'rgba(6, 78, 59, 0.35)' : '#ecfdf5')
+                                          : counselor.dbm_status === 'With DBM Request'
+                                            ? (isDark ? 'rgba(30, 58, 138, 0.35)' : '#eff6ff')
+                                            : (isDark ? 'rgba(30, 41, 59, 0.6)' : '#ffffff'),
+                                        color: counselor.dbm_status === 'With DBM NOSCA'
+                                          ? (isDark ? '#6ee7b7' : '#047857')
+                                          : counselor.dbm_status === 'With DBM Request'
+                                            ? (isDark ? '#93c5fd' : '#1d4ed8')
+                                            : (isDark ? '#94a3b8' : '#64748b'),
+                                        fontSize: '12px',
+                                        fontWeight: 750,
+                                        cursor: updatingDbmStatusId === counselor.id ? 'not-allowed' : 'pointer',
+                                        outline: 'none'
+                                      }}
+                                    >
+                                      <option value="" style={{ background: 'var(--card)', color: 'var(--text)' }}>-- Select Status --</option>
+                                      <option value="With DBM Request" style={{ background: 'var(--card)', color: 'var(--text)' }}>With DBM Request</option>
+                                      <option value="With DBM NOSCA" style={{ background: 'var(--card)', color: 'var(--text)' }}>With DBM NOSCA</option>
+                                    </select>
+                                    {updatingDbmStatusId === counselor.id && (
+                                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2.5" style={{ animation: 'spin 1s linear infinite' }}>
+                                        <circle cx="12" cy="12" r="10" strokeDasharray="32" strokeDashoffset="10" />
+                                      </svg>
+                                    )}
+                                  </div>
 
-                              {counselor.dbm_status === 'With DBM NOSCA' && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    const currentItem = (counselor.plantilla_item_number || '').trim();
-                                    const isItemNA = !currentItem || currentItem.toUpperCase() === '#N/A' || currentItem.toUpperCase() === 'N/A';
-                                    setNoscaItemAssignModal({ open: true, personnel: counselor });
-                                    setSelectedNoscaItemNo(isItemNA ? '' : currentItem);
-                                    setCustomPlantillaNo(isItemNA ? '' : currentItem);
-                                    setIsCustomItemNo(isItemNA || availableNoscaItemOptions.length === 0);
-                                    setItemSearchTerm('');
-                                  }}
-                                  style={{
-                                    background: 'none',
-                                    border: 'none',
-                                    padding: '0',
-                                    color: isDark ? '#93c5fd' : '#2563eb',
-                                    fontSize: '11px',
-                                    fontWeight: 700,
-                                    cursor: 'pointer',
-                                    textAlign: 'left',
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: '4px',
-                                    textDecoration: 'underline'
-                                  }}
-                                  title="Click to select or assign specific DBM NOSCA Item No."
-                                >
-                                  ✏️ {counselor.plantilla_item_number ? `Assigned: ${counselor.plantilla_item_number}` : 'Assign Item No.'}
-                                </button>
+                                  {counselor.dbm_status === 'With DBM NOSCA' && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const currentItem = (counselor.plantilla_item_number || '').trim();
+                                        const isItemNA = !currentItem || currentItem.toUpperCase() === '#N/A' || currentItem.toUpperCase() === 'N/A';
+                                        setNoscaItemAssignModal({ open: true, personnel: counselor });
+                                        setSelectedNoscaItemNo(isItemNA ? '' : currentItem);
+                                        setCustomPlantillaNo(isItemNA ? '' : currentItem);
+                                        setIsCustomItemNo(isItemNA || availableNoscaItemOptions.length === 0);
+                                        setItemSearchTerm('');
+                                      }}
+                                      style={{
+                                        background: 'none',
+                                        border: 'none',
+                                        padding: '0',
+                                        color: isDark ? '#93c5fd' : '#2563eb',
+                                        fontSize: '11px',
+                                        fontWeight: 700,
+                                        cursor: 'pointer',
+                                        textAlign: 'left',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '4px',
+                                        textDecoration: 'underline'
+                                      }}
+                                      title="Click to select or assign specific DBM NOSCA Item No."
+                                    >
+                                      ✏️ {counselor.plantilla_item_number ? `Assigned: ${counselor.plantilla_item_number}` : 'Assign Item No.'}
+                                    </button>
+                                  )}
+                                </>
+                              ) : (
+                                /* Read-only for HRMO: Display only the resulting DBM status badge */
+                                <div style={{ display: 'inline-flex', flexDirection: 'column', gap: '3px', alignItems: 'flex-start' }}>
+                                  {counselor.dbm_status === 'With DBM NOSCA' ? (
+                                    <span style={{
+                                      padding: '4px 10px',
+                                      borderRadius: '6px',
+                                      fontSize: '11.5px',
+                                      fontWeight: 800,
+                                      background: isDark ? 'rgba(16, 185, 129, 0.2)' : '#ecfdf5',
+                                      color: isDark ? '#6ee7b7' : '#047857',
+                                      border: isDark ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #a7f3d0',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '5px'
+                                    }}>
+                                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                        <polyline points="20 6 9 17 4 12" />
+                                      </svg>
+                                      With DBM NOSCA
+                                    </span>
+                                  ) : counselor.dbm_status === 'With DBM Request' ? (
+                                    <span style={{
+                                      padding: '4px 10px',
+                                      borderRadius: '6px',
+                                      fontSize: '11.5px',
+                                      fontWeight: 800,
+                                      background: isDark ? 'rgba(59, 130, 246, 0.2)' : '#eff6ff',
+                                      color: isDark ? '#93c5fd' : '#1d4ed8',
+                                      border: isDark ? '1px solid rgba(59, 130, 246, 0.4)' : '1px solid #bfdbfe',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '5px'
+                                    }}>
+                                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                        <circle cx="12" cy="12" r="10" />
+                                        <polyline points="12 6 12 12 16 14" />
+                                      </svg>
+                                      With DBM Request
+                                    </span>
+                                  ) : (
+                                    <span style={{
+                                      padding: '3px 8px',
+                                      borderRadius: '6px',
+                                      fontSize: '11px',
+                                      fontWeight: 650,
+                                      background: isDark ? 'rgba(71, 85, 105, 0.2)' : '#f1f5f9',
+                                      color: isDark ? '#94a3b8' : '#64748b',
+                                      border: isDark ? '1px solid rgba(71, 85, 105, 0.3)' : '1px solid #e2e8f0',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '4px'
+                                    }}>
+                                      Pending DBM Action
+                                    </span>
+                                  )}
+
+                                  {counselor.dbm_status === 'With DBM NOSCA' && counselor.plantilla_item_number && counselor.plantilla_item_number !== '#N/A' && counselor.plantilla_item_number !== 'N/A' && (
+                                    <span style={{
+                                      fontSize: '10.5px',
+                                      color: isDark ? '#94a3b8' : '#64748b',
+                                      fontWeight: 700,
+                                      fontFamily: 'monospace',
+                                      marginLeft: '2px'
+                                    }}>
+                                      Item: {counselor.plantilla_item_number}
+                                    </span>
+                                  )}
+                                </div>
                               )}
                             </div>
                           </td>
@@ -5008,7 +5089,7 @@ export default function ReclassificationPage({ onBack }) {
                     <select
                       value={modalStage}
                       onChange={e => setModalStage(e.target.value)}
-                      disabled={isRegionalOffice || savingModalChanges}
+                      disabled={isRegionalOffice || savingModalChanges || selectedIncumbent?.stage_of_reclassification === 'Approved'}
                       style={{
                         width: '100%',
                         padding: '10px 14px',
@@ -5018,17 +5099,26 @@ export default function ReclassificationPage({ onBack }) {
                         fontSize: '13.5px',
                         fontWeight: 700,
                         color: 'var(--input-text, var(--text))',
-                        cursor: isRegionalOffice ? 'not-allowed' : 'pointer',
+                        cursor: (isRegionalOffice || selectedIncumbent?.stage_of_reclassification === 'Approved') ? 'not-allowed' : 'pointer',
                         outline: 'none',
-                        opacity: isRegionalOffice ? 0.85 : 1
+                        opacity: (isRegionalOffice || selectedIncumbent?.stage_of_reclassification === 'Approved') ? 0.85 : 1
                       }}
                     >
                       {RECLASS_STAGES.map(stage => (
                         <option key={stage} value={stage} style={{ background: 'var(--card)', color: 'var(--text)' }}>{stage}</option>
                       ))}
+                      {selectedIncumbent?.stage_of_reclassification === 'Approved' && (
+                        <option value="Approved" disabled style={{ background: 'var(--card)', color: 'var(--text)' }}>
+                          ✓ Approved (via DBM NOSCA)
+                        </option>
+                      )}
                     </select>
                     <span style={{ fontSize: '11px', color: 'var(--text-secondary, #94a3b8)', display: 'block', marginTop: '4px' }}>
-                      {isRegionalOffice ? 'Workflow endorsement status recorded by Division HRMO.' : 'Workflow status automatically syncs across modal & main table view.'}
+                      {selectedIncumbent?.stage_of_reclassification === 'Approved'
+                        ? 'Locked: Stage is Approved automatically when DBM Status is set to "With DBM NOSCA".'
+                        : isRegionalOffice
+                          ? 'Workflow endorsement status recorded by Division HRMO.'
+                          : 'Workflow status automatically syncs across modal & main table view.'}
                     </span>
                   </div>
                 </div>
