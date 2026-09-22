@@ -12,6 +12,15 @@ const ALL_RECLASS_STAGES = ['For Review', 'Endorsed', 'Approved', 'Denied', 'Unf
 const RECLASS_STAGES = ['For Review', 'Endorsed', 'Denied', 'Unfilled / Vacant', 'Abolition'];
 const APPROVED_POST_ACTION_STAGES = ['Approved', 'Unfilled / Vacant', 'Abolition'];
 const RECLASS_POSITIONS_OPTIONS = ['School Counselor I', 'School Counselor II', 'School Counselor III', 'School Counselor IV'];
+const NOSCA_POSITION_OPTIONS = [
+  'School Counselor Associate I',
+  'School Counselor I',
+  'School Counselor II',
+  'School Counselor III',
+  'School Counselor IV',
+  'Guidance Counselor I',
+  'Guidance Coordinator III'
+];
 
 export default function ReclassificationPage({ onBack }) {
   const { user } = useAuth();
@@ -48,6 +57,7 @@ export default function ReclassificationPage({ onBack }) {
   const [showSchoolDropdown, setShowSchoolDropdown] = useState(false);
   const schoolSearchContainerRef = React.useRef(null);
   const [manualNoscaSerial, setManualNoscaSerial] = useState('');
+  const [manualNoscaPosition, setManualNoscaPosition] = useState('School Counselor Associate I');
   const [manualNoscaDivision, setManualNoscaDivision] = useState('');
   const [manuallyAddedNoscaItems, setManuallyAddedNoscaItems] = useState(new Set());
   const [showQuickAddInline, setShowQuickAddInline] = useState(false);
@@ -1167,7 +1177,7 @@ export default function ReclassificationPage({ onBack }) {
   };
 
   // Add a single Plantilla / Item No manually to active NOSCA batch
-  const handleAddManualNoscaItems = (inputString, targetCat, customSerial, customDiv, customSchoolId, customSchoolName) => {
+  const handleAddManualNoscaItems = (inputString, targetCat, customSerial, customDiv, customSchoolId, customSchoolName, customPosition) => {
     const rawString = inputString !== undefined ? inputString : manualNoscaItemInput;
     const cleanItem = String(rawString || '').trim();
 
@@ -1193,6 +1203,7 @@ export default function ReclassificationPage({ onBack }) {
     const div = (customDiv !== undefined ? customDiv : manualNoscaDivision).trim() || (scannedNoscaResult?.division || (divisionFilter && divisionFilter !== 'ALL' ? divisionFilter : 'Regional Scope'));
     const schoolId = (customSchoolId !== undefined ? customSchoolId : manualNoscaSchoolId) || scannedNoscaResult?.school_id || '';
     const schoolName = (customSchoolName !== undefined ? customSchoolName : manualNoscaSchoolName) || scannedNoscaResult?.school_name || scannedNoscaResult?.schoolName || '';
+    const pos = (customPosition !== undefined ? customPosition : manualNoscaPosition) || (scannedNoscaResult?.position || 'School Counselor Associate I');
 
     // Track manually added items for visual badges
     setManuallyAddedNoscaItems(prev => {
@@ -1216,7 +1227,7 @@ export default function ReclassificationPage({ onBack }) {
         school_id: schoolId,
         school_name: schoolName || 'Division / Regional Inventory',
         schoolName: schoolName || 'Division / Regional Inventory',
-        position: 'School Counselor Associate I',
+        position: pos,
         items: [itemNo],
         count: 1,
         category_breakdown: breakdown
@@ -1240,6 +1251,7 @@ export default function ReclassificationPage({ onBack }) {
         school_id: schoolId || prev.school_id,
         school_name: schoolName || prev.school_name || prev.schoolName,
         schoolName: schoolName || prev.schoolName || prev.school_name,
+        position: pos || prev.position,
         items: merged,
         count: merged.length,
         category_breakdown: newBreakdown
@@ -1249,7 +1261,7 @@ export default function ReclassificationPage({ onBack }) {
 
     setToast({
       title: 'Plantilla Item Added',
-      message: `Successfully added ${itemNo} to the plantilla list.${schoolId ? ` (School ID: ${schoolId})` : ''}`,
+      message: `Successfully added ${itemNo} (${pos}) to the plantilla list.${schoolId ? ` [School ID: ${schoolId}]` : ''}`,
       type: 'success'
     });
     setManualNoscaItemInput('');
@@ -1279,7 +1291,7 @@ export default function ReclassificationPage({ onBack }) {
           division: scannedNoscaResult.division,
           schoolId: scannedNoscaResult.school_id || manualNoscaSchoolId || null,
           schoolName: scannedNoscaResult.school_name || scannedNoscaResult.schoolName || manualNoscaSchoolName || null,
-          position: scannedNoscaResult.position,
+          position: scannedNoscaResult.position || manualNoscaPosition || 'School Counselor Associate I',
           items: selectedNoscaItems,
           categoryBreakdown: scannedNoscaResult.category_breakdown
         })
@@ -6445,25 +6457,28 @@ export default function ReclassificationPage({ onBack }) {
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                       <div>
                         <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: isDark ? '#cbd5e1' : '#334155', marginBottom: '4px' }}>
-                          NOSCA Ref / Serial
+                          Position <span style={{ color: '#ef4444' }}>*</span>
                         </label>
-                        <input
-                          type="text"
-                          value={manualNoscaSerial}
-                          onChange={(e) => setManualNoscaSerial(e.target.value)}
-                          placeholder="e.g. NOSCA-2024-MANUAL"
+                        <select
+                          value={manualNoscaPosition}
+                          onChange={(e) => setManualNoscaPosition(e.target.value)}
                           style={{
                             width: '100%',
                             padding: '7px 8px',
                             borderRadius: '8px',
                             fontSize: '11.5px',
+                            fontWeight: 650,
                             border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid #cbd5e1',
                             background: isDark ? 'rgba(15, 23, 42, 0.6)' : '#f8fafc',
                             color: isDark ? '#f8fafc' : '#0f172a',
                             outline: 'none',
                             boxSizing: 'border-box'
                           }}
-                        />
+                        >
+                          {NOSCA_POSITION_OPTIONS.map((pos) => (
+                            <option key={pos} value={pos}>{pos}</option>
+                          ))}
+                        </select>
                       </div>
 
                       <div>
