@@ -17,7 +17,7 @@ export async function runMigration() {
         current_position VARCHAR(255) NOT NULL,
         station_division VARCHAR(255) NOT NULL,
         stage_of_reclassification VARCHAR(100) NOT NULL DEFAULT 'For Review',
-        reclass_position VARCHAR(100),
+        target_position VARCHAR(100),
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
@@ -31,7 +31,7 @@ export async function runMigration() {
       ADD COLUMN IF NOT EXISTS current_position VARCHAR(255),
       ADD COLUMN IF NOT EXISTS station_division VARCHAR(255),
       ADD COLUMN IF NOT EXISTS stage_of_reclassification VARCHAR(100) DEFAULT 'For Review',
-      ADD COLUMN IF NOT EXISTS reclass_position VARCHAR(100),
+      ADD COLUMN IF NOT EXISTS target_position VARCHAR(100),
       ADD COLUMN IF NOT EXISTS region VARCHAR(255),
       ADD COLUMN IF NOT EXISTS division VARCHAR(255),
       ADD COLUMN IF NOT EXISTS uacs_oper_dsc TEXT,

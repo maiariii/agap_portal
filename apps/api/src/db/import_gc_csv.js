@@ -51,7 +51,7 @@ export async function importInventoryCSV() {
         current_position VARCHAR(255) NOT NULL,
         station_division VARCHAR(255) NOT NULL,
         stage_of_reclassification VARCHAR(100) NOT NULL DEFAULT 'For Review',
-        reclass_position VARCHAR(100),
+        target_position VARCHAR(100),
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
@@ -63,6 +63,7 @@ export async function importInventoryCSV() {
         ADD COLUMN IF NOT EXISTS org_cd VARCHAR(100),
         ADD COLUMN IF NOT EXISTS plantilla_item_number VARCHAR(150),
         ADD COLUMN IF NOT EXISTS salary_grade VARCHAR(50),
+        ADD COLUMN IF NOT EXISTS target_position VARCHAR(100),
         ADD COLUMN IF NOT EXISTS remarks TEXT;
 
       CREATE INDEX IF NOT EXISTS idx_incumbent_item_no ON incumbent_guidance_counselors(plantilla_item_number);
@@ -118,8 +119,7 @@ export async function importInventoryCSV() {
         const salary_grade = row[6] || null;
         const full_name = row[7] || '#N/A';
         const raw_reclass = row[8] || null;
-        // reclass_position is NULL by default for all personnel
-        const reclass_position = null;
+        const target_position = (raw_reclass && raw_reclass !== '#N/A') ? raw_reclass : null;
         const remarks = row[9] || null;
 
         // Use plantilla_item_number as employee_id to guarantee unique item binding
@@ -151,7 +151,7 @@ export async function importInventoryCSV() {
           org_cd,
           remarks,
           stage_of_reclassification,
-          reclass_position
+          target_position
         );
       }
 
@@ -169,7 +169,7 @@ export async function importInventoryCSV() {
           org_cd,
           remarks,
           stage_of_reclassification,
-          reclass_position
+          target_position
         ) VALUES ${placeholders.join(', ')}
         ON CONFLICT (employee_id) DO UPDATE SET
           plantilla_item_number = EXCLUDED.plantilla_item_number,
@@ -183,23 +183,13 @@ export async function importInventoryCSV() {
           org_cd = EXCLUDED.org_cd,
           remarks = EXCLUDED.remarks,
           stage_of_reclassification = EXCLUDED.stage_of_reclassification,
-          reclass_position = incumbent_guidance_counselors.reclass_position,
+          target_position = EXCLUDED.target_position,
           updated_at = NOW();
       `;
 
       await client.query(query, values);
       insertedCount += chunk.length;
     }
-
-    // Check reclassification_nosca_items for matching record based on employee ID and set reclass_position
-    await client.query(`
-      UPDATE incumbent_guidance_counselors g
-      SET reclass_position = n.position_title,
-          updated_at = NOW()
-      FROM reclassification_nosca_items n
-      WHERE (n.assigned_to_employee_id = g.employee_id OR n.assigned_to_incumbent_id = g.id)
-        AND n.position_title IS NOT NULL
-    `);
 
     console.log(`[CSV Import] Successfully imported ${insertedCount} rows into incumbent_guidance_counselors!`);
 

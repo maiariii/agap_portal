@@ -570,7 +570,7 @@ export const incumbentGuidanceCounselors = pgTable("incumbent_guidance_counselor
 	currentPosition: varchar("current_position", { length: 255 }).notNull(),
 	stationDivision: varchar("station_division", { length: 255 }).notNull(),
 	stageOfReclassification: varchar("stage_of_reclassification", { length: 100 }).default('For Review').notNull(),
-	reclassPosition: varchar("reclass_position", { length: 100 }),
+	targetPosition: varchar("target_position", { length: 100 }),
 	region: varchar("region", { length: 255 }),
 	division: varchar("division", { length: 255 }),
 	uacsOperDsc: text("uacs_oper_dsc"),

@@ -162,7 +162,7 @@ export default function ReclassificationPage({ onBack }) {
   // Sync modal state when an incumbent is opened
   useEffect(() => {
     if (selectedIncumbent) {
-      setModalTargetPosition(selectedIncumbent.reclass_position || '');
+      setModalTargetPosition(selectedIncumbent.target_position || selectedIncumbent.reclass_position || '');
       setModalStage(selectedIncumbent.stage_of_reclassification || 'For Review');
 
       // Initialize Document Checklist
@@ -222,9 +222,9 @@ export default function ReclassificationPage({ onBack }) {
       }
 
       setEvaluatorRemarks(selectedIncumbent.evaluator_remarks || '');
-      setEvaluatorName(selectedIncumbent.evaluated_by || user?.name || user?.email || 'Division HRMO Evaluator');
+      setEvaluatorName(selectedIncumbent.evaluated_by || currentUser?.name || currentUser?.fullName || 'Division HRMO');
     }
-  }, [selectedIncumbent, user]);
+  }, [selectedIncumbent, currentUser]);
 
   // Helper callbacks for Document Checklist
   const handleToggleDocSubmitted = (docId) => {
@@ -281,7 +281,7 @@ export default function ReclassificationPage({ onBack }) {
   // Automated Profile-to-QS Evaluation Suggestion
   const handleAutoEvaluateQs = () => {
     if (!selectedIncumbent) return;
-    const targetPos = modalTargetPosition || selectedIncumbent.reclass_position || 'School Counselor I';
+    const targetPos = modalTargetPosition || selectedIncumbent.target_position || selectedIncumbent.reclass_position || 'School Counselor I';
     const eduStr = String(selectedIncumbent.education || selectedIncumbent.assessment?.education || '').toLowerCase();
     const expVal = Number(selectedIncumbent.years_experience ?? selectedIncumbent.assessment?.years_experience ?? 0);
     const trnVal = Number(selectedIncumbent.hours_of_training ?? selectedIncumbent.assessment?.hours_of_training ?? 0);
@@ -819,20 +819,20 @@ export default function ReclassificationPage({ onBack }) {
   const handleUpdateIncumbentPosition = async (newPos) => {
     if (!selectedIncumbent) return;
     const incumbentId = selectedIncumbent.id;
-    const previousPos = selectedIncumbent.reclass_position;
+    const previousPos = selectedIncumbent.target_position || selectedIncumbent.reclass_position;
     const formattedPos = newPos === '' ? null : newPos;
 
     // Optimistic update
-    setSelectedIncumbent(prev => ({ ...prev, reclass_position: formattedPos }));
+    setSelectedIncumbent(prev => ({ ...prev, target_position: formattedPos, reclass_position: formattedPos }));
     setIncumbents(prev =>
-      prev.map(item => item.id === incumbentId ? { ...item, reclass_position: formattedPos } : item)
+      prev.map(item => item.id === incumbentId ? { ...item, target_position: formattedPos, reclass_position: formattedPos } : item)
     );
 
     setUpdatingPosition(true);
     try {
       await apiFetch(`/api/reclassification/incumbents/${incumbentId}/position`, {
         method: 'PUT',
-        body: JSON.stringify({ reclass_position: formattedPos })
+        body: JSON.stringify({ target_position: formattedPos, reclass_position: formattedPos })
       });
       setToast({
         type: 'success',
@@ -840,9 +840,9 @@ export default function ReclassificationPage({ onBack }) {
       });
     } catch (err) {
       console.error('[Reclass] Error updating position:', err);
-      setSelectedIncumbent(prev => ({ ...prev, reclass_position: previousPos }));
+      setSelectedIncumbent(prev => ({ ...prev, target_position: previousPos, reclass_position: previousPos }));
       setIncumbents(prev =>
-        prev.map(item => item.id === incumbentId ? { ...item, reclass_position: previousPos } : item)
+        prev.map(item => item.id === incumbentId ? { ...item, target_position: previousPos, reclass_position: previousPos } : item)
       );
       setToast({
         type: 'error',
@@ -873,11 +873,11 @@ export default function ReclassificationPage({ onBack }) {
 
     try {
       const promises = [];
-      if (formattedPos !== selectedIncumbent.reclass_position) {
+      if (formattedPos !== (selectedIncumbent.target_position || selectedIncumbent.reclass_position)) {
         promises.push(
           apiFetch(`/api/reclassification/incumbents/${incumbentId}/position`, {
             method: 'PUT',
-            body: JSON.stringify({ reclass_position: formattedPos })
+            body: JSON.stringify({ target_position: formattedPos, reclass_position: formattedPos })
           })
         );
       }
@@ -908,6 +908,7 @@ export default function ReclassificationPage({ onBack }) {
 
       // Optimistic update in table list and active selection
       const updatedFields = {
+        target_position: formattedPos,
         reclass_position: formattedPos,
         stage_of_reclassification: newStage,
         document_checklist: docChecklist,
@@ -966,15 +967,15 @@ export default function ReclassificationPage({ onBack }) {
         inc.region?.toLowerCase().includes(q) ||
         inc.uacs_oper_dsc?.toLowerCase().includes(q) ||
         inc.remarks?.toLowerCase().includes(q) ||
-        inc.reclass_position?.toLowerCase().includes(q) ||
+        (inc.target_position || inc.reclass_position)?.toLowerCase().includes(q) ||
         (inc.salary_grade && `sg ${inc.salary_grade}`.includes(q));
 
       const matchStage = !incumbentStageFilter || inc.stage_of_reclassification === incumbentStageFilter;
       const matchRegion = !incumbentRegionFilter || inc.region === incumbentRegionFilter;
       const matchPosition = !incumbentPositionFilter || (
         incumbentPositionFilter === 'UNASSIGNED'
-          ? !inc.reclass_position
-          : inc.reclass_position === incumbentPositionFilter
+          ? !(inc.target_position || inc.reclass_position)
+          : (inc.target_position || inc.reclass_position) === incumbentPositionFilter
       );
 
       return matchSearch && matchStage && matchRegion && matchPosition;
@@ -1000,7 +1001,7 @@ export default function ReclassificationPage({ onBack }) {
 
   // Step completion flags
   const isStep1Done = incumbents.length > 0 || currentStep > 1;
-  const isStep2Done = currentStep > 2 || incumbents.some(i => i.stage_of_reclassification === 'Endorsed' || i.stage_of_reclassification === 'Approved' || (i.reclass_position && i.reclass_position !== '#N/A'));
+  const isStep2Done = currentStep > 2 || incumbents.some(i => i.stage_of_reclassification === 'Endorsed' || i.stage_of_reclassification === 'Approved' || ((i.target_position || i.reclass_position) && (i.target_position || i.reclass_position) !== '#N/A'));
   const isStep3Done = incumbents.some(i => i.stage_of_reclassification === 'Approved');
 
   // Global Escape key listener to close active modals
@@ -3171,7 +3172,7 @@ export default function ReclassificationPage({ onBack }) {
                   <th style={{ padding: '14px 18px', minWidth: '220px', whiteSpace: 'nowrap', textAlign: 'left' }}>Station / School & Org Code</th>
                   <th style={{ padding: '14px 18px', minWidth: '180px', whiteSpace: 'nowrap', textAlign: 'left' }}>Division & Region</th>
                   <th style={{ padding: '14px 18px', minWidth: '170px', whiteSpace: 'nowrap', textAlign: 'left' }}>Stage of Reclassification</th>
-                  <th style={{ padding: '14px 18px', minWidth: '190px', whiteSpace: 'nowrap', textAlign: 'left' }}>Target Position & Remarks</th>
+                  <th style={{ padding: '14px 18px', minWidth: '180px', whiteSpace: 'nowrap', textAlign: 'left' }}>Target Position</th>
                   <th style={{ padding: '14px 18px', minWidth: '210px', whiteSpace: 'nowrap', textAlign: 'left' }}>Credentials Overview</th>
                   <th style={{ padding: '14px 18px', textAlign: 'right', minWidth: '120px', whiteSpace: 'nowrap' }}>Actions</th>
                 </tr>
@@ -3357,7 +3358,7 @@ export default function ReclassificationPage({ onBack }) {
                         </td>
                         <td style={{ padding: '14px 18px', verticalAlign: 'middle' }}>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                            {inc.reclass_position ? (
+                            {(inc.target_position || inc.reclass_position) ? (
                               <span style={{
                                 display: 'inline-flex',
                                 alignItems: 'center',
@@ -3370,7 +3371,7 @@ export default function ReclassificationPage({ onBack }) {
                                 fontWeight: 750,
                                 width: 'fit-content'
                               }}>
-                                {inc.reclass_position}
+                                {inc.target_position || inc.reclass_position}
                               </span>
                             ) : (
                               <span style={{ color: 'var(--text-secondary, #94a3b8)', fontSize: '12px', fontStyle: 'italic' }}>
@@ -3865,7 +3866,7 @@ export default function ReclassificationPage({ onBack }) {
                               background: isDark ? 'rgba(59, 130, 246, 0.2)' : '#eff6ff',
                               color: isDark ? '#93c5fd' : '#1d4ed8'
                             }}>
-                              {counselor.reclass_position || 'School Counselor'}
+                              {counselor.target_position || counselor.reclass_position || 'School Counselor'}
                             </span>
                           </td>
                           <td style={{ padding: '10px 14px', color: isDark ? '#94a3b8' : '#64748b' }}>{counselor.division || counselor.station_division}</td>
@@ -4186,7 +4187,7 @@ export default function ReclassificationPage({ onBack }) {
                     fontSize: '11px',
                     fontWeight: 750
                   }}>
-                    Target: {noscaItemAssignModal.personnel.reclass_position || 'School Counselor'}
+                    Target: {noscaItemAssignModal.personnel.target_position || noscaItemAssignModal.personnel.reclass_position || 'School Counselor'}
                   </span>
                 </div>
               </div>
@@ -5315,7 +5316,7 @@ export default function ReclassificationPage({ onBack }) {
 
                   <div style={{ marginTop: '10px', fontSize: '11px', color: 'var(--text-secondary, #94a3b8)', display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#10b981', flexShrink: 0 }} />
-                    <span>QS benchmarks dynamically loaded for: <b style={{ color: 'var(--text)' }}>{modalTargetPosition || selectedIncumbent.reclass_position || 'School Counselor I'}</b></span>
+                    <span>QS benchmarks dynamically loaded for: <b style={{ color: 'var(--text)' }}>{modalTargetPosition || selectedIncumbent.target_position || selectedIncumbent.reclass_position || 'School Counselor I'}</b></span>
                   </div>
                 </div>
               </div>
@@ -5353,7 +5354,7 @@ export default function ReclassificationPage({ onBack }) {
                           2. Required Documents Submission Checklist
                         </div>
                         <div style={{ fontSize: '12px', color: 'var(--text-secondary, #94a3b8)', marginTop: '2px' }}>
-                          Verify that all mandated personnel credentials and certificates are submitted and authenticated.
+                          Verify that all mandated personnel credentials and certificates are submitted and authenticated (items with <span style={{ color: '#ef4444', fontWeight: 800 }}>*</span> are mandatory).
                         </div>
                       </div>
 
@@ -5474,7 +5475,7 @@ export default function ReclassificationPage({ onBack }) {
                       borderRadius: '12px',
                       background: isDark ? 'rgba(15, 23, 42, 0.5)' : 'var(--card-solid, #ffffff)'
                     }}>
-                      <table style={{ width: '100%', minWidth: '780px', borderCollapse: 'collapse', fontSize: '12.5px' }}>
+                      <table style={{ width: '100%', minWidth: '660px', borderCollapse: 'collapse', fontSize: '12.5px' }}>
                         <thead>
                           <tr style={{
                             borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid var(--line)',
@@ -5484,8 +5485,7 @@ export default function ReclassificationPage({ onBack }) {
                             textTransform: 'uppercase',
                             letterSpacing: '0.04em'
                           }}>
-                            <th style={{ padding: '10px 16px', textAlign: 'left', whiteSpace: 'nowrap' }}>Required Document</th>
-                            <th style={{ padding: '10px 14px', textAlign: 'center', width: '120px', minWidth: '120px', whiteSpace: 'nowrap' }}>Requirement</th>
+                            <th style={{ padding: '10px 16px', textAlign: 'left', whiteSpace: 'nowrap' }}>Document</th>
                             <th style={{ padding: '10px 14px', textAlign: 'center', width: '130px', minWidth: '130px', whiteSpace: 'nowrap' }}>Submitted</th>
                             <th style={{ padding: '10px 14px', textAlign: 'center', width: '130px', minWidth: '130px', whiteSpace: 'nowrap' }}>Verified</th>
                             <th style={{ padding: '10px 16px', textAlign: 'right', width: '190px', minWidth: '190px', whiteSpace: 'nowrap' }}>Status</th>
@@ -5509,37 +5509,15 @@ export default function ReclassificationPage({ onBack }) {
                                 <td style={{ padding: '10px 16px', verticalAlign: 'middle' }}>
                                   <div style={{ fontWeight: 750, color: 'var(--text)' }}>
                                     {doc.label}
+                                    {doc.required && (
+                                      <span
+                                        style={{ color: '#ef4444', marginLeft: '4px', fontWeight: 800 }}
+                                        title="Mandatory"
+                                      >
+                                        *
+                                      </span>
+                                    )}
                                   </div>
-                                </td>
-                                <td style={{ padding: '10px 14px', textAlign: 'center', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
-                                  {doc.required ? (
-                                    <span style={{
-                                      fontSize: '10px',
-                                      fontWeight: 800,
-                                      padding: '3px 8px',
-                                      borderRadius: '5px',
-                                      background: isDark ? 'rgba(239, 68, 68, 0.2)' : '#fee2e2',
-                                      color: isDark ? '#fca5a5' : '#b91c1c',
-                                      border: isDark ? '1px solid rgba(239, 68, 68, 0.4)' : '1px solid #fca5a5',
-                                      whiteSpace: 'nowrap',
-                                      display: 'inline-block'
-                                    }}>
-                                      MANDATORY
-                                    </span>
-                                  ) : (
-                                    <span style={{
-                                      fontSize: '10px',
-                                      fontWeight: 700,
-                                      padding: '3px 8px',
-                                      borderRadius: '5px',
-                                      background: isDark ? 'rgba(100, 116, 139, 0.2)' : '#f1f5f9',
-                                      color: 'var(--text-secondary, #94a3b8)',
-                                      whiteSpace: 'nowrap',
-                                      display: 'inline-block'
-                                    }}>
-                                      OPTIONAL
-                                    </span>
-                                  )}
                                 </td>
                                 <td style={{ padding: '10px 14px', textAlign: 'center', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
                                   <label style={{ display: 'inline-flex', alignItems: 'center', cursor: isRegionalOffice ? 'not-allowed' : 'pointer', gap: '6px', whiteSpace: 'nowrap' }}>
@@ -5628,7 +5606,7 @@ export default function ReclassificationPage({ onBack }) {
               {(() => {
                 const missingRequiredDocs = docChecklist.filter(d => d.required && (!d.submitted || !d.verified));
                 const isDocComplete = missingRequiredDocs.length === 0;
-                const effectiveTargetPos = modalTargetPosition || selectedIncumbent.reclass_position || 'School Counselor I';
+                const effectiveTargetPos = modalTargetPosition || selectedIncumbent.target_position || selectedIncumbent.reclass_position || 'School Counselor I';
                 const standards = POSITION_QS_STANDARDS[effectiveTargetPos] || POSITION_QS_STANDARDS['School Counselor I'];
                 const overallResult = getCalculatedQsStatus(qsEvaluation);
 

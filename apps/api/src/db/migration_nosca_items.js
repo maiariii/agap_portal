@@ -58,7 +58,7 @@ export async function runMigration() {
 
     // 3. Migrate any previous dummy placeholder items from incumbent_guidance_counselors
     const existingPlaceholders = await client.query(`
-      SELECT id, plantilla_item_number, division, uacs_oper_dsc, remarks, reclass_position
+      SELECT id, plantilla_item_number, division, uacs_oper_dsc, remarks, target_position
       FROM incumbent_guidance_counselors
       WHERE full_name = 'UNFILLED ITEM (NOSCA)'
     `);
@@ -84,7 +84,7 @@ export async function runMigration() {
         `, [
           serial,
           row.plantilla_item_number,
-          row.reclass_position || 'School Counselor Associate I',
+          row.target_position || 'School Counselor Associate I',
           row.division || 'Regional Office',
           row.uacs_oper_dsc || 'Regional Allocation Station'
         ]);

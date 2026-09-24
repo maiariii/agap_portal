@@ -417,7 +417,7 @@ export async function getIncumbents(req, res) {
         g.org_cd,
         g.remarks,
         g.stage_of_reclassification,
-        COALESCE(nosca.position_title, g.reclass_position) AS reclass_position,
+        g.target_position,
         g.dbm_status,
         g.document_checklist,
         g.qs_evaluation,
@@ -428,14 +428,6 @@ export async function getIncumbents(req, res) {
         g.created_at,
         g.updated_at
       FROM incumbent_guidance_counselors g
-      LEFT JOIN LATERAL (
-        SELECT position_title
-        FROM reclassification_nosca_items n
-        WHERE (n.assigned_to_employee_id = g.employee_id OR n.assigned_to_incumbent_id = g.id)
-          AND n.position_title IS NOT NULL
-        ORDER BY n.updated_at DESC
-        LIMIT 1
-      ) nosca ON true
       WHERE 1=1
     `;
 
@@ -448,10 +440,10 @@ export async function getIncumbents(req, res) {
 
     if (position) {
       if (position === 'UNASSIGNED') {
-        query += ` AND COALESCE(nosca.position_title, g.reclass_position) IS NULL`;
+        query += ` AND g.target_position IS NULL`;
       } else {
         params.push(position);
-        query += ` AND COALESCE(nosca.position_title, g.reclass_position) = $${params.length}`;
+        query += ` AND g.target_position = $${params.length}`;
       }
     }
 
@@ -467,7 +459,7 @@ export async function getIncumbents(req, res) {
         g.plantilla_item_number ILIKE $${params.length} OR
         g.full_name ILIKE $${params.length} OR
         g.current_position ILIKE $${params.length} OR
-        COALESCE(nosca.position_title, g.reclass_position) ILIKE $${params.length} OR
+        g.target_position ILIKE $${params.length} OR
         g.station_division ILIKE $${params.length} OR
         g.division ILIKE $${params.length} OR
         g.region ILIKE $${params.length} OR
@@ -495,7 +487,8 @@ export async function getIncumbents(req, res) {
         org_cd: row.org_cd,
         remarks: row.remarks,
         stage_of_reclassification: row.stage_of_reclassification,
-        reclass_position: row.reclass_position,
+        target_position: row.target_position,
+        reclass_position: row.target_position,
         dbm_status: row.dbm_status || null,
         document_checklist: row.document_checklist || [],
         qs_evaluation: row.qs_evaluation || {},
@@ -580,19 +573,20 @@ export async function updateIncumbentPosition(req, res) {
     }
 
     const { id } = req.params;
-    const { reclass_position } = req.body;
+    const { target_position, reclass_position } = req.body;
 
-    const targetPosition = (reclass_position === '' || reclass_position === undefined) ? null : reclass_position;
+    const posInput = (target_position !== undefined ? target_position : reclass_position);
+    const targetPosition = (posInput === '' || posInput === undefined) ? null : posInput;
 
     if (targetPosition !== null && !VALID_POSITIONS.includes(targetPosition)) {
       return res.status(400).json({
-        error: `Invalid reclass_position. Must be one of: ${VALID_POSITIONS.join(', ')} or null/empty`
+        error: `Invalid target_position. Must be one of: ${VALID_POSITIONS.join(', ')} or null/empty`
       });
     }
 
     const updateQuery = `
       UPDATE incumbent_guidance_counselors
-      SET reclass_position = $1, updated_at = NOW()
+      SET target_position = $1, updated_at = NOW()
       WHERE id = $2
       RETURNING *;
     `;
@@ -625,12 +619,14 @@ export async function saveIncumbentQsEvaluation(req, res) {
       qs_evaluation,
       qs_eval_result,
       evaluator_remarks,
+      target_position,
       reclass_position,
       stage_of_reclassification
     } = req.body;
 
     const evaluatedBy = req.user?.name || req.user?.fullName || req.user?.username || req.user?.email || 'Division HRMO';
     const evalResult = qs_eval_result || 'PENDING';
+    const targetPosToSave = target_position !== undefined ? target_position : (reclass_position !== undefined ? reclass_position : null);
 
     const updateQuery = `
       UPDATE incumbent_guidance_counselors
@@ -640,7 +636,7 @@ export async function saveIncumbentQsEvaluation(req, res) {
           evaluator_remarks = $4,
           evaluated_by = $5,
           evaluated_at = NOW(),
-          reclass_position = COALESCE($6, reclass_position),
+          target_position = COALESCE($6, target_position),
           stage_of_reclassification = COALESCE($7, stage_of_reclassification),
           updated_at = NOW()
       WHERE id = $8
@@ -653,7 +649,7 @@ export async function saveIncumbentQsEvaluation(req, res) {
       evalResult,
       evaluator_remarks || null,
       evaluatedBy,
-      reclass_position || null,
+      targetPosToSave,
       stage_of_reclassification || null,
       id
     ]);
@@ -723,24 +719,16 @@ export async function updateIncumbentDbmStatus(req, res) {
     let queryParams;
 
     if (isNosca && cleanItemNo) {
-      // Check reclassification_nosca_items for matching record and get its position_title
-      const noscaItemRes = await client.query(
-        `SELECT position_title FROM reclassification_nosca_items WHERE plantilla_item_number = $1 LIMIT 1`,
-        [cleanItemNo]
-      );
-      const matchedPosition = noscaItemRes.rows[0]?.position_title || incumbent.reclass_position || 'School Counselor Associate I';
-
       updateQuery = `
         UPDATE incumbent_guidance_counselors
         SET dbm_status = $1,
             stage_of_reclassification = 'Approved',
             plantilla_item_number = $2,
-            reclass_position = $3,
             updated_at = NOW()
-        WHERE id = $4
+        WHERE id = $3
         RETURNING *;
       `;
-      queryParams = [valueToSet, cleanItemNo, matchedPosition, id];
+      queryParams = [valueToSet, cleanItemNo, id];
     } else if (isNosca) {
       updateQuery = `
         UPDATE incumbent_guidance_counselors
@@ -759,7 +747,6 @@ export async function updateIncumbentDbmStatus(req, res) {
               WHEN stage_of_reclassification = 'Approved' THEN 'Endorsed'
               ELSE stage_of_reclassification
             END,
-            reclass_position = NULL,
             updated_at = NOW()
         WHERE id = $2
         RETURNING *;
@@ -804,7 +791,7 @@ export async function updateIncumbentDbmStatus(req, res) {
             'MANUAL-ASSIGNMENT',
             cleanItemNo,
             'ELEMENTARY',
-            incumbent.reclass_position || 'School Counselor Associate I',
+            incumbent.target_position || incumbent.reclass_position || 'School Counselor Associate I',
             incumbent.division || incumbent.station_division || 'SDO Station',
             incumbent.station_division || incumbent.division || 'SDO Station',
             'ASSIGNED',
@@ -1007,8 +994,7 @@ export async function uploadReclassCsv(req, res) {
         const remarks = row[remarksIdx] || null;
 
         const full_name = (!rawName || rawName.toUpperCase() === '#N/A') ? '#N/A' : rawName;
-        // reclass_position is NULL by default for all personnel
-        const reclass_position = null;
+        const target_position = (rawReclass && rawReclass.toUpperCase() !== '#N/A') ? rawReclass : null;
 
         // Determine employee_id and station_division
         const employee_id = plantilla_item_number || `ITEM-${i + j + 1}-${Date.now()}`;
@@ -1046,7 +1032,7 @@ export async function uploadReclassCsv(req, res) {
           org_cd,
           remarks,
           stage_of_reclassification,
-          reclass_position
+          target_position
         );
       }
 
@@ -1065,7 +1051,7 @@ export async function uploadReclassCsv(req, res) {
             org_cd,
             remarks,
             stage_of_reclassification,
-            reclass_position
+            target_position
           ) VALUES ${placeholders.join(', ')}
           ON CONFLICT (employee_id) DO UPDATE SET
             plantilla_item_number = EXCLUDED.plantilla_item_number,
@@ -1079,23 +1065,13 @@ export async function uploadReclassCsv(req, res) {
             org_cd = EXCLUDED.org_cd,
             remarks = EXCLUDED.remarks,
             stage_of_reclassification = EXCLUDED.stage_of_reclassification,
-            reclass_position = incumbent_guidance_counselors.reclass_position,
+            target_position = COALESCE(EXCLUDED.target_position, incumbent_guidance_counselors.target_position),
             updated_at = NOW();
         `;
         await client.query(query, values);
         insertedOrUpdated += chunk.length;
       }
     }
-
-    // Check reclassification_nosca_items for matching record based on employee ID and set reclass_position
-    await client.query(`
-      UPDATE incumbent_guidance_counselors g
-      SET reclass_position = n.position_title,
-          updated_at = NOW()
-      FROM reclassification_nosca_items n
-      WHERE (n.assigned_to_employee_id = g.employee_id OR n.assigned_to_incumbent_id = g.id)
-        AND n.position_title IS NOT NULL
-    `);
 
     const countRes = await client.query('SELECT COUNT(*) as total FROM incumbent_guidance_counselors');
 
