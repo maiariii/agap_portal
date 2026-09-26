@@ -175,34 +175,35 @@ export const savedClusters = pgTable("saved_clusters", {
 	}
 });
 
-export const reclassificationApplications = pgTable("reclassification_applications", {
+export const reclassificationApplication = pgTable("reclassification_application", {
 	id: serial("id").primaryKey().notNull(),
 	applicationNumber: varchar("application_number", { length: 100 }).notNull(),
-	applicantId: integer("applicant_id").references(() => applicants.id, { onDelete: "cascade" } ),
-	employeeId: text("employee_id").references(() => users.id, { onDelete: "set null" } ),
+	applicantId: integer("applicant_id").references(() => applicants.id, { onDelete: "cascade" }),
+	incumbentId: integer("incumbent_id").references(() => incumbentGuidanceCounselors.id, { onDelete: "set null" }),
+	region: varchar("region", { length: 100 }),
+	division: varchar("division", { length: 255 }),
+	schoolId: varchar("school_id", { length: 50 }),
 	positionTitle: varchar("position_title", { length: 255 }).notNull(),
-	itemNumber: varchar("item_number", { length: 100 }),
-	stationDivision: varchar("station_division", { length: 255 }),
-	dateOriginallySubmitted: timestamp("date_originally_submitted", { withTimezone: true, mode: 'string' }).defaultNow(),
-	proposedQsEvalResult: varchar("proposed_qs_eval_result", { length: 100 }),
-	cscApprovedQsEvalResult: varchar("csc_approved_qs_eval_result", { length: 100 }),
-	evaluationStatus: varchar("evaluation_status", { length: 50 }).default('pending_reevaluation'),
-	hasUpdatedCredentials: boolean("has_updated_credentials").default(false),
-	updatedCredentialsSubmittedAt: timestamp("updated_credentials_submitted_at", { withTimezone: true, mode: 'string' }),
+	currentItemNumber: varchar("current_item_number", { length: 100 }),
+	qsStatus: varchar("qs_status", { length: 100 }).default('Pending Review'),
+	indicativePosition: varchar("indicative_position", { length: 255 }),
+	actualPosition: varchar("actual_position", { length: 255 }),
+	newItemNumber: varchar("new_item_number", { length: 100 }),
+	stageOfReclassification: varchar("stage_of_reclassification", { length: 100 }).default('For Review'),
 	documents: jsonb("documents").default([]),
-	reevaluationTimestamp: timestamp("reevaluation_timestamp", { withTimezone: true, mode: 'string' }),
-	dbmExportTimestamp: timestamp("dbm_export_timestamp", { withTimezone: true, mode: 'string' }),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow(),
 },
 (table) => {
 	return {
 		idxReclassAppNum: index("idx_reclass_app_num").on(table.applicationNumber),
-		idxReclassEvalStatus: index("idx_reclass_eval_status").on(table.evaluationStatus),
 		idxReclassApplicantId: index("idx_reclass_applicant_id").on(table.applicantId),
-		reclassificationApplicationsApplicationNumberKey: unique("reclassification_applications_application_number_key").on(table.applicationNumber),
+		idxReclassIncumbentId: index("idx_reclass_incumbent_id").on(table.incumbentId),
+		reclassificationApplicationAppNumKey: unique("reclassification_application_application_number_unique").on(table.applicationNumber),
 	}
 });
+
+export const reclassificationApplications = reclassificationApplication;
 
 export const adminConversationList = pgTable("admin_conversation_list", {
 	id: uuid("id"),
@@ -571,6 +572,9 @@ export const incumbentGuidanceCounselors = pgTable("incumbent_guidance_counselor
 	stationDivision: varchar("station_division", { length: 255 }).notNull(),
 	stageOfReclassification: varchar("stage_of_reclassification", { length: 100 }).default('For Review').notNull(),
 	targetPosition: varchar("target_position", { length: 100 }),
+	actualPosition: varchar("actual_position", { length: 255 }),
+	reclassPosition: varchar("reclass_position", { length: 255 }),
+	newItemNumber: varchar("new_item_number", { length: 100 }),
 	region: varchar("region", { length: 255 }),
 	division: varchar("division", { length: 255 }),
 	uacsOperDsc: text("uacs_oper_dsc"),

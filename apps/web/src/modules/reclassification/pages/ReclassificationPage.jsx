@@ -7,10 +7,17 @@ import FullScreenDocViewer from '../../../components/FullScreenDocViewer.jsx';
 import HqBackground from '../../../components/HqBackground.jsx';
 import ThemeToggle from '../../../components/ThemeToggle.jsx';
 import { useTheme } from '../../../middleware/ThemeProvider.jsx';
+import IncumbentDocumentVaultModal from '../components/IncumbentDocumentVaultModal.jsx';
 
-const ALL_RECLASS_STAGES = ['For Review', 'Endorsed', 'Approved', 'Denied', 'Unfilled / Vacant', 'Abolition'];
-const RECLASS_STAGES = ['For Review', 'Endorsed', 'Denied', 'Unfilled / Vacant', 'Abolition'];
-const APPROVED_POST_ACTION_STAGES = ['Approved', 'Unfilled / Vacant', 'Abolition'];
+const ALL_RECLASS_STAGES = [
+  'For Review',
+  'Endorsed to RO',
+  'Endorsed to DBM RO',
+  'Endorsed to SDO'
+];
+const HRMO_RECLASS_STAGES = ['For Review', 'Endorsed to RO'];
+const RO_RECLASS_STAGES = ['Endorsed to DBM RO', 'Endorsed to SDO'];
+const APPROVED_POST_ACTION_STAGES = ['Approved'];
 const RECLASS_POSITIONS_OPTIONS = ['School Counselor I', 'School Counselor II', 'School Counselor III', 'School Counselor IV'];
 const NOSCA_POSITION_OPTIONS = [
   'School Counselor Associate I',
@@ -23,12 +30,20 @@ const NOSCA_POSITION_OPTIONS = [
 ];
 
 const DEFAULT_REQUIRED_DOCUMENTS = [
-  { id: 'pds', label: 'Personal Data Sheet (CS Form 212 Revised 2017)', shortLabel: 'PDS (CS Form 212)', required: true },
-  { id: 'tor', label: 'Official Transcript of Records (TOR / CAV)', shortLabel: 'Transcript of Records (TOR)', required: true },
-  { id: 'eligibility', label: 'Proof of Eligibility / CSC or PRC Certificate (RA 1080 / PBET / LET)', shortLabel: 'Proof of Eligibility / Board Cert', required: true },
-  { id: 'training_cert', label: 'Training Certificates / Training Records (Relevant Hours)', shortLabel: 'Training Certificates / Records', required: true },
-  { id: 'seminar_cert', label: 'Certificates of Relevant Seminars / Specialized Workshops', shortLabel: 'Relevant Seminar Certificates', required: true },
-  { id: 'other_docs', label: 'Other Supporting Documents (IPCRF, Service Record, etc.)', shortLabel: 'Other Supporting Documents', required: false }
+  // Required requirements (5 items - unlock QS Evaluation)
+  { id: 'loi', label: 'Letter of intent addressed to the Head of Office or highest human resource officer', required: true },
+  { id: 'pds', label: 'Duly accomplished Personal Data Sheet (PDS, CS Form No. 212, Revised 2017) and Work Experience Sheet, if applicable', required: true },
+  { id: 'eligibility', label: 'Photocopy of Certificate of Eligibility/Report of Rating, if applicable', required: true },
+  { id: 'tor', label: 'Photocopy of scholastic/academic records such as Transcript of Records (TOR) and Diploma, including graduate and post-graduate units/degrees, if available', required: true },
+  { id: 'cav', label: 'Checklist of Requirements and Omnibus Sworn Statement on the CAV of documents submitted and Data Privacy Consent Form', required: true },
+
+  // Other requirements (6 items - total 11 items)
+  { id: 'prc', label: 'Photocopy of valid and updated PRC License/ID, if applicable', required: false },
+  { id: 'training', label: 'Photocopy of Certificate/s of Training, if applicable', required: false },
+  { id: 'employment', label: 'Photocopy of Certificate of Employment, Contract of Service, or duly signed Service Record, whichever is/are applicable', required: false },
+  { id: 'appointment', label: 'Photocopy of latest appointment, if applicable', required: false },
+  { id: 'performance', label: 'Photocopy of the Performance Rating in the last rating period(s) covering one (1) year performance prior to the deadline of submission, if applicable', required: false },
+  { id: 'other', label: 'Other documents as may be required for comparative assessment (e.g. MOVs, or Performance Rating from relevant work experience)', required: false }
 ];
 
 const POSITION_QS_STANDARDS = {
@@ -72,6 +87,7 @@ const POSITION_QS_STANDARDS = {
 
 export default function ReclassificationPage({ onBack }) {
   const { user } = useAuth();
+  const currentUser = user;
   const { setToast } = useToast();
   const { isDark } = useTheme();
 
@@ -113,11 +129,6 @@ export default function ReclassificationPage({ onBack }) {
   const [quickAddInlineCategory, setQuickAddInlineCategory] = useState('ELEMENTARY');
   const noscaFileInputRef = React.useRef(null);
 
-  const [applications, setApplications] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
-  const [divisionFilter, setDivisionFilter] = useState('');
 
   // Incumbents state
   const [incumbents, setIncumbents] = useState([]);
@@ -132,6 +143,7 @@ export default function ReclassificationPage({ onBack }) {
   const [updatingStageId, setUpdatingStageId] = useState(null);
   const [updatingDbmStatusId, setUpdatingDbmStatusId] = useState(null);
   const [updatingPosition, setUpdatingPosition] = useState(false);
+  const [updatingPositionId, setUpdatingPositionId] = useState(null);
   const [noscaItems, setNoscaItems] = useState([]);
   const [loadingNoscaItems, setLoadingNoscaItems] = useState(false);
   const [noscaItemAssignModal, setNoscaItemAssignModal] = useState({ open: false, personnel: null });
@@ -147,6 +159,8 @@ export default function ReclassificationPage({ onBack }) {
   const [modalTargetPosition, setModalTargetPosition] = useState('');
   const [modalStage, setModalStage] = useState('For Review');
   const [savingModalChanges, setSavingModalChanges] = useState(false);
+  const [showIncumbentDocsModal, setShowIncumbentDocsModal] = useState(false);
+  const [selectedVaultDocKey, setSelectedVaultDocKey] = useState('pds');
 
   // Document Checklist & QS Evaluation state
   const [docChecklist, setDocChecklist] = useState([]);
@@ -159,10 +173,95 @@ export default function ReclassificationPage({ onBack }) {
   const [evaluatorRemarks, setEvaluatorRemarks] = useState('');
   const [evaluatorName, setEvaluatorName] = useState('');
 
+  // Automated Profile-to-QS Evaluation (Runs automatically in background from candidate profile)
+  const computeAutoQs = (candidate, targetPositionName) => {
+    if (!candidate) return { education: null, experience: null, training: null, eligibility: null };
+    const targetPos = targetPositionName || candidate.target_position || candidate.reclass_position || 'School Counselor I';
+    const eduStr = String(candidate.education || candidate.assessment?.education || '').toLowerCase();
+    const expVal = Number(candidate.years_experience ?? candidate.assessment?.years_experience ?? 0);
+    const trnVal = Number(candidate.hours_of_training ?? candidate.assessment?.hours_of_training ?? 0);
+    const eligStr = String(candidate.eligibility || candidate.assessment?.eligibility || '').toLowerCase();
+
+    // Education evaluation
+    let eduMeets = false;
+    if (targetPos.includes('Associate') || targetPos === 'School Counselor I') {
+      eduMeets = eduStr.length > 3;
+    } else {
+      eduMeets = eduStr.includes('master') || eduStr.includes('ms') || eduStr.includes('ma') || eduStr.includes('phd') || eduStr.includes('doctor') || eduStr.includes('post');
+    }
+
+    // Experience evaluation
+    let reqYears = 0;
+    if (targetPos.includes('Associate I') || targetPos === 'School Counselor I') reqYears = 0;
+    else if (targetPos.includes('Associate II') || targetPos === 'School Counselor II') reqYears = 1;
+    else if (targetPos.includes('Associate III') || targetPos === 'School Counselor III') reqYears = 2;
+    else if (targetPos.includes('Associate IV') || targetPos === 'School Counselor IV') reqYears = 3;
+    else if (targetPos.includes('Coordinator')) reqYears = 3;
+    else reqYears = 1;
+    const expMeets = expVal >= reqYears;
+
+    // Training evaluation
+    let reqHours = 0;
+    if (targetPos.includes('Associate I') || targetPos === 'School Counselor I') reqHours = 0;
+    else if (targetPos.includes('Associate II') || targetPos === 'School Counselor II') reqHours = 4;
+    else if (targetPos.includes('Associate III') || targetPos === 'School Counselor III') reqHours = 8;
+    else if (targetPos.includes('Associate IV') || targetPos === 'School Counselor IV') reqHours = 16;
+    else if (targetPos.includes('Coordinator')) reqHours = 16;
+    else reqHours = 4;
+    const trnMeets = trnVal >= reqHours;
+
+    // Eligibility evaluation
+    let eligMeets = false;
+    if (targetPos.includes('Associate')) {
+      eligMeets = eligStr.includes('prof') || eligStr.includes('2nd') || eligStr.includes('csc') || eligStr.includes('career') || eligStr.includes('let') || eligStr.includes('pbet') || eligStr.includes('1080') || eligStr.includes('rgc') || eligStr.length > 0;
+    } else {
+      eligMeets = eligStr.includes('1080') || eligStr.includes('rgc') || eligStr.includes('guidance counselor') || eligStr.includes('licensed');
+    }
+
+    return {
+      education: eduMeets ? 'Meets' : 'Does Not Meet',
+      experience: expMeets ? 'Meets' : 'Does Not Meet',
+      training: trnMeets ? 'Meets' : 'Does Not Meet',
+      eligibility: eligMeets ? 'Meets' : 'Does Not Meet'
+    };
+  };
+
+  // Determine Indicative Position based on candidate qualifications
+  const determineIndicativePosition = (candidate) => {
+    if (!candidate) return 'School Counselor I';
+    const eduStr = String(candidate.education || candidate.assessment?.education || '').toLowerCase();
+    const expVal = Number(candidate.years_experience ?? candidate.assessment?.years_experience ?? 0);
+    const trnVal = Number(candidate.hours_of_training ?? candidate.assessment?.hours_of_training ?? 0);
+    const eligStr = String(candidate.eligibility || candidate.assessment?.eligibility || '').toLowerCase();
+    const targetPos = String(candidate.target_position || candidate.reclass_position || '');
+
+    const isRGC = eligStr.includes('1080') || eligStr.includes('rgc') || eligStr.includes('guidance counselor') || eligStr.includes('licensed');
+    const hasMasters = eduStr.includes('master') || eduStr.includes('ms') || eduStr.includes('ma') || eduStr.includes('phd') || eduStr.includes('doctor') || eduStr.includes('post');
+
+    if (isRGC) {
+      if (targetPos.includes('Coordinator') && hasMasters && expVal >= 3 && trnVal >= 16) {
+        return 'Guidance Coordinator III';
+      }
+      if (hasMasters) {
+        if (expVal >= 3 && trnVal >= 16) return 'School Counselor IV';
+        if (expVal >= 2 && trnVal >= 8) return 'School Counselor III';
+        if (expVal >= 1 && trnVal >= 4) return 'School Counselor II';
+      }
+      return 'School Counselor I';
+    } else {
+      // School Counselor Associate Pathway
+      if (expVal >= 3 && trnVal >= 16) return 'School Counselor Associate IV';
+      if (expVal >= 2 && trnVal >= 8) return 'School Counselor Associate III';
+      if (expVal >= 1 && trnVal >= 4) return 'School Counselor Associate II';
+      return 'School Counselor Associate I';
+    }
+  };
+
   // Sync modal state when an incumbent is opened
   useEffect(() => {
     if (selectedIncumbent) {
-      setModalTargetPosition(selectedIncumbent.target_position || selectedIncumbent.reclass_position || '');
+      const initialPos = selectedIncumbent.actual_position || selectedIncumbent.reclass_position || selectedIncumbent.target_position || determineIndicativePosition(selectedIncumbent) || '';
+      setModalTargetPosition(initialPos);
       setModalStage(selectedIncumbent.stage_of_reclassification || 'For Review');
 
       // Initialize Document Checklist
@@ -176,23 +275,29 @@ export default function ReclassificationPage({ onBack }) {
 
       const initialChecklist = DEFAULT_REQUIRED_DOCUMENTS.map(def => {
         if (savedDocs) {
-          const match = savedDocs.find(d => d.id === def.id);
+          const match = savedDocs.find(d => (d.id || d.key) === def.id || (def.id === 'training' && (d.id === 'training_cert' || d.id === 'seminar_cert')));
           if (match) {
+            const isDone = Boolean(match.submitted ?? match.verified ?? match.checked);
             return {
               ...def,
-              submitted: Boolean(match.submitted),
-              verified: Boolean(match.verified)
+              submitted: isDone,
+              verified: isDone
             };
           }
         }
         // Auto-match if candidate has attached documents in assessment.documents
         const hasAttachment = attachedDocs.some(att => {
           const name = String(att.label || att.name || att.key || '').toLowerCase();
+          if (def.id === 'loi' && (name.includes('loi') || name.includes('intent'))) return true;
           if (def.id === 'pds' && name.includes('pds')) return true;
           if (def.id === 'tor' && (name.includes('tor') || name.includes('transcript'))) return true;
-          if (def.id === 'eligibility' && (name.includes('elig') || name.includes('board') || name.includes('prc') || name.includes('1080'))) return true;
-          if (def.id === 'training_cert' && (name.includes('train') || name.includes('cert'))) return true;
-          if (def.id === 'seminar_cert' && name.includes('seminar')) return true;
+          if (def.id === 'eligibility' && (name.includes('elig') || name.includes('board') || name.includes('1080'))) return true;
+          if (def.id === 'cav' && (name.includes('cav') || name.includes('omnibus') || name.includes('sworn'))) return true;
+          if (def.id === 'prc' && name.includes('prc')) return true;
+          if (def.id === 'training' && (name.includes('train') || name.includes('cert') || name.includes('seminar'))) return true;
+          if (def.id === 'employment' && (name.includes('service') || name.includes('employ'))) return true;
+          if (def.id === 'appointment' && name.includes('appoint')) return true;
+          if (def.id === 'performance' && (name.includes('ipcrf') || name.includes('perform'))) return true;
           return false;
         });
 
@@ -204,38 +309,41 @@ export default function ReclassificationPage({ onBack }) {
       });
       setDocChecklist(initialChecklist);
 
-      // Initialize QS Evaluation
-      if (selectedIncumbent.qs_evaluation && typeof selectedIncumbent.qs_evaluation === 'object') {
+      // Initialize QS Evaluation (Preserve saved evaluation or evaluate automatically in background from profile)
+      const autoComputed = computeAutoQs(selectedIncumbent, initialPos);
+      if (
+        selectedIncumbent.qs_evaluation &&
+        typeof selectedIncumbent.qs_evaluation === 'object' &&
+        (selectedIncumbent.qs_evaluation.education || selectedIncumbent.qs_evaluation.experience || selectedIncumbent.qs_evaluation.training || selectedIncumbent.qs_evaluation.eligibility)
+      ) {
         setQsEvaluation({
-          education: selectedIncumbent.qs_evaluation.education || null,
-          experience: selectedIncumbent.qs_evaluation.experience || null,
-          training: selectedIncumbent.qs_evaluation.training || null,
-          eligibility: selectedIncumbent.qs_evaluation.eligibility || null
+          education: selectedIncumbent.qs_evaluation.education || autoComputed.education,
+          experience: selectedIncumbent.qs_evaluation.experience || autoComputed.experience,
+          training: selectedIncumbent.qs_evaluation.training || autoComputed.training,
+          eligibility: selectedIncumbent.qs_evaluation.eligibility || autoComputed.eligibility
         });
       } else {
-        setQsEvaluation({
-          education: null,
-          experience: null,
-          training: null,
-          eligibility: null
-        });
+        setQsEvaluation(autoComputed);
       }
 
       setEvaluatorRemarks(selectedIncumbent.evaluator_remarks || '');
-      setEvaluatorName(selectedIncumbent.evaluated_by || currentUser?.name || currentUser?.fullName || 'Division HRMO');
+      const defaultEvalName = currentUser?.name || currentUser?.fullName || [currentUser?.firstName, currentUser?.lastName].filter(Boolean).join(' ') || 'Division HRMO';
+      setEvaluatorName(selectedIncumbent.evaluated_by || defaultEvalName);
     }
   }, [selectedIncumbent, currentUser]);
 
   // Helper callbacks for Document Checklist
-  const handleToggleDocSubmitted = (docId) => {
+  const handleToggleDocCheck = (docId) => {
+    if (isRegionalOffice) return;
     setDocChecklist(prev =>
       prev.map(item => {
         if (item.id === docId) {
-          const nextSubmitted = !item.submitted;
+          const isCurrentlyDone = Boolean(item.submitted && item.verified);
+          const nextVal = !isCurrentlyDone;
           return {
             ...item,
-            submitted: nextSubmitted,
-            verified: nextSubmitted ? item.verified : false
+            submitted: nextVal,
+            verified: nextVal
           };
         }
         return item;
@@ -243,21 +351,8 @@ export default function ReclassificationPage({ onBack }) {
     );
   };
 
-  const handleToggleDocVerified = (docId) => {
-    setDocChecklist(prev =>
-      prev.map(item => {
-        if (item.id === docId) {
-          const nextVerified = !item.verified;
-          return {
-            ...item,
-            verified: nextVerified,
-            submitted: nextVerified ? true : item.submitted
-          };
-        }
-        return item;
-      })
-    );
-  };
+  const handleToggleDocSubmitted = handleToggleDocCheck;
+  const handleToggleDocVerified = handleToggleDocCheck;
 
   const handleMarkAllDocsComplete = () => {
     setDocChecklist(prev =>
@@ -278,69 +373,15 @@ export default function ReclassificationPage({ onBack }) {
     }));
   };
 
-  // Automated Profile-to-QS Evaluation Suggestion
-  const handleAutoEvaluateQs = () => {
+  // Automated Profile-to-QS Evaluation Helper
+  const handleAutoEvaluateQs = (posOverride) => {
     if (!selectedIncumbent) return;
-    const targetPos = modalTargetPosition || selectedIncumbent.target_position || selectedIncumbent.reclass_position || 'School Counselor I';
-    const eduStr = String(selectedIncumbent.education || selectedIncumbent.assessment?.education || '').toLowerCase();
-    const expVal = Number(selectedIncumbent.years_experience ?? selectedIncumbent.assessment?.years_experience ?? 0);
-    const trnVal = Number(selectedIncumbent.hours_of_training ?? selectedIncumbent.assessment?.hours_of_training ?? 0);
-    const eligStr = String(selectedIncumbent.eligibility || selectedIncumbent.assessment?.eligibility || '').toLowerCase();
-
-    // Education evaluation
-    let eduMeets = false;
-    if (targetPos === 'School Counselor Associate I' || targetPos === 'School Counselor I') {
-      eduMeets = eduStr.length > 5;
-    } else {
-      eduMeets = eduStr.includes('master') || eduStr.includes('ms') || eduStr.includes('ma') || eduStr.includes('phd') || eduStr.includes('doctor') || eduStr.includes('post');
-    }
-
-    // Experience evaluation
-    let reqYears = 1;
-    if (targetPos === 'School Counselor Associate I') reqYears = 0;
-    else if (targetPos === 'School Counselor I') reqYears = 1;
-    else if (targetPos === 'School Counselor II') reqYears = 2;
-    else if (targetPos === 'School Counselor III') reqYears = 3;
-    else if (targetPos === 'School Counselor IV') reqYears = 4;
-    else if (targetPos === 'Guidance Coordinator III') reqYears = 3;
-    const expMeets = expVal >= reqYears;
-
-    // Training evaluation
-    let reqHours = 4;
-    if (targetPos === 'School Counselor Associate I') reqHours = 0;
-    else if (targetPos === 'School Counselor I') reqHours = 4;
-    else if (targetPos === 'School Counselor II') reqHours = 8;
-    else if (targetPos === 'School Counselor III') reqHours = 16;
-    else if (targetPos === 'School Counselor IV') reqHours = 24;
-    else if (targetPos === 'Guidance Coordinator III') reqHours = 16;
-    const trnMeets = trnVal >= reqHours;
-
-    // Eligibility evaluation
-    let eligMeets = false;
-    if (targetPos === 'School Counselor Associate I') {
-      eligMeets = eligStr.length > 0;
-    } else {
-      eligMeets = eligStr.includes('1080') || eligStr.includes('rgc') || eligStr.includes('guidance counselor') || eligStr.includes('pbet') || eligStr.includes('let') || eligStr.includes('licensed');
-    }
-
-    setQsEvaluation({
-      education: eduMeets ? 'Meets' : 'Does Not Meet',
-      experience: expMeets ? 'Meets' : 'Does Not Meet',
-      training: trnMeets ? 'Meets' : 'Does Not Meet',
-      eligibility: eligMeets ? 'Meets' : 'Does Not Meet'
-    });
-
-    setToast({
-      type: 'info',
-      message: `Auto-evaluated standards for ${targetPos} based on candidate records.`
-    });
+    const targetPos = posOverride || modalTargetPosition || selectedIncumbent.target_position || selectedIncumbent.reclass_position || 'School Counselor I';
+    const computed = computeAutoQs(selectedIncumbent, targetPos);
+    setQsEvaluation(computed);
   };
 
   // Modals state
-  const [selectedApp, setSelectedApp] = useState(null);
-  const [showReevalModal, setShowReevalModal] = useState(false);
-  const [showDocModal, setShowDocModal] = useState(false);
-  const [showNewAppModal, setShowNewAppModal] = useState(false);
 
   // CSV Ingestion Modal state
   const [showCsvModal, setShowCsvModal] = useState(false);
@@ -361,125 +402,6 @@ export default function ReclassificationPage({ onBack }) {
 
   const handleStepClick = (targetStep) => {
     setCurrentStep(targetStep);
-  };
-
-  // Form states for re-evaluation
-  const [reevalResult, setReevalResult] = useState('Qualified (CSC QS)');
-  const [reevalStatus, setReevalStatus] = useState('reevaluated');
-  const [reevalRemarks, setReevalRemarks] = useState('');
-  const [submittingReeval, setSubmittingReeval] = useState(false);
-
-  // Form states for document update
-  const [newDocName, setNewDocName] = useState('');
-  const [newDocType, setNewDocType] = useState('pds');
-  const [submittingDoc, setSubmittingDoc] = useState(false);
-
-  // Form states for new application
-  const [newPosition, setNewPosition] = useState('');
-  const [newItemNumber, setNewItemNumber] = useState('');
-  const [newStation, setNewStation] = useState('');
-  const [newApplicantName, setNewApplicantName] = useState('');
-  const [submittingNewApp, setSubmittingNewApp] = useState(false);
-
-  // Pagination state
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
-
-  // Load applications
-  const fetchApplications = async () => {
-    setLoading(true);
-    try {
-      const data = await apiFetch('/api/reclassification');
-      if (Array.isArray(data)) {
-        setApplications(data);
-      }
-    } catch (err) {
-      console.warn('[Reclass] Error loading applications from API, using fallback data:', err);
-      // Fallback local dataset for resilient UI testing
-      setApplications([
-        {
-          id: 1,
-          application_number: 'REC-2026-001',
-          applicant_name: 'Maria Elena Santos',
-          applicant_email: 'maria.santos@deped.gov.ph',
-          position_title: 'Master Teacher I (Secondary)',
-          item_number: 'OSEC-DECSB-MTCHR1-00192',
-          station_division: 'SDO Quezon City',
-          date_originally_submitted: '2026-01-15T08:30:00Z',
-          proposed_qs_eval_result: 'Qualified (Proposed QS)',
-          csc_approved_qs_eval_result: 'Qualified (CSC QS)',
-          evaluation_status: 'reevaluated',
-          has_updated_credentials: true,
-          updated_credentials_submitted_at: '2026-02-10T14:15:00Z',
-          documents: [
-            { name: 'Updated_PDS_2026.pdf', type: 'pds', uploadedAt: '2026-02-10T14:15:00Z' },
-            { name: 'IPCRF_Outstanding_2025.pdf', type: 'ipcrf', uploadedAt: '2026-02-10T14:15:00Z' }
-          ],
-          reevaluation_timestamp: '2026-02-14T10:00:00Z',
-          dbm_export_timestamp: '2026-03-01T09:00:00Z'
-        },
-        {
-          id: 2,
-          application_number: 'REC-2026-002',
-          applicant_name: 'Juan Carlos Ramos',
-          applicant_email: 'juan.ramos@deped.gov.ph',
-          position_title: 'Head Teacher III',
-          item_number: 'OSEC-DECSB-HTEACH3-00084',
-          station_division: 'SDO Manila',
-          date_originally_submitted: '2026-01-22T10:00:00Z',
-          proposed_qs_eval_result: 'Qualified (Proposed QS)',
-          csc_approved_qs_eval_result: 'Pending CSC Review',
-          evaluation_status: 'pending_reevaluation',
-          has_updated_credentials: false,
-          updated_credentials_submitted_at: null,
-          documents: [
-            { name: 'PDS_Original_Submission.pdf', type: 'pds', uploadedAt: '2026-01-22T10:00:00Z' }
-          ],
-          reevaluation_timestamp: null,
-          dbm_export_timestamp: null
-        },
-        {
-          id: 3,
-          application_number: 'REC-2026-003',
-          applicant_name: 'Annaliza Reyes',
-          applicant_email: 'annaliza.reyes@deped.gov.ph',
-          position_title: 'Special Education Teacher I',
-          item_number: 'OSEC-DECSB-SPET1-00215',
-          station_division: 'SDO Pasig',
-          date_originally_submitted: '2026-02-01T11:45:00Z',
-          proposed_qs_eval_result: 'Qualified (Proposed QS)',
-          csc_approved_qs_eval_result: 'Needs Applicant Update',
-          evaluation_status: 'needs_applicant_update',
-          has_updated_credentials: false,
-          updated_credentials_submitted_at: null,
-          documents: [],
-          reevaluation_timestamp: '2026-02-18T16:20:00Z',
-          dbm_export_timestamp: null
-        },
-        {
-          id: 4,
-          application_number: 'REC-2026-004',
-          applicant_name: 'Roberto Dela Cruz',
-          applicant_email: 'roberto.delacruz@deped.gov.ph',
-          position_title: 'Master Teacher II',
-          item_number: 'OSEC-DECSB-MTCHR2-00041',
-          station_division: 'SDO Caloocan',
-          date_originally_submitted: '2026-02-05T09:15:00Z',
-          proposed_qs_eval_result: 'Qualified (Proposed QS)',
-          csc_approved_qs_eval_result: 'Qualified (CSC QS)',
-          evaluation_status: 'reevaluated',
-          has_updated_credentials: true,
-          updated_credentials_submitted_at: '2026-02-25T11:30:00Z',
-          documents: [
-            { name: 'MA_Diploma_Transcript.pdf', type: 'tor', uploadedAt: '2026-02-25T11:30:00Z' }
-          ],
-          reevaluation_timestamp: '2026-02-28T13:40:00Z',
-          dbm_export_timestamp: null
-        }
-      ]);
-    } finally {
-      setLoading(false);
-    }
   };
 
   // Load Incumbent Guidance Counselors
@@ -578,8 +500,7 @@ export default function ReclassificationPage({ onBack }) {
   };
 
   useEffect(() => {
-    fetchApplications();
-    fetchIncumbents();
+        fetchIncumbents();
     fetchNoscaItems();
   }, []);
 
@@ -646,7 +567,7 @@ export default function ReclassificationPage({ onBack }) {
       });
       setToast({
         type: 'success',
-        message: `Stage updated to "${newStage}" successfully!`
+        message: `Stage updated to "${newStage}" (synchronized with application record)!`
       });
     } catch (err) {
       console.error('[Reclass] Error updating stage:', err);
@@ -815,40 +736,60 @@ export default function ReclassificationPage({ onBack }) {
     }
   };
 
-  // Update incumbent counselor target position
-  const handleUpdateIncumbentPosition = async (newPos) => {
-    if (!selectedIncumbent) return;
-    const incumbentId = selectedIncumbent.id;
-    const previousPos = selectedIncumbent.target_position || selectedIncumbent.reclass_position;
-    const formattedPos = newPos === '' ? null : newPos;
+  // Update incumbent counselor actual reclassification position
+  const handleUpdateIncumbentPosition = async (incumbentIdOrPos, optionalPos, e) => {
+    if (e && e.stopPropagation) e.stopPropagation();
+
+    let incumbentId;
+    let newPos;
+    if (typeof incumbentIdOrPos === 'string' && optionalPos === undefined) {
+      if (!selectedIncumbent) return;
+      incumbentId = selectedIncumbent.id;
+      newPos = incumbentIdOrPos;
+    } else {
+      incumbentId = incumbentIdOrPos;
+      newPos = optionalPos;
+    }
+
+    const targetInc = incumbents.find(i => i.id === incumbentId) || selectedIncumbent;
+    if (!targetInc) return;
+    const previousPos = targetInc.actual_position || targetInc.target_position || targetInc.reclass_position;
+    const formattedPos = (newPos === '' || newPos === undefined) ? null : newPos;
 
     // Optimistic update
-    setSelectedIncumbent(prev => ({ ...prev, target_position: formattedPos, reclass_position: formattedPos }));
     setIncumbents(prev =>
-      prev.map(item => item.id === incumbentId ? { ...item, target_position: formattedPos, reclass_position: formattedPos } : item)
+      prev.map(item => item.id === incumbentId ? { ...item, actual_position: formattedPos, target_position: formattedPos, reclass_position: formattedPos } : item)
     );
+    if (selectedIncumbent && selectedIncumbent.id === incumbentId) {
+      setSelectedIncumbent(prev => ({ ...prev, actual_position: formattedPos, target_position: formattedPos, reclass_position: formattedPos }));
+      setModalTargetPosition(formattedPos || '');
+    }
 
+    setUpdatingPositionId(incumbentId);
     setUpdatingPosition(true);
     try {
       await apiFetch(`/api/reclassification/incumbents/${incumbentId}/position`, {
         method: 'PUT',
-        body: JSON.stringify({ target_position: formattedPos, reclass_position: formattedPos })
+        body: JSON.stringify({ target_position: formattedPos, reclass_position: formattedPos, actual_position: formattedPos })
       });
       setToast({
         type: 'success',
-        message: formattedPos ? `Assigned to ${formattedPos} successfully!` : 'Target position unassigned.'
+        message: formattedPos ? `Actual reclassification position set to ${formattedPos}!` : 'Position unassigned.'
       });
     } catch (err) {
       console.error('[Reclass] Error updating position:', err);
-      setSelectedIncumbent(prev => ({ ...prev, target_position: previousPos, reclass_position: previousPos }));
       setIncumbents(prev =>
-        prev.map(item => item.id === incumbentId ? { ...item, target_position: previousPos, reclass_position: previousPos } : item)
+        prev.map(item => item.id === incumbentId ? { ...item, actual_position: previousPos, target_position: previousPos, reclass_position: previousPos } : item)
       );
+      if (selectedIncumbent && selectedIncumbent.id === incumbentId) {
+        setSelectedIncumbent(prev => ({ ...prev, actual_position: previousPos, target_position: previousPos, reclass_position: previousPos }));
+      }
       setToast({
         type: 'error',
-        message: err.message || 'Failed to update target reclassification position'
+        message: err.message || 'Failed to update actual reclassification position'
       });
     } finally {
+      setUpdatingPositionId(null);
       setUpdatingPosition(false);
     }
   };
@@ -873,11 +814,11 @@ export default function ReclassificationPage({ onBack }) {
 
     try {
       const promises = [];
-      if (formattedPos !== (selectedIncumbent.target_position || selectedIncumbent.reclass_position)) {
+      if (formattedPos !== (selectedIncumbent.actual_position || selectedIncumbent.reclass_position || selectedIncumbent.target_position)) {
         promises.push(
           apiFetch(`/api/reclassification/incumbents/${incumbentId}/position`, {
             method: 'PUT',
-            body: JSON.stringify({ target_position: formattedPos, reclass_position: formattedPos })
+            body: JSON.stringify({ target_position: formattedPos, actual_position: formattedPos, reclass_position: formattedPos })
           })
         );
       }
@@ -899,7 +840,11 @@ export default function ReclassificationPage({ onBack }) {
             qs_evaluation: qsEvaluation,
             qs_eval_result: overallStatus,
             evaluated_by: evaluatorName,
-            evaluator_remarks: evaluatorRemarks
+            evaluator_remarks: evaluatorRemarks,
+            target_position: formattedPos,
+            actual_position: formattedPos,
+            reclass_position: formattedPos,
+            stage_of_reclassification: newStage
           })
         })
       );
@@ -909,6 +854,7 @@ export default function ReclassificationPage({ onBack }) {
       // Optimistic update in table list and active selection
       const updatedFields = {
         target_position: formattedPos,
+        actual_position: formattedPos,
         reclass_position: formattedPos,
         stage_of_reclassification: newStage,
         document_checklist: docChecklist,
@@ -986,11 +932,23 @@ export default function ReclassificationPage({ onBack }) {
   const incumbentMetrics = useMemo(() => {
     const total = incumbents.length;
     const forReview = incumbents.filter((i) => i.stage_of_reclassification === 'For Review').length;
-    const endorsed = incumbents.filter((i) => i.stage_of_reclassification === 'Endorsed').length;
+    const endorsedToRO = incumbents.filter((i) => i.stage_of_reclassification === 'Endorsed to RO' || i.stage_of_reclassification === 'Endorsed').length;
+    const endorsedToDbm = incumbents.filter((i) => i.stage_of_reclassification === 'Endorsed to DBM RO').length;
+    const endorsedToSdo = incumbents.filter((i) => i.stage_of_reclassification === 'Endorsed to SDO').length;
     const approved = incumbents.filter((i) => i.stage_of_reclassification === 'Approved').length;
     const denied = incumbents.filter((i) => i.stage_of_reclassification === 'Denied').length;
     const vacant = incumbents.filter((i) => i.stage_of_reclassification === 'Unfilled / Vacant' || i.full_name === '#N/A').length;
-    return { total, forReview, endorsed, approved, denied, vacant };
+    return {
+      total,
+      forReview,
+      endorsedToRO,
+      endorsedToDbm,
+      endorsedToSdo,
+      endorsed: endorsedToRO + endorsedToDbm + endorsedToSdo,
+      approved,
+      denied,
+      vacant
+    };
   }, [incumbents]);
 
   // Paged incumbents
@@ -1001,24 +959,32 @@ export default function ReclassificationPage({ onBack }) {
 
   // Step completion flags
   const isStep1Done = incumbents.length > 0 || currentStep > 1;
-  const isStep2Done = currentStep > 2 || incumbents.some(i => i.stage_of_reclassification === 'Endorsed' || i.stage_of_reclassification === 'Approved' || ((i.target_position || i.reclass_position) && (i.target_position || i.reclass_position) !== '#N/A'));
+  const isStep2Done = currentStep > 2 || incumbents.some(i => 
+    i.stage_of_reclassification === 'Endorsed to RO' || 
+    i.stage_of_reclassification === 'Endorsed to DBM RO' ||
+    i.stage_of_reclassification === 'Endorsed to SDO' ||
+    i.stage_of_reclassification === 'Endorsed' || 
+    i.stage_of_reclassification === 'Approved' || 
+    ((i.target_position || i.reclass_position) && (i.target_position || i.reclass_position) !== '#N/A')
+  );
   const isStep3Done = incumbents.some(i => i.stage_of_reclassification === 'Approved');
 
   // Global Escape key listener to close active modals
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (e.key === 'Escape') {
+        if (showIncumbentDocsModal) {
+          setShowIncumbentDocsModal(false);
+          return;
+        }
         if (showAssessmentModal) setShowAssessmentModal(false);
-        if (showReevalModal) setShowReevalModal(false);
-        if (showDocModal) setShowDocModal(false);
-        if (showNewAppModal) setShowNewAppModal(false);
         if (showCsvModal) setShowCsvModal(false);
         if (noscaItemAssignModal.open) setNoscaItemAssignModal({ open: false, personnel: null });
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [showAssessmentModal, showReevalModal, showDocModal, showNewAppModal, showCsvModal, noscaItemAssignModal]);
+  }, [showAssessmentModal, showCsvModal, noscaItemAssignModal, showIncumbentDocsModal]);
 
   const getStageBadge = (stage) => {
     switch (stage) {
@@ -1027,35 +993,50 @@ export default function ReclassificationPage({ onBack }) {
           bg: isDark ? 'rgba(6, 95, 70, 0.25)' : '#ECFDF5',
           text: isDark ? '#34d399' : '#065F46',
           border: isDark ? 'rgba(16, 185, 129, 0.4)' : '#A7F3D0',
-          icon: '✓'
+          icon: ''
         };
+      case 'Endorsed to RO':
       case 'Endorsed':
         return {
           bg: isDark ? 'rgba(30, 58, 138, 0.35)' : '#EFF6FF',
           text: isDark ? '#93c5fd' : '#1E40AF',
           border: isDark ? 'rgba(59, 130, 246, 0.4)' : '#BFDBFE',
-          icon: '★'
+          icon: ''
+        };
+      case 'Endorsed to DBM RO':
+        return {
+          bg: isDark ? 'rgba(99, 102, 241, 0.25)' : '#EEF2FF',
+          text: isDark ? '#a5b4fc' : '#4338CA',
+          border: isDark ? 'rgba(99, 102, 241, 0.4)' : '#C7D2FE',
+          icon: ''
+        };
+      case 'Endorsed to SDO':
+        return {
+          bg: isDark ? 'rgba(14, 165, 233, 0.25)' : '#F0F9FF',
+          text: isDark ? '#7dd3fc' : '#0369A1',
+          border: isDark ? 'rgba(14, 165, 233, 0.4)' : '#BAE6FD',
+          icon: ''
         };
       case 'Denied':
         return {
           bg: isDark ? 'rgba(239, 68, 68, 0.2)' : '#FEF2F2',
           text: isDark ? '#f87171' : '#991B1B',
           border: isDark ? 'rgba(239, 68, 68, 0.4)' : '#FECACA',
-          icon: '✕'
+          icon: ''
         };
       case 'Unfilled / Vacant':
         return {
           bg: isDark ? 'rgba(71, 85, 105, 0.25)' : '#F1F5F9',
           text: isDark ? '#94a3b8' : '#475569',
           border: isDark ? 'rgba(100, 116, 139, 0.4)' : '#CBD5E1',
-          icon: '○'
+          icon: ''
         };
       case 'Abolition':
         return {
           bg: isDark ? 'rgba(153, 27, 27, 0.25)' : '#FEF2F2',
           text: isDark ? '#fca5a5' : '#991B1B',
           border: isDark ? 'rgba(239, 68, 68, 0.4)' : '#F87171',
-          icon: '⚠'
+          icon: ''
         };
       case 'For Review':
       default:
@@ -1063,196 +1044,8 @@ export default function ReclassificationPage({ onBack }) {
           bg: isDark ? 'rgba(180, 83, 9, 0.25)' : '#FFFBEB',
           text: isDark ? '#fde68a' : '#92400E',
           border: isDark ? 'rgba(245, 158, 11, 0.4)' : '#FDE68A',
-          icon: '⏳'
+          icon: ''
         };
-    }
-  };
-
-  // Filtered applications
-  const filteredApps = useMemo(() => {
-    return applications.filter((app) => {
-      const matchSearch =
-        !searchTerm ||
-        app.applicant_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        app.application_number?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        app.position_title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        app.item_number?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        app.station_division?.toLowerCase().includes(searchTerm.toLowerCase());
-
-      const matchStatus = !statusFilter || app.evaluation_status === statusFilter;
-      const matchDivision = !divisionFilter || app.station_division === divisionFilter;
-
-      return matchSearch && matchStatus && matchDivision;
-    });
-  }, [applications, searchTerm, statusFilter, divisionFilter]);
-
-  // KPI Metrics
-  const metrics = useMemo(() => {
-    const total = applications.length;
-    const pending = applications.filter((a) => a.evaluation_status === 'pending_reevaluation').length;
-    const needsUpdate = applications.filter((a) => a.evaluation_status === 'needs_applicant_update').length;
-    const reevaluated = applications.filter((a) => a.evaluation_status === 'reevaluated').length;
-    return { total, pending, needsUpdate, reevaluated };
-  }, [applications]);
-
-  // Unique divisions for dropdown
-  const divisions = useMemo(() => {
-    const set = new Set(applications.map((a) => a.station_division).filter(Boolean));
-    return Array.from(set).sort();
-  }, [applications]);
-
-  // Paged applications
-  const pagedApps = useMemo(() => {
-    const start = (currentPage - 1) * pageSize;
-    return filteredApps.slice(start, start + pageSize);
-  }, [filteredApps, currentPage, pageSize]);
-
-  // Handle CSC Reevaluation Submit
-  const handleSaveReeval = async (e) => {
-    e.preventDefault();
-    if (!selectedApp) return;
-
-    setSubmittingReeval(true);
-    try {
-      await apiFetch(`/api/reclassification/${selectedApp.id}/reevaluate`, {
-        method: 'PUT',
-        body: JSON.stringify({
-          csc_approved_qs_eval_result: reevalResult,
-          evaluation_status: reevalStatus,
-          remarks: reevalRemarks
-        })
-      });
-      setToast({ message: `Re-evaluation saved for ${selectedApp.application_number}`, type: 'success' });
-      setShowReevalModal(false);
-      fetchApplications();
-    } catch (err) {
-      console.error('Error submitting re-evaluation:', err);
-      // Optimistic local update
-      setApplications(prev => prev.map(a => {
-        if (a.id === selectedApp.id) {
-          return {
-            ...a,
-            csc_approved_qs_eval_result: reevalResult,
-            evaluation_status: reevalStatus,
-            reevaluation_timestamp: new Date().toISOString()
-          };
-        }
-        return a;
-      }));
-      setToast({ message: 'Re-evaluation recorded locally', type: 'info' });
-      setShowReevalModal(false);
-    } finally {
-      setSubmittingReeval(false);
-    }
-  };
-
-  // Handle Document Credential Update Submit
-  const handleSaveDocument = async (e) => {
-    e.preventDefault();
-    if (!selectedApp || !newDocName) return;
-
-    setSubmittingDoc(true);
-    try {
-      const docPayload = {
-        name: newDocName,
-        type: newDocType,
-        uploadedAt: new Date().toISOString()
-      };
-
-      await apiFetch(`/api/reclassification/${selectedApp.id}/documents`, {
-        method: 'POST',
-        body: JSON.stringify({
-          documents: [docPayload]
-        })
-      });
-
-      setToast({ message: `Credentials updated for ${selectedApp.applicant_name}`, type: 'success' });
-      setShowDocModal(false);
-      setNewDocName('');
-      fetchApplications();
-    } catch (err) {
-      console.error('Error submitting document update:', err);
-      // Optimistic local update
-      setApplications(prev => prev.map(a => {
-        if (a.id === selectedApp.id) {
-          const docs = Array.isArray(a.documents) ? [...a.documents] : [];
-          docs.push({ name: newDocName, type: newDocType, uploadedAt: new Date().toISOString() });
-          return {
-            ...a,
-            documents: docs,
-            has_updated_credentials: true,
-            updated_credentials_submitted_at: new Date().toISOString(),
-            evaluation_status: a.evaluation_status === 'needs_applicant_update' ? 'pending_reevaluation' : a.evaluation_status
-          };
-        }
-        return a;
-      }));
-      setToast({ message: 'Document added to applicant profile', type: 'info' });
-      setShowDocModal(false);
-      setNewDocName('');
-    } finally {
-      setSubmittingDoc(false);
-    }
-  };
-
-  // Handle New Application Submit
-  const handleCreateNewApp = async (e) => {
-    e.preventDefault();
-    if (!newPosition) return;
-
-    setSubmittingNewApp(true);
-    try {
-      const appNum = `REC-${new Date().getFullYear()}-${String(applications.length + 1).padStart(3, '0')}`;
-      const payload = {
-        application_number: appNum,
-        position_title: newPosition,
-        item_number: newItemNumber || 'PENDING-ITEM',
-        station_division: newStation || user?.division || 'SDO Main',
-        proposed_qs_eval_result: 'Qualified (Proposed QS)',
-        documents: []
-      };
-
-      await apiFetch('/api/reclassification', {
-        method: 'POST',
-        body: JSON.stringify(payload)
-      });
-
-      setToast({ message: `Reclassification application ${appNum} created`, type: 'success' });
-      setShowNewAppModal(false);
-      setNewPosition('');
-      setNewItemNumber('');
-      setNewStation('');
-      fetchApplications();
-    } catch (err) {
-      console.error('Error creating reclassification application:', err);
-      const appNum = `REC-2026-${String(applications.length + 1).padStart(3, '0')}`;
-      setApplications(prev => [
-        {
-          id: Date.now(),
-          application_number: appNum,
-          applicant_name: newApplicantName || 'New Teacher Applicant',
-          applicant_email: 'applicant@deped.gov.ph',
-          position_title: newPosition,
-          item_number: newItemNumber || 'OSEC-DECSB-ITEM-NEW',
-          station_division: newStation || user?.division || 'SDO Manila',
-          date_originally_submitted: new Date().toISOString(),
-          proposed_qs_eval_result: 'Qualified (Proposed QS)',
-          csc_approved_qs_eval_result: 'Pending CSC Review',
-          evaluation_status: 'pending_reevaluation',
-          has_updated_credentials: false,
-          updated_credentials_submitted_at: null,
-          documents: []
-        },
-        ...prev
-      ]);
-      setToast({ message: `Reclassification application ${appNum} added`, type: 'info' });
-      setShowNewAppModal(false);
-      setNewPosition('');
-      setNewItemNumber('');
-      setNewStation('');
-      setNewApplicantName('');
-    } finally {
-      setSubmittingNewApp(false);
     }
   };
 
@@ -1567,8 +1360,7 @@ export default function ReclassificationPage({ onBack }) {
         setShowConfirmAddModal(false);
         setShowNoscaModal(false);
         fetchIncumbents();
-        fetchApplications();
-        fetchNoscaItems();
+                fetchNoscaItems();
       } else {
         throw new Error(res?.error || 'Failed to import NOSCA plantilla items.');
       }
@@ -1779,7 +1571,7 @@ export default function ReclassificationPage({ onBack }) {
             color: '#1E40AF',
             border: '1px solid #BFDBFE'
           }}>
-            ⏳ Pending CSC Re-eval
+            Pending CSC Re-eval
           </span>
         );
     }
@@ -1838,7 +1630,7 @@ export default function ReclassificationPage({ onBack }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <img src={agadLogo} alt="AGAP Logo" style={{ width: '32px', height: '32px', objectFit: 'contain' }} />
             <div>
-              <span style={{ fontSize: '10.5px', fontWeight: 800, color: '#6366f1', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+              <span style={{ fontSize: '10.5px', fontWeight: 800, color: isDark ? '#38bdf8' : '#0284c7', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
                 RECLASSIFICATION WORKBENCH
               </span>
               <h2 style={{ fontSize: '15px', fontWeight: 800, margin: 0, color: isDark ? '#F8FAFC' : '#08315f' }}>
@@ -2798,12 +2590,16 @@ export default function ReclassificationPage({ onBack }) {
             borderLeft: isDark ? '4px solid #3b82f6' : '4px solid #2563eb'
           }}>
             <div style={{ fontSize: '12px', fontWeight: 700, color: isDark ? '#60a5fa' : '#1d4ed8', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-              Endorsed
+              {isRegionalOffice ? 'Endorsed (RO / DBM / SDO)' : 'Endorsed to RO'}
             </div>
             <div style={{ fontSize: '30px', fontWeight: 850, color: isDark ? '#93c5fd' : '#1e40af', margin: '6px 0 2px' }}>
-              {incumbentMetrics.endorsed}
+              {isRegionalOffice ? incumbentMetrics.endorsed : incumbentMetrics.endorsedToRO}
             </div>
-            <div style={{ fontSize: '12px', color: isDark ? '#60a5fa' : '#2563eb' }}>Endorsed for appointment</div>
+            <div style={{ fontSize: '12px', color: isDark ? '#60a5fa' : '#2563eb' }}>
+              {isRegionalOffice 
+                ? `RO: ${incumbentMetrics.endorsedToRO} • DBM: ${incumbentMetrics.endorsedToDbm} • SDO: ${incumbentMetrics.endorsedToSdo}` 
+                : 'Endorsed to Regional Office'}
+            </div>
           </div>
 
           <div className="card" style={{
@@ -3172,7 +2968,7 @@ export default function ReclassificationPage({ onBack }) {
                   <th style={{ padding: '14px 18px', minWidth: '220px', whiteSpace: 'nowrap', textAlign: 'left' }}>Station / School & Org Code</th>
                   <th style={{ padding: '14px 18px', minWidth: '180px', whiteSpace: 'nowrap', textAlign: 'left' }}>Division & Region</th>
                   <th style={{ padding: '14px 18px', minWidth: '170px', whiteSpace: 'nowrap', textAlign: 'left' }}>Stage of Reclassification</th>
-                  <th style={{ padding: '14px 18px', minWidth: '180px', whiteSpace: 'nowrap', textAlign: 'left' }}>Target Position</th>
+                  <th style={{ padding: '14px 18px', minWidth: '220px', whiteSpace: 'nowrap', textAlign: 'left' }}>Actual Reclassification Position</th>
                   <th style={{ padding: '14px 18px', minWidth: '210px', whiteSpace: 'nowrap', textAlign: 'left' }}>Credentials Overview</th>
                   <th style={{ padding: '14px 18px', textAlign: 'right', minWidth: '120px', whiteSpace: 'nowrap' }}>Actions</th>
                 </tr>
@@ -3248,8 +3044,26 @@ export default function ReclassificationPage({ onBack }) {
                           <div style={{ fontWeight: 750, color: inc.full_name === '#N/A' ? 'var(--muted)' : 'var(--text)', fontSize: '13.5px' }}>
                             {inc.full_name === '#N/A' ? 'Unassigned Plantilla' : inc.full_name}
                           </div>
-                          <div style={{ fontSize: '11px', color: 'var(--text-secondary, #94a3b8)', fontFamily: 'monospace', marginTop: '2px' }}>
-                            {inc.plantilla_item_number || inc.employee_id}
+                          <div style={{ fontSize: '11px', color: 'var(--text-secondary, #94a3b8)', fontFamily: 'monospace', marginTop: '2px', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                            <span>{inc.plantilla_item_number || inc.employee_id}</span>
+                            {inc.new_item_number && (
+                              <span style={{
+                                fontSize: '10px',
+                                fontWeight: 800,
+                                padding: '1px 6px',
+                                borderRadius: '4px',
+                                background: isDark ? 'rgba(16, 185, 129, 0.2)' : '#dcfce7',
+                                color: isDark ? '#6ee7b7' : '#166534',
+                                border: isDark ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #86efac',
+                                letterSpacing: '0.02em',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '3px'
+                              }}>
+                                <span style={{ opacity: 0.75, fontWeight: 700 }}>NEW:</span>
+                                {inc.new_item_number}
+                              </span>
+                            )}
                           </div>
                         </td>
                         <td style={{ padding: '14px 18px', verticalAlign: 'middle' }}>
@@ -3301,100 +3115,152 @@ export default function ReclassificationPage({ onBack }) {
                           </div>
                         </td>
                         <td style={{ padding: '14px 18px', verticalAlign: 'middle' }} onClick={e => e.stopPropagation()}>
-                          {isRegionalOffice ? (
-                            <span style={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '6px',
-                              padding: '5px 10px',
-                              borderRadius: '8px',
-                              border: `1.5px solid ${badgeStyle.border}`,
-                              background: badgeStyle.bg,
+                          <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
+                            <select
+                              value={inc.stage_of_reclassification || 'For Review'}
+                              disabled={updatingStageId === inc.id}
+                              onChange={(e) => handleUpdateIncumbentStage(inc.id, e.target.value, e)}
+                              title="Click to update Stage of Reclassification (connected to reclassification_application)"
+                              style={{
+                                appearance: 'none',
+                                WebkitAppearance: 'none',
+                                MozAppearance: 'none',
+                                padding: '6px 26px 6px 12px',
+                                borderRadius: '8px',
+                                border: `1.5px solid ${badgeStyle.border}`,
+                                background: badgeStyle.bg,
+                                color: badgeStyle.text,
+                                fontSize: '12px',
+                                fontWeight: 750,
+                                cursor: updatingStageId === inc.id ? 'wait' : 'pointer',
+                                outline: 'none',
+                                boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+                                transition: 'all 0.15s ease',
+                                textAlign: 'left'
+                              }}
+                            >
+                              {(() => {
+                                const currentStage = inc.stage_of_reclassification || 'For Review';
+                                let stageOptions = [];
+
+                                if (currentUser?.role === 'admin') {
+                                  stageOptions = ['For Review', 'Endorsed to RO', 'Endorsed', 'Endorsed to DBM RO', 'Endorsed to SDO', 'Approved', 'Denied'];
+                                } else if (isRegionalOffice) {
+                                  stageOptions = [...RO_RECLASS_STAGES];
+                                  if (currentStage === 'Approved' || inc.dbm_status === 'With DBM NOSCA') {
+                                    stageOptions.push('Approved');
+                                  }
+                                } else {
+                                  stageOptions = [...HRMO_RECLASS_STAGES];
+                                  if (currentStage === 'Approved') {
+                                    stageOptions.push('Approved');
+                                  }
+                                }
+
+                                if (!stageOptions.includes(currentStage)) {
+                                  stageOptions.unshift(currentStage);
+                                }
+
+                                return stageOptions.map(stage => (
+                                  <option 
+                                    key={stage} 
+                                    value={stage}
+                                    style={{ 
+                                      background: isDark ? '#1e293b' : '#ffffff', 
+                                      color: isDark ? '#f8fafc' : '#0f172a',
+                                      fontWeight: 600,
+                                      padding: '6px'
+                                    }}
+                                  >
+                                    {stage === 'Approved' ? '✓ Approved' : stage}
+                                  </option>
+                                ));
+                              })()}
+                            </select>
+                            <div style={{
+                              position: 'absolute',
+                              right: '9px',
+                              pointerEvents: 'none',
+                              fontSize: '9px',
                               color: badgeStyle.text,
-                              fontSize: '12px',
-                              fontWeight: 750
+                              opacity: 0.8,
+                              display: 'flex',
+                              alignItems: 'center'
                             }}>
-                              <span>{badgeStyle.icon}</span>
-                              <span>{inc.stage_of_reclassification || 'For Review'}</span>
-                            </span>
-                          ) : (
-                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                              {updatingStageId === inc.id ? '⏳' : '▼'}
+                            </div>
+                          </div>
+                        </td>
+                        <td style={{ padding: '14px 18px', verticalAlign: 'middle' }} onClick={e => e.stopPropagation()}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                            <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
                               <select
-                                value={inc.stage_of_reclassification || 'For Review'}
-                                onChange={e => handleUpdateIncumbentStage(inc.id, e.target.value, e)}
-                                disabled={updatingStageId === inc.id}
+                                value={inc.reclass_position || inc.actual_position || inc.target_position || ''}
+                                disabled={isRegionalOffice || updatingPositionId === inc.id}
+                                onChange={(e) => handleUpdateIncumbentPosition(inc.id, e.target.value, e)}
+                                title={isRegionalOffice ? 'View-only for Regional Office' : 'Click to update Actual Reclassification Position'}
                                 style={{
-                                  padding: '5px 10px',
-                                  borderRadius: '8px',
-                                  border: `1.5px solid ${badgeStyle.border}`,
-                                  background: badgeStyle.bg,
-                                  color: badgeStyle.text,
-                                  fontSize: '12px',
+                                  appearance: 'none',
+                                  WebkitAppearance: 'none',
+                                  MozAppearance: 'none',
+                                  padding: isRegionalOffice ? '5px 10px' : '5px 24px 5px 10px',
+                                  borderRadius: '6px',
+                                  background: (inc.reclass_position || inc.actual_position || inc.target_position)
+                                    ? (isDark ? 'rgba(6, 78, 59, 0.35)' : '#ecfdf5')
+                                    : (isDark ? 'rgba(51, 65, 85, 0.4)' : '#f8fafc'),
+                                  color: (inc.reclass_position || inc.actual_position || inc.target_position)
+                                    ? (isDark ? '#6ee7b7' : '#047857')
+                                    : 'var(--text-secondary, #94a3b8)',
+                                  border: (inc.reclass_position || inc.actual_position || inc.target_position)
+                                    ? (isDark ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #a7f3d0')
+                                    : '1px solid var(--line)',
+                                  fontSize: '11.5px',
                                   fontWeight: 750,
-                                  cursor: 'pointer',
-                                  outline: 'none'
+                                  cursor: isRegionalOffice ? 'default' : (updatingPositionId === inc.id ? 'wait' : 'pointer'),
+                                  outline: 'none',
+                                  boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
+                                  transition: 'all 0.15s ease',
+                                  textAlign: 'left',
+                                  width: 'fit-content'
                                 }}
-                                title={inc.stage_of_reclassification === 'Approved' ? 'Current stage is Approved (available post-approval options: Unfilled / Vacant, Abolition)' : 'Select stage of reclassification'}
                               >
-                                {inc.stage_of_reclassification === 'Approved' ? (
-                                  APPROVED_POST_ACTION_STAGES.map(s => (
-                                    <option key={s} value={s} style={{ background: 'var(--card)', color: 'var(--text)' }}>
-                                      {s === 'Approved' ? '✓ Approved (via DBM NOSCA)' : s}
-                                    </option>
-                                  ))
-                                ) : (
-                                  RECLASS_STAGES.map(s => (
-                                    <option key={s} value={s} style={{ background: 'var(--card)', color: 'var(--text)' }}>{s}</option>
-                                  ))
-                                )}
+                                <option value="" style={{ background: isDark ? '#1e293b' : '#ffffff', color: isDark ? '#f8fafc' : '#0f172a' }}>
+                                  — Unassigned —
+                                </option>
+                                {RECLASS_POSITIONS_OPTIONS.map(pos => (
+                                  <option 
+                                    key={pos} 
+                                    value={pos}
+                                    style={{ 
+                                      background: isDark ? '#1e293b' : '#ffffff', 
+                                      color: isDark ? '#f8fafc' : '#0f172a',
+                                      fontWeight: 600,
+                                      padding: '4px'
+                                    }}
+                                  >
+                                    {pos}
+                                  </option>
+                                ))}
                               </select>
-                              {updatingStageId === inc.id && (
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2.5" style={{ animation: 'spin 1s linear infinite' }}>
-                                  <circle cx="12" cy="12" r="10" strokeDasharray="32" strokeDashoffset="10" />
-                                </svg>
+                              {!isRegionalOffice && (
+                                <div style={{
+                                  position: 'absolute',
+                                  right: '8px',
+                                  pointerEvents: 'none',
+                                  fontSize: '8px',
+                                  color: (inc.actual_position || inc.target_position || inc.reclass_position) ? (isDark ? '#6ee7b7' : '#047857') : 'var(--text-secondary, #94a3b8)',
+                                  opacity: 0.8,
+                                  display: 'flex',
+                                  alignItems: 'center'
+                                }}>
+                                  {updatingPositionId === inc.id ? '⏳' : '▼'}
+                                </div>
                               )}
                             </div>
-                          )}
-                        </td>
-                        <td style={{ padding: '14px 18px', verticalAlign: 'middle' }}>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                            {(inc.target_position || inc.reclass_position) ? (
-                              <span style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                padding: '3px 9px',
-                                borderRadius: '6px',
-                                background: isDark ? 'rgba(6, 78, 59, 0.35)' : '#ecfdf5',
-                                color: isDark ? '#6ee7b7' : '#047857',
-                                border: isDark ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #a7f3d0',
-                                fontSize: '11.5px',
-                                fontWeight: 750,
-                                width: 'fit-content'
-                              }}>
-                                {inc.target_position || inc.reclass_position}
-                              </span>
-                            ) : (
-                              <span style={{ color: 'var(--text-secondary, #94a3b8)', fontSize: '12px', fontStyle: 'italic' }}>
-                                — Unassigned
-                              </span>
-                            )}
-                            {inc.remarks && (
-                              <div style={{
-                                fontSize: '11px',
-                                fontWeight: 650,
-                                padding: '2.5px 7px',
-                                borderRadius: '5px',
-                                background: isDark ? 'rgba(51, 65, 85, 0.4)' : '#f8fafc',
-                                border: '1px solid var(--line)',
-                                color: isDark ? '#cbd5e1' : '#475569',
-                                width: 'fit-content',
-                                maxWidth: '220px',
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap'
-                              }} title={inc.remarks}>
+                            {inc.remarks && !['CTI', 'Reclassification'].includes(inc.remarks.trim()) && (
+                              <span style={{ fontSize: '10px', color: 'var(--text-secondary, #94a3b8)', fontStyle: 'italic' }}>
                                 {inc.remarks}
-                              </div>
+                              </span>
                             )}
                           </div>
                         </td>
@@ -3802,7 +3668,7 @@ export default function ReclassificationPage({ onBack }) {
                 Endorsed & Approved Counselors for DBM Transmittal
               </h3>
               <span style={{ fontSize: '12px', color: isDark ? '#94a3b8' : '#64748b', fontWeight: 600 }}>
-                {incumbents.filter(i => i.stage_of_reclassification === 'Endorsed' || i.stage_of_reclassification === 'Approved').length} candidates
+                {incumbents.filter(i => ['Endorsed to RO', 'Endorsed to DBM RO', 'Endorsed to SDO', 'Endorsed', 'Approved'].includes(i.stage_of_reclassification)).length} candidates
               </span>
             </div>
 
@@ -3825,7 +3691,7 @@ export default function ReclassificationPage({ onBack }) {
                 </thead>
                 <tbody>
                   {incumbents
-                    .filter(i => i.stage_of_reclassification === 'Endorsed' || i.stage_of_reclassification === 'Approved')
+                    .filter(i => ['Endorsed to RO', 'Endorsed to DBM RO', 'Endorsed to SDO', 'Endorsed', 'Approved'].includes(i.stage_of_reclassification))
                     .slice(0, 15)
                     .map((counselor, idx) => {
                       const badge = getStageBadge(counselor.stage_of_reclassification);
@@ -3880,7 +3746,7 @@ export default function ReclassificationPage({ onBack }) {
                               color: badge.text,
                               border: `1px solid ${badge.border}`
                             }}>
-                              {badge.icon} {counselor.stage_of_reclassification}
+                              {badge.icon ? `${badge.icon} ` : ''}{counselor.stage_of_reclassification}
                             </span>
                           </td>
                           <td style={{ padding: '8px 14px', verticalAlign: 'middle' }} onClick={e => e.stopPropagation()}>
@@ -4034,7 +3900,7 @@ export default function ReclassificationPage({ onBack }) {
                         </tr>
                       );
                     })}
-                  {incumbents.filter(i => i.stage_of_reclassification === 'Endorsed' || i.stage_of_reclassification === 'Approved').length === 0 && (
+                  {incumbents.filter(i => ['Endorsed to RO', 'Endorsed to DBM RO', 'Endorsed to SDO', 'Endorsed', 'Approved'].includes(i.stage_of_reclassification)).length === 0 && (
                     <tr>
                       <td colSpan={7} style={{ padding: '24px', textAlign: 'center', color: isDark ? '#94a3b8' : '#64748b' }}>
                         No counselors have been marked as Endorsed or Approved yet. Move candidates to Endorsed/Approved in Step 2.
@@ -4383,603 +4249,6 @@ export default function ReclassificationPage({ onBack }) {
         </div>
       )}
 
-      {/* MODAL 1: RE-EVALUATION AGAINST CSC QS */}
-      {showReevalModal && selectedApp && (
-        <div 
-          onClick={(e) => { if (e.target === e.currentTarget) setShowReevalModal(false); }}
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: isDark ? 'rgba(2, 6, 23, 0.75)' : 'rgba(15, 23, 42, 0.45)',
-            backdropFilter: 'blur(8px)',
-            display: 'grid',
-            placeItems: 'center',
-            zIndex: 100
-          }}
-        >
-          <div style={{
-            background: isDark ? 'rgba(15, 23, 42, 0.95)' : 'var(--modal-bg, var(--card))',
-            backdropFilter: 'blur(20px)',
-            borderRadius: '20px',
-            width: 'min(580px, 94vw)',
-            padding: '28px 32px',
-            boxShadow: isDark ? '0 25px 60px rgba(0,0,0,0.6)' : '0 20px 40px rgba(0,0,0,0.15)',
-            border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid var(--line)'
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '18px', gap: '16px' }}>
-              <div>
-                <span style={{ fontSize: '11px', fontWeight: 800, color: isDark ? '#818cf8' : '#4f46e5', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                  CSC QUALIFICATION MATRIX
-                </span>
-                <h3 style={{ fontSize: '18px', fontWeight: 800, margin: '2px 0 0', color: 'var(--text)' }}>
-                  Re-evaluate Application
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowReevalModal(false)}
-                title="Close (Esc)"
-                aria-label="Close Modal"
-                style={{
-                  background: isDark ? 'rgba(30, 41, 59, 0.6)' : 'var(--card-subtle)',
-                  border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid var(--line)',
-                  width: '32px',
-                  height: '32px',
-                  borderRadius: '8px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: 'var(--text-secondary, #94a3b8)',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease',
-                  padding: 0,
-                  flexShrink: 0
-                }}
-                onMouseOver={e => {
-                  e.currentTarget.style.background = isDark ? 'rgba(239, 68, 68, 0.2)' : '#fee2e2';
-                  e.currentTarget.style.borderColor = '#ef4444';
-                  e.currentTarget.style.color = isDark ? '#fca5a5' : '#b91c1c';
-                }}
-                onMouseOut={e => {
-                  e.currentTarget.style.background = isDark ? 'rgba(30, 41, 59, 0.6)' : 'var(--card-subtle)';
-                  e.currentTarget.style.borderColor = isDark ? 'rgba(51, 65, 85, 0.8)' : 'var(--line)';
-                  e.currentTarget.style.color = 'var(--text-secondary, #94a3b8)';
-                }}
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </button>
-            </div>
-
-            <div style={{
-              background: isDark ? 'rgba(2, 6, 23, 0.6)' : 'var(--card-subtle)',
-              borderRadius: '12px',
-              padding: '14px 16px',
-              marginBottom: '20px',
-              border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid var(--line)',
-              fontSize: '13px',
-              color: 'var(--text)'
-            }}>
-              <div><b style={{ color: 'var(--text)' }}>Applicant:</b> {selectedApp.applicant_name} ({selectedApp.application_number})</div>
-              <div><b style={{ color: 'var(--text)' }}>Target Position:</b> {selectedApp.position_title}</div>
-              <div><b style={{ color: 'var(--text)' }}>Plantilla Item:</b> {selectedApp.item_number}</div>
-              <div><b style={{ color: 'var(--text)' }}>Station:</b> {selectedApp.station_division}</div>
-            </div>
-
-            <form onSubmit={handleSaveReeval}>
-              <div style={{ marginBottom: '16px' }}>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 750, color: 'var(--text)', marginBottom: '6px' }}>
-                  CSC-Approved QS Evaluation Result
-                </label>
-                <select
-                  value={reevalResult}
-                  onChange={e => {
-                    setReevalResult(e.target.value);
-                    if (e.target.value.includes('Qualified')) {
-                      setReevalStatus('reevaluated');
-                    } else if (e.target.value.includes('Update')) {
-                      setReevalStatus('needs_applicant_update');
-                    }
-                  }}
-                  style={{
-                    width: '100%',
-                    padding: '10px 12px',
-                    borderRadius: '10px',
-                    border: isDark ? '1.5px solid rgba(51, 65, 85, 0.8)' : '1.5px solid var(--input-border, var(--line))',
-                    background: 'var(--input-bg)',
-                    color: 'var(--input-text, var(--text))',
-                    fontSize: '13.5px'
-                  }}
-                  required
-                >
-                  <option value="Qualified (CSC QS)" style={{ background: 'var(--card)', color: 'var(--text)' }}>Qualified (CSC QS)</option>
-                  <option value="Needs Applicant Update" style={{ background: 'var(--card)', color: 'var(--text)' }}>Needs Applicant Update (Deficient Credentials)</option>
-                  <option value="Disqualified" style={{ background: 'var(--card)', color: 'var(--text)' }}>Disqualified (Does Not Meet Approved QS)</option>
-                  <option value="Pending CSC Review" style={{ background: 'var(--card)', color: 'var(--text)' }}>Pending CSC Review</option>
-                </select>
-              </div>
-
-              <div style={{ marginBottom: '16px' }}>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 750, color: 'var(--text)', marginBottom: '6px' }}>
-                  Evaluation Lifecycle Status
-                </label>
-                <select
-                  value={reevalStatus}
-                  onChange={e => setReevalStatus(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '10px 12px',
-                    borderRadius: '10px',
-                    border: isDark ? '1.5px solid rgba(51, 65, 85, 0.8)' : '1.5px solid var(--input-border, var(--line))',
-                    background: 'var(--input-bg)',
-                    color: 'var(--input-text, var(--text))',
-                    fontSize: '13.5px'
-                  }}
-                  required
-                >
-                  <option value="reevaluated" style={{ background: 'var(--card)', color: 'var(--text)' }}>Re-evaluated (Ready for DBM Endorsement)</option>
-                  <option value="needs_applicant_update" style={{ background: 'var(--card)', color: 'var(--text)' }}>Needs Applicant Update</option>
-                  <option value="pending_reevaluation" style={{ background: 'var(--card)', color: 'var(--text)' }}>Pending Re-evaluation</option>
-                </select>
-              </div>
-
-              <div style={{ marginBottom: '22px' }}>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 750, color: 'var(--text)', marginBottom: '6px' }}>
-                  Evaluator Remarks / Justification
-                </label>
-                <textarea
-                  rows="3"
-                  value={reevalRemarks}
-                  onChange={e => setReevalRemarks(e.target.value)}
-                  placeholder="Record justification based on CSC qualification standards..."
-                  style={{
-                    width: '100%',
-                    padding: '10px 12px',
-                    borderRadius: '10px',
-                    border: isDark ? '1.5px solid rgba(51, 65, 85, 0.8)' : '1.5px solid var(--input-border, var(--line))',
-                    background: 'var(--input-bg)',
-                    color: 'var(--input-text, var(--text))',
-                    fontSize: '13px'
-                  }}
-                />
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-                <button
-                  type="button"
-                  onClick={() => setShowReevalModal(false)}
-                  style={{
-                    padding: '9px 16px',
-                    borderRadius: '10px',
-                    border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid var(--line)',
-                    background: isDark ? 'rgba(30, 41, 59, 0.6)' : 'var(--card-subtle)',
-                    color: 'var(--text)',
-                    fontSize: '13px',
-                    fontWeight: 700,
-                    cursor: 'pointer'
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={submittingReeval}
-                  style={{
-                    padding: '9px 18px',
-                    borderRadius: '10px',
-                    border: 'none',
-                    background: '#6366f1',
-                    color: '#ffffff',
-                    fontSize: '13px',
-                    fontWeight: 750,
-                    cursor: 'pointer',
-                    boxShadow: '0 4px 12px rgba(99, 102, 241, 0.3)'
-                  }}
-                >
-                  {submittingReeval ? 'Saving...' : 'Confirm Re-evaluation'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL 2: CREDENTIALS / DOCUMENT UPDATE */}
-      {showDocModal && selectedApp && (
-        <div 
-          onClick={(e) => { if (e.target === e.currentTarget) setShowDocModal(false); }}
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: isDark ? 'rgba(2, 6, 23, 0.75)' : 'rgba(15, 23, 42, 0.45)',
-            backdropFilter: 'blur(8px)',
-            display: 'grid',
-            placeItems: 'center',
-            zIndex: 100
-          }}
-        >
-          <div style={{
-            background: isDark ? 'rgba(15, 23, 42, 0.95)' : 'var(--modal-bg, var(--card))',
-            backdropFilter: 'blur(20px)',
-            borderRadius: '20px',
-            width: 'min(580px, 94vw)',
-            padding: '28px 32px',
-            boxShadow: isDark ? '0 25px 60px rgba(0,0,0,0.6)' : '0 20px 40px rgba(0,0,0,0.15)',
-            border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid var(--line)'
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '18px', gap: '16px' }}>
-              <div>
-                <span style={{ fontSize: '11px', fontWeight: 800, color: isDark ? '#34d399' : '#059669', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                  APPLICANT CREDENTIALS VAULT
-                </span>
-                <h3 style={{ fontSize: '18px', fontWeight: 800, margin: '2px 0 0', color: 'var(--text)' }}>
-                  Document Records — {selectedApp.applicant_name}
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowDocModal(false)}
-                title="Close (Esc)"
-                aria-label="Close Modal"
-                style={{
-                  background: isDark ? 'rgba(30, 41, 59, 0.6)' : 'var(--card-subtle)',
-                  border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid var(--line)',
-                  width: '32px',
-                  height: '32px',
-                  borderRadius: '8px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: 'var(--text-secondary, #94a3b8)',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease',
-                  padding: 0,
-                  flexShrink: 0
-                }}
-                onMouseOver={e => {
-                  e.currentTarget.style.background = isDark ? 'rgba(239, 68, 68, 0.2)' : '#fee2e2';
-                  e.currentTarget.style.borderColor = '#ef4444';
-                  e.currentTarget.style.color = isDark ? '#fca5a5' : '#b91c1c';
-                }}
-                onMouseOut={e => {
-                  e.currentTarget.style.background = isDark ? 'rgba(30, 41, 59, 0.6)' : 'var(--card-subtle)';
-                  e.currentTarget.style.borderColor = isDark ? 'rgba(51, 65, 85, 0.8)' : 'var(--line)';
-                  e.currentTarget.style.color = 'var(--text-secondary, #94a3b8)';
-                }}
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </button>
-            </div>
-
-            {/* Current Attached Documents */}
-            <div style={{ marginBottom: '20px' }}>
-              <div style={{ fontSize: '12px', fontWeight: 750, color: 'var(--text-secondary, #94a3b8)', marginBottom: '8px', textTransform: 'uppercase' }}>
-                Existing Attached Credentials ({Array.isArray(selectedApp.documents) ? selectedApp.documents.length : 0})
-              </div>
-              <div style={{
-                maxHeight: '140px',
-                overflowY: 'auto',
-                background: isDark ? 'rgba(2, 6, 23, 0.6)' : 'var(--card-subtle)',
-                borderRadius: '10px',
-                border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid var(--line)',
-                padding: '8px 12px'
-              }}>
-                {(!selectedApp.documents || selectedApp.documents.length === 0) ? (
-                  <div style={{ fontSize: '12.5px', color: 'var(--text-secondary, #94a3b8)', textAlign: 'center', padding: '12px' }}>
-                    No updated credentials on file yet.
-                  </div>
-                ) : (
-                  (Array.isArray(selectedApp.documents) ? selectedApp.documents : []).map((doc, idx) => (
-                    <div key={idx} style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      padding: '6px 0',
-                      borderBottom: idx < selectedApp.documents.length - 1 ? (isDark ? '1px solid rgba(51, 65, 85, 0.4)' : '1px solid var(--line)') : 'none',
-                      fontSize: '12.5px'
-                    }}>
-                      <span style={{ fontWeight: 600, color: 'var(--text)' }}>📄 {doc.name || doc}</span>
-                      <span style={{ fontSize: '11px', color: 'var(--text-secondary, #94a3b8)' }}>
-                        {doc.uploadedAt ? new Date(doc.uploadedAt).toLocaleDateString() : 'Verified'}
-                      </span>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-
-            {/* Add New Document Form */}
-            <form onSubmit={handleSaveDocument}>
-              <div style={{ marginBottom: '14px' }}>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 750, color: 'var(--text)', marginBottom: '6px' }}>
-                  Document / Credential Title
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. Masteral_Degree_Transcript_2026.pdf"
-                  value={newDocName}
-                  onChange={e => setNewDocName(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '10px 12px',
-                    borderRadius: '10px',
-                    border: isDark ? '1.5px solid rgba(51, 65, 85, 0.8)' : '1.5px solid var(--input-border, var(--line))',
-                    background: 'var(--input-bg)',
-                    color: 'var(--input-text, var(--text))',
-                    fontSize: '13px'
-                  }}
-                  required
-                />
-              </div>
-
-              <div style={{ marginBottom: '22px' }}>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 750, color: 'var(--text)', marginBottom: '6px' }}>
-                  Document Category
-                </label>
-                <select
-                  value={newDocType}
-                  onChange={e => setNewDocType(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '10px 12px',
-                    borderRadius: '10px',
-                    border: isDark ? '1.5px solid rgba(51, 65, 85, 0.8)' : '1.5px solid var(--input-border, var(--line))',
-                    background: 'var(--input-bg)',
-                    color: 'var(--input-text, var(--text))',
-                    fontSize: '13px'
-                  }}
-                >
-                  <option value="pds" style={{ background: 'var(--card)', color: 'var(--text)' }}>Personal Data Sheet (CS Form 212)</option>
-                  <option value="tor" style={{ background: 'var(--card)', color: 'var(--text)' }}>Transcript of Records / Diploma</option>
-                  <option value="ipcrf" style={{ background: 'var(--card)', color: 'var(--text)' }}>IPCRF / Performance Rating</option>
-                  <option value="service_record" style={{ background: 'var(--card)', color: 'var(--text)' }}>Service Record / Certificates</option>
-                  <option value="csc_eligibility" style={{ background: 'var(--card)', color: 'var(--text)' }}>CSC Eligibility / Board License</option>
-                </select>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-                <button
-                  type="button"
-                  onClick={() => setShowDocModal(false)}
-                  style={{
-                    padding: '9px 16px',
-                    borderRadius: '10px',
-                    border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid var(--line)',
-                    background: isDark ? 'rgba(30, 41, 59, 0.6)' : 'var(--card-subtle)',
-                    color: 'var(--text)',
-                    fontSize: '13px',
-                    fontWeight: 700,
-                    cursor: 'pointer'
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={submittingDoc}
-                  style={{
-                    padding: '9px 18px',
-                    borderRadius: '10px',
-                    border: 'none',
-                    background: '#059669',
-                    color: '#ffffff',
-                    fontSize: '13px',
-                    fontWeight: 750,
-                    cursor: 'pointer',
-                    boxShadow: '0 4px 12px rgba(5, 150, 105, 0.3)'
-                  }}
-                >
-                  {submittingDoc ? 'Updating...' : '+ Attach Credential'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL 3: NEW RECLASSIFICATION APPLICATION */}
-      {showNewAppModal && (
-        <div 
-          onClick={(e) => { if (e.target === e.currentTarget) setShowNewAppModal(false); }}
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: isDark ? 'rgba(2, 6, 23, 0.75)' : 'rgba(15, 23, 42, 0.45)',
-            backdropFilter: 'blur(8px)',
-            display: 'grid',
-            placeItems: 'center',
-            zIndex: 100
-          }}
-        >
-          <div style={{
-            background: isDark ? 'rgba(15, 23, 42, 0.95)' : 'var(--modal-bg, var(--card))',
-            backdropFilter: 'blur(20px)',
-            borderRadius: '20px',
-            width: 'min(580px, 94vw)',
-            padding: '28px 32px',
-            boxShadow: isDark ? '0 25px 60px rgba(0,0,0,0.6)' : '0 20px 40px rgba(0,0,0,0.15)',
-            border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid var(--line)'
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '18px', gap: '16px' }}>
-              <div>
-                <span style={{ fontSize: '11px', fontWeight: 800, color: isDark ? '#60a5fa' : '#2563eb', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                  INTAKE WORKBENCH
-                </span>
-                <h3 style={{ fontSize: '18px', fontWeight: 800, margin: '2px 0 0', color: 'var(--text)' }}>
-                  New Reclassification Entry
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowNewAppModal(false)}
-                title="Close (Esc)"
-                aria-label="Close Modal"
-                style={{
-                  background: isDark ? 'rgba(30, 41, 59, 0.6)' : 'var(--card-subtle)',
-                  border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid var(--line)',
-                  width: '32px',
-                  height: '32px',
-                  borderRadius: '8px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: 'var(--text-secondary, #94a3b8)',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease',
-                  padding: 0,
-                  flexShrink: 0
-                }}
-                onMouseOver={e => {
-                  e.currentTarget.style.background = isDark ? 'rgba(239, 68, 68, 0.2)' : '#fee2e2';
-                  e.currentTarget.style.borderColor = '#ef4444';
-                  e.currentTarget.style.color = isDark ? '#fca5a5' : '#b91c1c';
-                }}
-                onMouseOut={e => {
-                  e.currentTarget.style.background = isDark ? 'rgba(30, 41, 59, 0.6)' : 'var(--card-subtle)';
-                  e.currentTarget.style.borderColor = isDark ? 'rgba(51, 65, 85, 0.8)' : 'var(--line)';
-                  e.currentTarget.style.color = 'var(--text-secondary, #94a3b8)';
-                }}
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateNewApp}>
-              <div style={{ marginBottom: '14px' }}>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 750, color: 'var(--text)', marginBottom: '6px' }}>
-                  Applicant Full Name
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. Juanita D. Reyes"
-                  value={newApplicantName}
-                  onChange={e => setNewApplicantName(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '10px 12px',
-                    borderRadius: '10px',
-                    border: isDark ? '1.5px solid rgba(51, 65, 85, 0.8)' : '1.5px solid var(--input-border, var(--line))',
-                    background: 'var(--input-bg)',
-                    color: 'var(--input-text, var(--text))',
-                    fontSize: '13px'
-                  }}
-                  required
-                />
-              </div>
-
-              <div style={{ marginBottom: '14px' }}>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 750, color: 'var(--text)', marginBottom: '6px' }}>
-                  Reclassification Target Position
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. Master Teacher I (Elementary)"
-                  value={newPosition}
-                  onChange={e => setNewPosition(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '10px 12px',
-                    borderRadius: '10px',
-                    border: isDark ? '1.5px solid rgba(51, 65, 85, 0.8)' : '1.5px solid var(--input-border, var(--line))',
-                    background: 'var(--input-bg)',
-                    color: 'var(--input-text, var(--text))',
-                    fontSize: '13px'
-                  }}
-                  required
-                />
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '22px' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 750, color: 'var(--text)', marginBottom: '6px' }}>
-                    Plantilla Item No.
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. OSEC-DECSB-MTCHR1-00045"
-                    value={newItemNumber}
-                    onChange={e => setNewItemNumber(e.target.value)}
-                    style={{
-                      width: '100%',
-                      padding: '10px 12px',
-                      borderRadius: '10px',
-                      border: isDark ? '1.5px solid rgba(51, 65, 85, 0.8)' : '1.5px solid var(--input-border, var(--line))',
-                      background: 'var(--input-bg)',
-                      color: 'var(--input-text, var(--text))',
-                      fontSize: '13px'
-                    }}
-                  />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 750, color: 'var(--text)', marginBottom: '6px' }}>
-                    Station / Division
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. SDO Quezon City"
-                    value={newStation}
-                    onChange={e => setNewStation(e.target.value)}
-                    style={{
-                      width: '100%',
-                      padding: '10px 12px',
-                      borderRadius: '10px',
-                      border: isDark ? '1.5px solid rgba(51, 65, 85, 0.8)' : '1.5px solid var(--input-border, var(--line))',
-                      background: 'var(--input-bg)',
-                      color: 'var(--input-text, var(--text))',
-                      fontSize: '13px'
-                    }}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-                <button
-                  type="button"
-                  onClick={() => setShowNewAppModal(false)}
-                  style={{
-                    padding: '9px 16px',
-                    borderRadius: '10px',
-                    border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid var(--line)',
-                    background: isDark ? 'rgba(30, 41, 59, 0.6)' : 'var(--card-subtle)',
-                    color: 'var(--text)',
-                    fontSize: '13px',
-                    fontWeight: 700,
-                    cursor: 'pointer'
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={submittingNewApp}
-                  style={{
-                    padding: '9px 18px',
-                    borderRadius: '10px',
-                    border: 'none',
-                    background: '#2563eb',
-                    color: '#ffffff',
-                    fontSize: '13px',
-                    fontWeight: 750,
-                    cursor: 'pointer',
-                    boxShadow: '0 4px 12px rgba(37, 99, 235, 0.3)'
-                  }}
-                >
-                  {submittingNewApp ? 'Creating...' : 'Register Application'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
       {/* MODAL 4: INCUMBENT GUIDANCE COUNSELOR ASSESSMENT MODAL */}
       {showAssessmentModal && selectedIncumbent && (
         <div 
@@ -5042,8 +4311,26 @@ export default function ReclassificationPage({ onBack }) {
                     borderRadius: '6px',
                     fontFamily: 'monospace'
                   }}>
-                    Item: {selectedIncumbent.plantilla_item_number || selectedIncumbent.employee_id}
+                    Plantilla: {selectedIncumbent.plantilla_item_number || selectedIncumbent.employee_id}
                   </span>
+                  {selectedIncumbent.new_item_number && (
+                    <span style={{
+                      fontSize: '11px',
+                      fontWeight: 800,
+                      color: isDark ? '#6ee7b7' : '#047857',
+                      background: isDark ? 'rgba(6, 78, 59, 0.35)' : '#ecfdf5',
+                      border: isDark ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #a7f3d0',
+                      padding: '3px 9px',
+                      borderRadius: '6px',
+                      fontFamily: 'monospace',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}>
+                      <span style={{ opacity: 0.75, fontWeight: 700 }}>NEW ITEM:</span>
+                      {selectedIncumbent.new_item_number}
+                    </span>
+                  )}
                   {selectedIncumbent.full_name === '#N/A' && (
                     <span style={{
                       fontSize: '10px',
@@ -5076,42 +4363,69 @@ export default function ReclassificationPage({ onBack }) {
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={() => setShowAssessmentModal(false)}
-                title="Close Assessment (Esc)"
-                aria-label="Close Assessment Modal"
-                style={{
-                  background: isDark ? 'rgba(30, 41, 59, 0.6)' : 'var(--card-solid, #ffffff)',
-                  border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid var(--line)',
-                  width: '34px',
-                  height: '34px',
-                  borderRadius: '10px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: 'var(--text-secondary, #94a3b8)',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease',
-                  padding: 0,
-                  flexShrink: 0
-                }}
-                onMouseOver={e => {
-                  e.currentTarget.style.background = isDark ? 'rgba(239, 68, 68, 0.2)' : '#fee2e2';
-                  e.currentTarget.style.borderColor = '#ef4444';
-                  e.currentTarget.style.color = isDark ? '#fca5a5' : '#b91c1c';
-                }}
-                onMouseOut={e => {
-                  e.currentTarget.style.background = isDark ? 'rgba(30, 41, 59, 0.6)' : 'var(--card-solid, #ffffff)';
-                  e.currentTarget.style.borderColor = isDark ? 'rgba(51, 65, 85, 0.8)' : 'var(--line)';
-                  e.currentTarget.style.color = 'var(--text-secondary, #94a3b8)';
-                }}
-              >
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
+                <button
+                  type="button"
+                  onClick={() => setShowIncumbentDocsModal(true)}
+                  style={{
+                    padding: '8px 16px',
+                    borderRadius: '8px',
+                    border: isDark ? '1px solid rgba(56, 189, 248, 0.45)' : '1px solid #0284c7',
+                    background: isDark ? 'rgba(2, 132, 199, 0.2)' : '#eff6ff',
+                    color: isDark ? '#38bdf8' : '#0284c7',
+                    fontSize: '12.5px',
+                    fontWeight: 750,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '7px',
+                    boxShadow: '0 1px 3px rgba(2, 132, 199, 0.12)',
+                    transition: 'all 0.15s ease'
+                  }}
+                  onMouseOver={e => e.currentTarget.style.background = isDark ? 'rgba(2, 132, 199, 0.35)' : '#dbeafe'}
+                  onMouseOut={e => e.currentTarget.style.background = isDark ? 'rgba(2, 132, 199, 0.2)' : '#eff6ff'}
+                >
+                  <span style={{ fontSize: '15px' }}>📁</span>
+                  View Submitted Documents
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowAssessmentModal(false)}
+                  title="Close Assessment (Esc)"
+                  aria-label="Close Assessment Modal"
+                  style={{
+                    background: isDark ? 'rgba(30, 41, 59, 0.6)' : 'var(--card-solid, #ffffff)',
+                    border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid var(--line)',
+                    width: '34px',
+                    height: '34px',
+                    borderRadius: '10px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: 'var(--text-secondary, #94a3b8)',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                    padding: 0,
+                    flexShrink: 0
+                  }}
+                  onMouseOver={e => {
+                    e.currentTarget.style.background = isDark ? 'rgba(239, 68, 68, 0.2)' : '#fee2e2';
+                    e.currentTarget.style.borderColor = '#ef4444';
+                    e.currentTarget.style.color = isDark ? '#fca5a5' : '#b91c1c';
+                  }}
+                  onMouseOut={e => {
+                    e.currentTarget.style.background = isDark ? 'rgba(30, 41, 59, 0.6)' : 'var(--card-solid, #ffffff)';
+                    e.currentTarget.style.borderColor = isDark ? 'rgba(51, 65, 85, 0.8)' : 'var(--line)';
+                    e.currentTarget.style.color = 'var(--text-secondary, #94a3b8)';
+                  }}
+                >
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                </button>
+              </div>
             </div>
 
             {/* Modal Body (Scrollable) */}
@@ -5122,210 +4436,82 @@ export default function ReclassificationPage({ onBack }) {
               flexDirection: 'column',
               gap: '20px'
             }}>
-              {/* TOP DASHBOARD ROW: 2-Column Responsive Layout */}
+              {/* TOP DASHBOARD ROW: Official Plantilla Assignment Profile */}
               <div style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(440px, 1fr))',
-                gap: '16px'
+                background: isDark ? 'rgba(2, 6, 23, 0.6)' : 'var(--card-subtle)',
+                borderRadius: '16px',
+                border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid var(--line)',
+                padding: '18px 20px',
+                boxShadow: isDark ? '0 8px 32px rgba(0, 0, 0, 0.2)' : '0 4px 12px rgba(0, 0, 0, 0.03)'
               }}>
-                {/* Panel A: Official Plantilla Assignment */}
                 <div style={{
-                  background: isDark ? 'rgba(2, 6, 23, 0.6)' : 'var(--card-subtle)',
-                  borderRadius: '16px',
-                  border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid var(--line)',
-                  padding: '18px 20px',
+                  fontSize: '11px',
+                  fontWeight: 800,
+                  color: isDark ? '#38bdf8' : '#0284c7',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.06em',
+                  marginBottom: '12px',
                   display: 'flex',
-                  flexDirection: 'column',
+                  alignItems: 'center',
                   justifyContent: 'space-between'
                 }}>
-                  <div>
-                    <div style={{
-                      fontSize: '11px',
-                      fontWeight: 800,
-                      color: isDark ? '#38bdf8' : '#0284c7',
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.06em',
-                      marginBottom: '12px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between'
-                    }}>
-                      <span>Official Plantilla &amp; Station Profile</span>
-                      <span style={{ fontSize: '11px', color: 'var(--text-secondary, #94a3b8)', textTransform: 'none', fontWeight: 650 }}>
-                        {selectedIncumbent.region || 'DepEd Regional'}
-                      </span>
-                    </div>
-
-                    <div style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(2, 1fr)',
-                      gap: '10px',
-                      fontSize: '12px'
-                    }}>
-                      <div style={{ background: isDark ? 'rgba(15, 23, 42, 0.65)' : 'var(--card-solid, #ffffff)', padding: '10px 12px', borderRadius: '10px', border: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid var(--line)' }}>
-                        <div style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-secondary, #94a3b8)', textTransform: 'uppercase' }}>Plantilla Item No.</div>
-                        <div style={{ fontWeight: 800, color: 'var(--text)', marginTop: '2px', fontFamily: 'monospace', fontSize: '11.5px', wordBreak: 'break-all' }}>
-                          {selectedIncumbent.plantilla_item_number || selectedIncumbent.employee_id}
-                        </div>
-                      </div>
-
-                      <div style={{ background: isDark ? 'rgba(15, 23, 42, 0.65)' : 'var(--card-solid, #ffffff)', padding: '10px 12px', borderRadius: '10px', border: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid var(--line)' }}>
-                        <div style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-secondary, #94a3b8)', textTransform: 'uppercase' }}>Org Code &amp; Salary Grade</div>
-                        <div style={{ fontWeight: 750, color: 'var(--text)', marginTop: '2px' }}>
-                          {selectedIncumbent.org_cd ? `ORG ${selectedIncumbent.org_cd}` : '—'} • <span style={{ color: '#2563eb', fontWeight: 800 }}>SG {selectedIncumbent.salary_grade || '—'}</span>
-                        </div>
-                      </div>
-
-                      <div style={{ background: isDark ? 'rgba(15, 23, 42, 0.65)' : 'var(--card-solid, #ffffff)', padding: '10px 12px', borderRadius: '10px', border: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid var(--line)' }}>
-                        <div style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-secondary, #94a3b8)', textTransform: 'uppercase' }}>Station / School</div>
-                        <div style={{ fontWeight: 750, color: 'var(--text)', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={selectedIncumbent.uacs_oper_dsc || selectedIncumbent.station_division}>
-                          {selectedIncumbent.uacs_oper_dsc || selectedIncumbent.station_division || '—'}
-                        </div>
-                      </div>
-
-                      <div style={{ background: isDark ? 'rgba(15, 23, 42, 0.65)' : 'var(--card-solid, #ffffff)', padding: '10px 12px', borderRadius: '10px', border: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid var(--line)' }}>
-                        <div style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-secondary, #94a3b8)', textTransform: 'uppercase' }}>Division &amp; Region</div>
-                        <div style={{ fontWeight: 700, color: 'var(--text)', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {selectedIncumbent.division || selectedIncumbent.station_division || '—'}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {selectedIncumbent.remarks && (
-                    <div style={{ marginTop: '10px', background: isDark ? 'rgba(15, 23, 42, 0.5)' : 'var(--card-solid, #ffffff)', padding: '8px 12px', borderRadius: '8px', border: isDark ? '1px solid rgba(51, 65, 85, 0.5)' : '1px solid var(--line)', fontSize: '11.5px' }}>
-                      <span style={{ fontSize: '10px', fontWeight: 750, color: 'var(--text-secondary, #94a3b8)', textTransform: 'uppercase', marginRight: '6px' }}>Remarks:</span>
-                      <span style={{ color: 'var(--text)', fontWeight: 600 }}>{selectedIncumbent.remarks}</span>
-                    </div>
-                  )}
+                  <span>Official Plantilla &amp; Station Profile</span>
+                  <span style={{ fontSize: '11px', color: 'var(--text-secondary, #94a3b8)', textTransform: 'none', fontWeight: 650 }}>
+                    {selectedIncumbent.region || 'DepEd Regional'}
+                  </span>
                 </div>
 
-                {/* Panel B: Reclassification Decisions */}
                 <div style={{
-                  background: isDark ? 'rgba(6, 78, 59, 0.25)' : '#ecfdf5',
-                  borderRadius: '16px',
-                  border: isDark ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #a7f3d0',
-                  padding: '18px 20px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  justifyContent: 'space-between'
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                  gap: '10px',
+                  fontSize: '12px'
                 }}>
-                  <div>
-                    <div style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      marginBottom: '12px',
-                      gap: '10px'
-                    }}>
-                      <div style={{
-                        fontSize: '11px',
-                        fontWeight: 800,
-                        color: isDark ? '#34d399' : '#047857',
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.05em'
-                      }}>
-                        1. Target Position &amp; Workflow Stage
-                      </div>
-                      {isRegionalOffice && (
-                        <span style={{
-                          fontSize: '10.5px',
-                          fontWeight: 750,
-                          padding: '2px 7px',
-                          borderRadius: '6px',
-                          background: isDark ? 'rgba(99, 102, 241, 0.25)' : '#e0e7ff',
-                          color: isDark ? '#c7d2fe' : '#4338ca',
-                          border: isDark ? '1px solid rgba(99, 102, 241, 0.4)' : '1px solid #c7d2fe'
-                        }}>
-                          👁️ View-Only
-                        </span>
-                      )}
+                  <div style={{ background: isDark ? 'rgba(15, 23, 42, 0.65)' : 'var(--card-solid, #ffffff)', padding: '10px 12px', borderRadius: '10px', border: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid var(--line)' }}>
+                    <div style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-secondary, #94a3b8)', textTransform: 'uppercase' }}>Plantilla Item No.</div>
+                    <div style={{ fontWeight: 800, color: 'var(--text)', marginTop: '2px', fontFamily: 'monospace', fontSize: '11.5px', wordBreak: 'break-all' }}>
+                      {selectedIncumbent.plantilla_item_number || selectedIncumbent.employee_id}
                     </div>
-
-                    <div style={{
-                      display: 'grid',
-                      gridTemplateColumns: '1fr 1fr',
-                      gap: '12px'
-                    }}>
-                      <div>
-                        <label style={{ display: 'block', fontSize: '11.5px', fontWeight: 750, color: 'var(--text)', marginBottom: '5px' }}>
-                          Target Reclassification Position <span style={{ color: '#ef4444' }}>*</span>
-                        </label>
-                        <select
-                          value={modalTargetPosition}
-                          onChange={e => setModalTargetPosition(e.target.value)}
-                          disabled={isRegionalOffice || savingModalChanges}
-                          style={{
-                            width: '100%',
-                            padding: '9px 12px',
-                            borderRadius: '10px',
-                            border: isDark ? '1.5px solid rgba(16, 185, 129, 0.5)' : '1.5px solid #10b981',
-                            background: 'var(--input-bg)',
-                            fontSize: '13px',
-                            fontWeight: 700,
-                            color: isDark ? '#6ee7b7' : '#047857',
-                            cursor: isRegionalOffice ? 'not-allowed' : 'pointer',
-                            outline: 'none',
-                            opacity: isRegionalOffice ? 0.85 : 1
-                          }}
-                        >
-                          <option value="" style={{ background: 'var(--card)', color: 'var(--text)' }}>-- Unassigned --</option>
-                          {RECLASS_POSITIONS_OPTIONS.map(pos => (
-                            <option key={pos} value={pos} style={{ background: 'var(--card)', color: 'var(--text)' }}>{pos}</option>
-                          ))}
-                        </select>
+                    {selectedIncumbent.new_item_number && (
+                      <div style={{ marginTop: '4px', fontSize: '11px', fontWeight: 800, color: isDark ? '#6ee7b7' : '#047857', fontFamily: 'monospace', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <span style={{ fontSize: '9px', textTransform: 'uppercase', padding: '1px 5px', borderRadius: '3px', background: isDark ? 'rgba(16, 185, 129, 0.2)' : '#dcfce7', border: isDark ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #86efac' }}>New Item</span>
+                        <span>{selectedIncumbent.new_item_number}</span>
                       </div>
+                    )}
+                  </div>
 
-                      <div>
-                        <label style={{ display: 'block', fontSize: '11.5px', fontWeight: 750, color: 'var(--text)', marginBottom: '5px' }}>
-                          Stage of Reclassification
-                        </label>
-                        <select
-                          value={modalStage}
-                          onChange={e => setModalStage(e.target.value)}
-                          disabled={isRegionalOffice || savingModalChanges}
-                          style={{
-                            width: '100%',
-                            padding: '9px 12px',
-                            borderRadius: '10px',
-                            border: isDark ? '1.5px solid rgba(51, 65, 85, 0.8)' : '1.5px solid var(--input-border, var(--line))',
-                            background: 'var(--input-bg)',
-                            fontSize: '13px',
-                            fontWeight: 700,
-                            color: 'var(--input-text, var(--text))',
-                            cursor: isRegionalOffice ? 'not-allowed' : 'pointer',
-                            outline: 'none',
-                            opacity: isRegionalOffice ? 0.85 : 1
-                          }}
-                        >
-                          {(selectedIncumbent?.stage_of_reclassification === 'Approved' || modalStage === 'Approved') ? (
-                            APPROVED_POST_ACTION_STAGES.map(stage => (
-                              <option key={stage} value={stage} style={{ background: 'var(--card)', color: 'var(--text)' }}>
-                                {stage === 'Approved' ? '✓ Approved (via DBM NOSCA)' : stage}
-                              </option>
-                            ))
-                          ) : (
-                            RECLASS_STAGES.map(stage => (
-                              <option key={stage} value={stage} style={{ background: 'var(--card)', color: 'var(--text)' }}>{stage}</option>
-                            ))
-                          )}
-                        </select>
-                      </div>
+                  <div style={{ background: isDark ? 'rgba(15, 23, 42, 0.65)' : 'var(--card-solid, #ffffff)', padding: '10px 12px', borderRadius: '10px', border: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid var(--line)' }}>
+                    <div style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-secondary, #94a3b8)', textTransform: 'uppercase' }}>Current Position &amp; SG</div>
+                    <div style={{ fontWeight: 750, color: 'var(--text)', marginTop: '2px' }}>
+                      {selectedIncumbent.current_position || '—'} • <span style={{ color: '#0284c7', fontWeight: 800 }}>SG {selectedIncumbent.salary_grade || '—'}</span>
                     </div>
                   </div>
 
-                  <div style={{ marginTop: '10px', fontSize: '11px', color: 'var(--text-secondary, #94a3b8)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#10b981', flexShrink: 0 }} />
-                    <span>QS benchmarks dynamically loaded for: <b style={{ color: 'var(--text)' }}>{modalTargetPosition || selectedIncumbent.target_position || selectedIncumbent.reclass_position || 'School Counselor I'}</b></span>
+                  <div style={{ background: isDark ? 'rgba(15, 23, 42, 0.65)' : 'var(--card-solid, #ffffff)', padding: '10px 12px', borderRadius: '10px', border: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid var(--line)' }}>
+                    <div style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-secondary, #94a3b8)', textTransform: 'uppercase' }}>Station / School</div>
+                    <div style={{ fontWeight: 750, color: 'var(--text)', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={selectedIncumbent.uacs_oper_dsc || selectedIncumbent.station_division}>
+                      {selectedIncumbent.uacs_oper_dsc || selectedIncumbent.station_division || '—'}
+                    </div>
+                  </div>
+
+                  <div style={{ background: isDark ? 'rgba(15, 23, 42, 0.65)' : 'var(--card-solid, #ffffff)', padding: '10px 12px', borderRadius: '10px', border: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid var(--line)' }}>
+                    <div style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-secondary, #94a3b8)', textTransform: 'uppercase' }}>Division &amp; Region</div>
+                    <div style={{ fontWeight: 700, color: 'var(--text)', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {selectedIncumbent.division || selectedIncumbent.station_division || '—'}
+                    </div>
                   </div>
                 </div>
               </div>
 
-              {/* Card 2: Required Documents Checklist Section */}
+              {/* Card 2: Documentary Screening & Requirements Checklist Section */}
               {(() => {
-                const missingRequiredDocs = docChecklist.filter(d => d.required && (!d.submitted || !d.verified));
+                const requiredReqs = docChecklist.filter(d => d.required);
+                const otherReqs = docChecklist.filter(d => !d.required);
+                const missingRequiredDocs = requiredReqs.filter(d => !d.submitted || !d.verified);
                 const isDocComplete = missingRequiredDocs.length === 0;
                 const verifiedCount = docChecklist.filter(d => d.submitted && d.verified).length;
+                const requiredVerifiedCount = requiredReqs.filter(d => d.submitted && d.verified).length;
+                const otherVerifiedCount = otherReqs.filter(d => d.submitted && d.verified).length;
 
                 return (
                   <div style={{
@@ -5335,6 +4521,7 @@ export default function ReclassificationPage({ onBack }) {
                     padding: '20px',
                     boxShadow: isDark ? '0 8px 32px rgba(0, 0, 0, 0.2)' : '0 4px 12px rgba(0, 0, 0, 0.03)'
                   }}>
+                    {/* Header Controls */}
                     <div style={{
                       display: 'flex',
                       alignItems: 'center',
@@ -5351,10 +4538,10 @@ export default function ReclassificationPage({ onBack }) {
                           textTransform: 'uppercase',
                           letterSpacing: '0.05em'
                         }}>
-                          2. Required Documents Submission Checklist
+                          1. Documentary Screening &amp; Requirements Checklist
                         </div>
                         <div style={{ fontSize: '12px', color: 'var(--text-secondary, #94a3b8)', marginTop: '2px' }}>
-                          Verify that all mandated personnel credentials and certificates are submitted and authenticated (items with <span style={{ color: '#ef4444', fontWeight: 800 }}>*</span> are mandatory).
+                          Tick submitted requirements. The mandatory requirements unlock the QS Evaluation automatically once completed.
                         </div>
                       </div>
 
@@ -5374,7 +4561,7 @@ export default function ReclassificationPage({ onBack }) {
                             ? (isDark ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #a7f3d0')
                             : (isDark ? '1px solid rgba(245, 158, 11, 0.4)' : '1px solid #fde68a')
                         }}>
-                          {verifiedCount} of {docChecklist.length} Verified
+                          {requiredVerifiedCount} of {requiredReqs.length} Mandatory ({verifiedCount} of {docChecklist.length} Total)
                         </span>
 
                         {!isRegionalOffice && (
@@ -5417,37 +4604,7 @@ export default function ReclassificationPage({ onBack }) {
                     </div>
 
                     {/* Completion Notice Banner */}
-                    {!isDocComplete ? (
-                      <div style={{
-                        padding: '12px 16px',
-                        borderRadius: '12px',
-                        background: isDark ? 'rgba(120, 53, 15, 0.35)' : '#fffbeb',
-                        border: isDark ? '1px solid rgba(245, 158, 11, 0.5)' : '1px solid #fde68a',
-                        color: isDark ? '#fef3c7' : '#92400e',
-                        fontSize: '12.5px',
-                        lineHeight: 1.5,
-                        marginBottom: '14px',
-                        display: 'flex',
-                        alignItems: 'flex-start',
-                        gap: '10px'
-                      }}>
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: '2px' }}>
-                          <circle cx="12" cy="12" r="10" />
-                          <line x1="12" y1="8" x2="12" y2="12" />
-                          <line x1="12" y1="16" x2="12.01" y2="16" />
-                        </svg>
-                        <div>
-                          <b style={{ fontWeight: 800 }}>Incomplete Document Submission Notice:</b>
-                          <div style={{ marginTop: '2px' }}>
-                            The following required documents are missing or unverified:{' '}
-                            <span style={{ fontWeight: 750, textDecoration: 'underline' }}>
-                              {missingRequiredDocs.map(d => d.shortLabel || d.label).join(', ')}
-                            </span>
-                            . All mandated documents must be marked as Submitted &amp; Verified before Qualification Standards (QS) Evaluation can be completed.
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
+                    {isDocComplete ? (
                       <div style={{
                         padding: '10px 16px',
                         borderRadius: '12px',
@@ -5466,137 +4623,166 @@ export default function ReclassificationPage({ onBack }) {
                         </svg>
                         All required documents are submitted and verified. Qualification Standards (QS) Evaluation is unlocked.
                       </div>
+                    ) : (
+                      <div style={{
+                        padding: '10px 16px',
+                        borderRadius: '12px',
+                        background: isDark ? 'rgba(120, 53, 15, 0.35)' : '#fffbeb',
+                        border: isDark ? '1px solid rgba(245, 158, 11, 0.5)' : '1px solid #fde68a',
+                        color: isDark ? '#fef3c7' : '#92400e',
+                        fontSize: '12.5px',
+                        lineHeight: 1.45,
+                        marginBottom: '14px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '10px'
+                      }}>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                          <circle cx="12" cy="12" r="10" />
+                          <line x1="12" y1="8" x2="12" y2="12" />
+                          <line x1="12" y1="16" x2="12.01" y2="16" />
+                        </svg>
+                        <div>
+                          <b>{requiredVerifiedCount} of {requiredReqs.length} Mandatory Requirements complete.</b> Tick all 5 mandatory requirements below to unlock Qualification Standards (QS) Evaluation.
+                        </div>
+                      </div>
                     )}
 
-                    {/* Document Checklist Table */}
-                    <div style={{
-                      overflowX: 'auto',
-                      border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid var(--line)',
-                      borderRadius: '12px',
-                      background: isDark ? 'rgba(15, 23, 42, 0.5)' : 'var(--card-solid, #ffffff)'
-                    }}>
-                      <table style={{ width: '100%', minWidth: '660px', borderCollapse: 'collapse', fontSize: '12.5px' }}>
-                        <thead>
-                          <tr style={{
-                            borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid var(--line)',
-                            background: isDark ? 'rgba(30, 41, 59, 0.5)' : 'var(--card-subtle)',
-                            color: 'var(--text-secondary, #94a3b8)',
-                            fontSize: '11px',
-                            textTransform: 'uppercase',
-                            letterSpacing: '0.04em'
-                          }}>
-                            <th style={{ padding: '10px 16px', textAlign: 'left', whiteSpace: 'nowrap' }}>Document</th>
-                            <th style={{ padding: '10px 14px', textAlign: 'center', width: '130px', minWidth: '130px', whiteSpace: 'nowrap' }}>Submitted</th>
-                            <th style={{ padding: '10px 14px', textAlign: 'center', width: '130px', minWidth: '130px', whiteSpace: 'nowrap' }}>Verified</th>
-                            <th style={{ padding: '10px 16px', textAlign: 'right', width: '190px', minWidth: '190px', whiteSpace: 'nowrap' }}>Status</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {docChecklist.map((doc) => {
-                            const isSubmitted = Boolean(doc.submitted);
-                            const isVerified = Boolean(doc.verified);
-
-                            return (
-                              <tr
-                                key={doc.id}
+                    {/* Section A: Mandatory Requirements (Card Grid) */}
+                    <div style={{ marginBottom: '14px' }}>
+                      <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))',
+                        gap: '8px'
+                      }}>
+                        {requiredReqs.map(doc => {
+                          const isChecked = Boolean(doc.submitted && doc.verified);
+                          return (
+                            <label
+                              key={doc.id}
+                              style={{
+                                display: 'grid',
+                                gridTemplateColumns: '20px 1fr',
+                                gap: '10px',
+                                alignItems: 'start',
+                                padding: '12px 14px',
+                                borderRadius: '12px',
+                                border: isChecked
+                                  ? (isDark ? '1.5px solid #22c55e' : '1.5px solid #86efac')
+                                  : (isDark ? '1.5px solid rgba(51, 65, 85, 0.8)' : '1.5px solid #e2e8f0'),
+                                background: isChecked
+                                  ? (isDark ? 'rgba(22, 101, 52, 0.22)' : '#f0fdf4')
+                                  : (isDark ? 'rgba(30, 41, 59, 0.4)' : '#f8fcff'),
+                                cursor: isRegionalOffice ? 'not-allowed' : 'pointer',
+                                transition: 'all 0.15s ease',
+                                boxShadow: isChecked
+                                  ? (isDark ? '0 2px 8px rgba(34, 197, 94, 0.15)' : '0 1px 3px rgba(22, 163, 74, 0.08)')
+                                  : 'none'
+                              }}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => handleToggleDocSubmitted(doc.id)}
+                                disabled={isRegionalOffice}
                                 style={{
-                                  borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.4)' : '1px solid var(--line)',
-                                  background: (doc.required && (!isSubmitted || !isVerified))
-                                    ? (isDark ? 'rgba(120, 53, 15, 0.08)' : 'rgba(254, 243, 199, 0.3)')
-                                    : 'transparent'
+                                  width: '17px',
+                                  height: '17px',
+                                  marginTop: '2px',
+                                  accentColor: '#2563eb',
+                                  cursor: isRegionalOffice ? 'not-allowed' : 'pointer',
+                                  flexShrink: 0
                                 }}
-                              >
-                                <td style={{ padding: '10px 16px', verticalAlign: 'middle' }}>
-                                  <div style={{ fontWeight: 750, color: 'var(--text)' }}>
-                                    {doc.label}
-                                    {doc.required && (
-                                      <span
-                                        style={{ color: '#ef4444', marginLeft: '4px', fontWeight: 800 }}
-                                        title="Mandatory"
-                                      >
-                                        *
-                                      </span>
-                                    )}
-                                  </div>
-                                </td>
-                                <td style={{ padding: '10px 14px', textAlign: 'center', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
-                                  <label style={{ display: 'inline-flex', alignItems: 'center', cursor: isRegionalOffice ? 'not-allowed' : 'pointer', gap: '6px', whiteSpace: 'nowrap' }}>
-                                    <input
-                                      type="checkbox"
-                                      checked={isSubmitted}
-                                      onChange={() => handleToggleDocSubmitted(doc.id)}
-                                      disabled={isRegionalOffice}
-                                      style={{ width: '16px', height: '16px', accentColor: '#2563eb', cursor: isRegionalOffice ? 'not-allowed' : 'pointer', margin: 0, flexShrink: 0 }}
-                                    />
-                                    <span style={{ fontSize: '12px', fontWeight: 650, color: isSubmitted ? '#2563eb' : 'var(--text-secondary, #94a3b8)', whiteSpace: 'nowrap' }}>
-                                      {isSubmitted ? 'Submitted' : 'Missing'}
-                                    </span>
-                                  </label>
-                                </td>
-                                <td style={{ padding: '10px 14px', textAlign: 'center', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
-                                  <label style={{ display: 'inline-flex', alignItems: 'center', cursor: (isRegionalOffice || !isSubmitted) ? 'not-allowed' : 'pointer', gap: '6px', whiteSpace: 'nowrap' }}>
-                                    <input
-                                      type="checkbox"
-                                      checked={isVerified}
-                                      onChange={() => handleToggleDocVerified(doc.id)}
-                                      disabled={isRegionalOffice || !isSubmitted}
-                                      style={{ width: '16px', height: '16px', accentColor: '#10b981', cursor: (isRegionalOffice || !isSubmitted) ? 'not-allowed' : 'pointer', margin: 0, flexShrink: 0 }}
-                                    />
-                                    <span style={{ fontSize: '12px', fontWeight: 650, color: isVerified ? '#10b981' : 'var(--text-secondary, #94a3b8)', whiteSpace: 'nowrap' }}>
-                                      {isVerified ? 'Verified' : 'Pending'}
-                                    </span>
-                                  </label>
-                                </td>
-                                <td style={{ padding: '10px 16px', textAlign: 'right', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
-                                  {isSubmitted && isVerified ? (
-                                    <span style={{
-                                      fontSize: '11px',
-                                      fontWeight: 800,
-                                      padding: '3px 10px',
-                                      borderRadius: '6px',
-                                      background: isDark ? 'rgba(6, 78, 59, 0.4)' : '#ecfdf5',
-                                      color: isDark ? '#6ee7b7' : '#047857',
-                                      border: isDark ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #a7f3d0',
-                                      whiteSpace: 'nowrap',
-                                      display: 'inline-block'
-                                    }}>
-                                      ☑ Submitted &amp; Verified
-                                    </span>
-                                  ) : isSubmitted ? (
-                                    <span style={{
-                                      fontSize: '11px',
-                                      fontWeight: 750,
-                                      padding: '3px 10px',
-                                      borderRadius: '6px',
-                                      background: isDark ? 'rgba(180, 83, 9, 0.3)' : '#fffbeb',
-                                      color: isDark ? '#fcd34d' : '#b45309',
-                                      border: isDark ? '1px solid rgba(245, 158, 11, 0.4)' : '1px solid #fde68a',
-                                      whiteSpace: 'nowrap',
-                                      display: 'inline-block'
-                                    }}>
-                                      ⏳ Submitted (Unverified)
-                                    </span>
-                                  ) : (
-                                    <span style={{
-                                      fontSize: '11px',
-                                      fontWeight: 750,
-                                      padding: '3px 10px',
-                                      borderRadius: '6px',
-                                      background: isDark ? 'rgba(239, 68, 68, 0.2)' : '#fee2e2',
-                                      color: isDark ? '#fca5a5' : '#b91c1c',
-                                      border: isDark ? '1px solid rgba(239, 68, 68, 0.3)' : '1px solid #fca5a5',
-                                      whiteSpace: 'nowrap',
-                                      display: 'inline-block'
-                                    }}>
-                                      ☐ Missing
-                                    </span>
-                                  )}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
+                              />
+                              <span style={{
+                                fontSize: '11px',
+                                fontWeight: 800,
+                                color: isChecked ? (isDark ? '#86efac' : '#1e293b') : (isDark ? '#94a3b8' : '#334155'),
+                                lineHeight: 1.35,
+                                letterSpacing: '0.02em',
+                                textTransform: 'uppercase'
+                              }}>
+                                <span style={{ color: isChecked ? '#16a34a' : '#ef4444', marginRight: '5px' }}>[REQUIRED]</span>
+                                {doc.label}
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Section B: Other Requirements (Card Grid) */}
+                    <div>
+                      <div style={{
+                        fontSize: '12px',
+                        fontWeight: 800,
+                        color: isDark ? '#94a3b8' : '#64748b',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.04em',
+                        marginBottom: '10px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px'
+                      }}>
+                        <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#94a3b8', display: 'inline-block' }} />
+                        OTHER REQUIREMENTS ({otherVerifiedCount} OF {otherReqs.length})
+                      </div>
+
+                      <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))',
+                        gap: '8px'
+                      }}>
+                        {otherReqs.map(doc => {
+                          const isChecked = Boolean(doc.submitted && doc.verified);
+                          return (
+                            <label
+                              key={doc.id}
+                              style={{
+                                display: 'grid',
+                                gridTemplateColumns: '20px 1fr',
+                                gap: '10px',
+                                alignItems: 'start',
+                                padding: '11px 14px',
+                                borderRadius: '12px',
+                                border: isChecked
+                                  ? (isDark ? '1.5px solid #22c55e' : '1.5px solid #86efac')
+                                  : (isDark ? '1.5px solid rgba(51, 65, 85, 0.7)' : '1.5px solid #e2e8f0'),
+                                background: isChecked
+                                  ? (isDark ? 'rgba(22, 101, 52, 0.18)' : '#f0fdf4')
+                                  : (isDark ? 'rgba(30, 41, 59, 0.3)' : '#f8fcff'),
+                                cursor: isRegionalOffice ? 'not-allowed' : 'pointer',
+                                transition: 'all 0.15s ease'
+                              }}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => handleToggleDocSubmitted(doc.id)}
+                                disabled={isRegionalOffice}
+                                style={{
+                                  width: '16px',
+                                  height: '16px',
+                                  marginTop: '2px',
+                                  accentColor: '#2563eb',
+                                  cursor: isRegionalOffice ? 'not-allowed' : 'pointer',
+                                  flexShrink: 0
+                                }}
+                              />
+                              <span style={{
+                                fontSize: '11px',
+                                fontWeight: isChecked ? 800 : 700,
+                                color: isChecked ? (isDark ? '#86efac' : '#1e293b') : (isDark ? '#94a3b8' : '#475569'),
+                                lineHeight: 1.35,
+                                letterSpacing: '0.02em',
+                                textTransform: 'uppercase'
+                              }}>
+                                {doc.label}
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
                     </div>
                   </div>
                 );
@@ -5669,44 +4855,17 @@ export default function ReclassificationPage({ onBack }) {
                         <div style={{
                           fontSize: '12px',
                           fontWeight: 800,
-                          color: isDark ? '#a78bfa' : '#7c3aed',
+                          color: isDark ? '#38bdf8' : '#0284c7',
                           textTransform: 'uppercase',
                           letterSpacing: '0.05em'
                         }}>
-                          3. Position-Specific Qualification Standards (QS) Evaluation
+                          2. Position-Specific Qualification Standards (QS) Evaluation
                         </div>
                         <div style={{ fontSize: '12px', color: 'var(--text-secondary, #94a3b8)', marginTop: '2px' }}>
                           CSC &amp; DepEd QS benchmarks for: <b style={{ color: 'var(--text)' }}>{effectiveTargetPos}</b>
                         </div>
                       </div>
 
-                      {isDocComplete && !isRegionalOffice && (
-                        <button
-                          type="button"
-                          onClick={handleAutoEvaluateQs}
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '6px',
-                            padding: '6px 14px',
-                            borderRadius: '8px',
-                            background: 'linear-flex(135deg, #4f46e5 0%, #7c3aed 100%)',
-                            backgroundColor: '#6366f1',
-                            border: 'none',
-                            color: '#ffffff',
-                            fontSize: '12px',
-                            fontWeight: 750,
-                            cursor: 'pointer',
-                            boxShadow: '0 2px 6px rgba(99, 102, 241, 0.3)',
-                            transition: 'all 0.15s ease'
-                          }}
-                        >
-                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-                          </svg>
-                          Auto-Assess from Profile
-                        </button>
-                      )}
                     </div>
 
                     {/* Completion Gating Lock Overlay */}
@@ -5937,90 +5096,98 @@ export default function ReclassificationPage({ onBack }) {
                           border: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid var(--line)',
                           padding: '16px'
                         }}>
-                          <div style={{
-                            fontSize: '11px',
-                            fontWeight: 800,
-                            color: 'var(--text-secondary, #94a3b8)',
-                            textTransform: 'uppercase',
-                            letterSpacing: '0.05em',
-                            marginBottom: '10px'
-                          }}>
-                            Evaluation Audit Trail &amp; Remarks
-                          </div>
-
+                          {/* Position Classification Comparison & Determination */}
                           <div style={{
                             display: 'grid',
-                            gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
-                            gap: '14px',
-                            alignItems: 'flex-start'
+                            gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))',
+                            gap: '12px',
+                            marginBottom: '16px',
+                            paddingBottom: '16px',
+                            borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid var(--line)'
                           }}>
-                            <div>
-                              <label style={{ display: 'block', fontSize: '11.5px', fontWeight: 750, color: 'var(--text)', marginBottom: '5px' }}>
-                                Evaluator Name / Account
-                              </label>
-                              <input
-                                type="text"
-                                value={evaluatorName}
-                                onChange={e => setEvaluatorName(e.target.value)}
-                                disabled={isRegionalOffice}
-                                placeholder="HRMO Evaluator Name"
-                                style={{
-                                  width: '100%',
-                                  padding: '9px 12px',
-                                  borderRadius: '8px',
-                                  border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid var(--line)',
-                                  background: 'var(--input-bg)',
-                                  color: 'var(--text)',
-                                  fontSize: '12.5px',
-                                  outline: 'none'
-                                }}
-                              />
-                            </div>
-
-                            <div>
-                              <label style={{ display: 'block', fontSize: '11.5px', fontWeight: 750, color: 'var(--text)', marginBottom: '5px' }}>
-                                Evaluation Timestamp
-                              </label>
-                              <div style={{
-                                padding: '9px 12px',
-                                borderRadius: '8px',
-                                border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid var(--line)',
-                                background: isDark ? 'rgba(15, 23, 42, 0.6)' : 'var(--card-solid, #ffffff)',
-                                color: 'var(--text-secondary, #94a3b8)',
-                                fontSize: '12.5px',
-                                fontFamily: 'monospace'
-                              }}>
-                                {selectedIncumbent.evaluated_at
-                                  ? new Date(selectedIncumbent.evaluated_at).toLocaleString()
-                                  : 'Auto-recorded upon saving'}
+                            {/* 1. Target Position */}
+                            <div style={{
+                              background: isDark ? 'rgba(15, 23, 42, 0.6)' : 'var(--card-solid, #ffffff)',
+                              padding: '12px 14px',
+                              borderRadius: '10px',
+                              border: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid var(--line)'
+                            }}>
+                              <div style={{ fontSize: '10.5px', fontWeight: 800, color: 'var(--text-secondary, #94a3b8)', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                <span>🎯</span> Target Position
+                              </div>
+                              <div style={{ fontWeight: 800, color: 'var(--text)', fontSize: '13.5px', marginTop: '6px' }}>
+                                {selectedIncumbent.actual_position || selectedIncumbent.reclass_position || selectedIncumbent.target_position || 'School Counselor I'}
+                              </div>
+                              <div style={{ fontSize: '11px', color: 'var(--text-secondary, #94a3b8)', marginTop: '3px' }}>
+                                Stated / Applied position
                               </div>
                             </div>
 
-                            <div>
-                              <label style={{ display: 'block', fontSize: '11.5px', fontWeight: 750, color: 'var(--text)', marginBottom: '5px' }}>
-                                Evaluator Remarks &amp; Justification
+                            {/* 2. Indicative Position */}
+                            <div style={{
+                              background: isDark ? 'rgba(2, 132, 199, 0.1)' : 'rgba(2, 132, 199, 0.05)',
+                              padding: '12px 14px',
+                              borderRadius: '10px',
+                              border: isDark ? '1px solid rgba(56, 189, 248, 0.35)' : '1px solid rgba(2, 132, 199, 0.25)'
+                            }}>
+                              <div style={{ fontSize: '10.5px', fontWeight: 800, color: isDark ? '#38bdf8' : '#0284c7', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}><span>⚡</span> Indicative Position</span>
+                                <span style={{ fontSize: '10px', padding: '1px 6px', borderRadius: '4px', background: isDark ? 'rgba(56, 189, 248, 0.2)' : '#e0f2fe', color: isDark ? '#38bdf8' : '#0284c7', fontWeight: 800 }}>QS Match</span>
+                              </div>
+                              <div style={{ fontWeight: 850, color: isDark ? '#7dd3fc' : '#0369a1', fontSize: '13.5px', marginTop: '6px' }}>
+                                {determineIndicativePosition(selectedIncumbent)}
+                              </div>
+                              <div style={{ fontSize: '11px', color: isDark ? '#94a3b8' : '#64748b', marginTop: '3px' }}>
+                                Determined from qualifications
+                              </div>
+                            </div>
+
+                            {/* 3. Actual Reclassification Position */}
+                            <div style={{
+                              background: isDark ? 'rgba(15, 23, 42, 0.6)' : 'var(--card-solid, #ffffff)',
+                              padding: '12px 14px',
+                              borderRadius: '10px',
+                              border: isDark ? '1.5px solid #0284c7' : '1.5px solid #0284c7',
+                              boxShadow: '0 2px 8px rgba(2, 132, 199, 0.08)'
+                            }}>
+                              <label style={{ display: 'block', fontSize: '10.5px', fontWeight: 800, color: isDark ? '#38bdf8' : '#0284c7', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '5px' }}>
+                                Actual Reclassification Position <span style={{ color: '#ef4444' }}>*</span>
                               </label>
-                              <textarea
-                                value={evaluatorRemarks}
-                                onChange={e => setEvaluatorRemarks(e.target.value)}
-                                disabled={isRegionalOffice}
-                                rows={1}
-                                placeholder="Add assessment notes, board resolution, or justification..."
+                              <select
+                                value={modalTargetPosition}
+                                onChange={e => {
+                                  const newPos = e.target.value;
+                                  setModalTargetPosition(newPos);
+                                  if (selectedIncumbent) {
+                                    const updatedQs = computeAutoQs(selectedIncumbent, newPos);
+                                    setQsEvaluation(updatedQs);
+                                  }
+                                }}
+                                disabled={isRegionalOffice || savingModalChanges}
                                 style={{
                                   width: '100%',
-                                  padding: '8px 12px',
+                                  padding: '7px 10px',
                                   borderRadius: '8px',
-                                  border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid var(--line)',
+                                  border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid var(--input-border, var(--line))',
                                   background: 'var(--input-bg)',
-                                  color: 'var(--text)',
                                   fontSize: '12.5px',
-                                  resize: 'vertical',
-                                  outline: 'none',
-                                  fontFamily: 'inherit'
+                                  fontWeight: 750,
+                                  color: 'var(--input-text, var(--text))',
+                                  cursor: isRegionalOffice ? 'not-allowed' : 'pointer',
+                                  outline: 'none'
                                 }}
-                              />
+                              >
+                                <option value="">-- Unassigned --</option>
+                                {RECLASS_POSITIONS_OPTIONS.map(pos => (
+                                  <option key={pos} value={pos}>{pos}</option>
+                                ))}
+                              </select>
+                              <div style={{ fontSize: '11px', color: 'var(--text-secondary, #94a3b8)', marginTop: '4px' }}>
+                                Final endorsed position
+                              </div>
                             </div>
                           </div>
+
                         </div>
                       </>
                     )}
@@ -6028,7 +5195,7 @@ export default function ReclassificationPage({ onBack }) {
                 );
               })()}
 
-              {/* Card 4: Supporting Attached Files */}
+              {/* Card 3: Final Recommendation - Actual Reclassification Position & Workflow Stage */}
               <div style={{
                 background: isDark ? 'rgba(2, 6, 23, 0.6)' : 'var(--card-subtle)',
                 borderRadius: '16px',
@@ -6040,128 +5207,131 @@ export default function ReclassificationPage({ onBack }) {
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'space-between',
-                  marginBottom: '12px'
+                  marginBottom: '14px',
+                  gap: '10px'
                 }}>
                   <div>
                     <div style={{
                       fontSize: '12px',
                       fontWeight: 800,
-                      color: 'var(--text)',
+                      color: isDark ? '#38bdf8' : '#0284c7',
                       textTransform: 'uppercase',
                       letterSpacing: '0.05em'
                     }}>
-                      4. Supporting Attached Documents Preview
+                      3. Actual Reclassification Position &amp; Workflow Stage
                     </div>
                     <div style={{ fontSize: '12px', color: 'var(--text-secondary, #94a3b8)', marginTop: '2px' }}>
-                      Click "View Document" to inspect candidate-attached credentials in full screen (PDS, TOR, Training Certificates, Eligibility Card).
+                      Designate the final approved actual reclassification position and update candidate progression stage.
                     </div>
                   </div>
-                  <span style={{
-                    fontSize: '11px',
-                    fontWeight: 750,
-                    padding: '3px 8px',
-                    borderRadius: '6px',
-                    background: isDark ? 'rgba(30, 41, 59, 0.7)' : 'var(--card-solid, #ffffff)',
-                    border: '1px solid var(--line)',
-                    color: 'var(--text-secondary, #94a3b8)'
-                  }}>
-                    {Array.isArray(selectedIncumbent.assessment?.documents) ? selectedIncumbent.assessment.documents.length : 0} Files
-                  </span>
+                  {isRegionalOffice && (
+                    <span style={{
+                      fontSize: '10.5px',
+                      fontWeight: 750,
+                      padding: '2px 7px',
+                      borderRadius: '6px',
+                      background: isDark ? 'rgba(30, 58, 138, 0.35)' : '#eff6ff',
+                      color: isDark ? '#93c5fd' : '#1d4ed8',
+                      border: isDark ? '1px solid rgba(59, 130, 246, 0.4)' : '1px solid #bfdbfe'
+                    }}>
+                      👁️ View-Only
+                    </span>
+                  )}
                 </div>
 
-                {(!selectedIncumbent.assessment?.documents || selectedIncumbent.assessment.documents.length === 0) ? (
-                  <div style={{
-                    padding: '20px',
-                    textAlign: 'center',
-                    background: isDark ? 'rgba(15, 23, 42, 0.5)' : 'var(--card-solid, #ffffff)',
-                    borderRadius: '12px',
-                    color: 'var(--text-secondary, #94a3b8)',
-                    fontSize: '12.5px'
-                  }}>
-                    No external PDF/image files uploaded for this incumbent. Checklist records above serve as evaluation basis.
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
+                  gap: '14px'
+                }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '11.5px', fontWeight: 750, color: 'var(--text)', marginBottom: '5px' }}>
+                      Actual Reclassification Position <span style={{ color: '#ef4444' }}>*</span>
+                    </label>
+                    <select
+                      value={modalTargetPosition}
+                      onChange={e => {
+                        const newPos = e.target.value;
+                        setModalTargetPosition(newPos);
+                        if (selectedIncumbent) {
+                          const updatedQs = computeAutoQs(selectedIncumbent, newPos);
+                          setQsEvaluation(updatedQs);
+                        }
+                      }}
+                      disabled={isRegionalOffice || savingModalChanges}
+                      style={{
+                        width: '100%',
+                        padding: '9px 12px',
+                        borderRadius: '10px',
+                        border: isDark ? '1.5px solid rgba(51, 65, 85, 0.8)' : '1.5px solid var(--input-border, var(--line))',
+                        background: 'var(--input-bg)',
+                        fontSize: '13px',
+                        fontWeight: 700,
+                        color: 'var(--input-text, var(--text))',
+                        cursor: isRegionalOffice ? 'not-allowed' : 'pointer',
+                        outline: 'none',
+                        opacity: isRegionalOffice ? 0.85 : 1
+                      }}
+                    >
+                      <option value="" style={{ background: 'var(--card)', color: 'var(--text)' }}>-- Unassigned --</option>
+                      {RECLASS_POSITIONS_OPTIONS.map(pos => (
+                        <option key={pos} value={pos} style={{ background: 'var(--card)', color: 'var(--text)' }}>{pos}</option>
+                      ))}
+                    </select>
                   </div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    {selectedIncumbent.assessment.documents.map((doc, dIdx) => (
-                      <div
-                        key={dIdx}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          padding: '12px 16px',
-                          borderRadius: '12px',
-                          border: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid var(--line)',
-                          background: isDark ? 'rgba(15, 23, 42, 0.6)' : 'var(--card-solid, #ffffff)',
-                          transition: 'all 0.15s'
-                        }}
-                        onMouseOver={e => e.currentTarget.style.background = isDark ? 'rgba(30, 41, 59, 0.6)' : 'rgba(241, 245, 249, 0.7)'}
-                        onMouseOut={e => e.currentTarget.style.background = isDark ? 'rgba(15, 23, 42, 0.6)' : 'var(--card-solid, #ffffff)'}
-                      >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                            <polyline points="14 2 14 8 20 8" />
-                            <line x1="16" y1="13" x2="8" y2="13" />
-                            <line x1="16" y1="17" x2="8" y2="17" />
-                            <polyline points="10 9 9 9 8 9" />
-                          </svg>
-                          <div>
-                            <div style={{ fontSize: '13.5px', fontWeight: 750, color: 'var(--text)' }}>
-                              {doc.label || doc.name || doc.key}
-                            </div>
-                          </div>
-                        </div>
 
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          <span style={{
-                            fontSize: '11px',
-                            fontWeight: 700,
-                            padding: '2px 8px',
-                            borderRadius: '999px',
-                            background: isDark ? 'rgba(6, 78, 59, 0.35)' : '#ecfdf5',
-                            color: isDark ? '#6ee7b7' : '#047857',
-                            border: isDark ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #a7f3d0'
-                          }}>
-                            ✓ Attachment
-                          </span>
-
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setFullScreenDoc({
-                                open: true,
-                                url: doc.url || 'https://raw.githubusercontent.com/mozilla/pdf.js/ba2edeae/web/compressed.tracemonkey-pldi-09.pdf',
-                                title: doc.label || doc.name || 'Incumbent Supporting Document'
-                              });
-                            }}
-                            style={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '6px',
-                              padding: '6px 14px',
-                              borderRadius: '8px',
-                              background: '#2563eb',
-                              border: 'none',
-                              color: '#ffffff',
-                              fontSize: '12px',
-                              fontWeight: 700,
-                              cursor: 'pointer',
-                              boxShadow: '0 2px 4px rgba(37, 99, 235, 0.25)',
-                              transition: 'all 0.15s'
-                            }}
-                          >
-                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                              <circle cx="12" cy="12" r="3" />
-                            </svg>
-                            View Document
-                          </button>
-                        </div>
-                      </div>
-                    ))}
+                  <div>
+                    <label style={{ display: 'block', fontSize: '11.5px', fontWeight: 750, color: 'var(--text)', marginBottom: '5px' }}>
+                      Stage of Reclassification
+                    </label>
+                    <select
+                      value={modalStage}
+                      onChange={e => setModalStage(e.target.value)}
+                      disabled={isRegionalOffice || savingModalChanges}
+                      style={{
+                        width: '100%',
+                        padding: '9px 12px',
+                        borderRadius: '10px',
+                        border: isDark ? '1.5px solid rgba(51, 65, 85, 0.8)' : '1.5px solid var(--input-border, var(--line))',
+                        background: 'var(--input-bg)',
+                        fontSize: '13px',
+                        fontWeight: 700,
+                        color: 'var(--input-text, var(--text))',
+                        cursor: isRegionalOffice ? 'not-allowed' : 'pointer',
+                        outline: 'none',
+                        opacity: isRegionalOffice ? 0.85 : 1
+                      }}
+                    >
+                      {(selectedIncumbent?.stage_of_reclassification === 'Approved' || modalStage === 'Approved') ? (
+                        APPROVED_POST_ACTION_STAGES.map(stage => (
+                          <option key={stage} value={stage} style={{ background: 'var(--card)', color: 'var(--text)' }}>
+                            {stage === 'Approved' ? '✓ Approved (via DBM NOSCA)' : stage}
+                          </option>
+                        ))
+                      ) : isRegionalOffice ? (
+                        <>
+                          {!RO_RECLASS_STAGES.includes(modalStage) && (
+                            <option value={modalStage} disabled style={{ background: 'var(--card)', color: 'var(--text)' }}>
+                              {modalStage} (Current)
+                            </option>
+                          )}
+                          {RO_RECLASS_STAGES.map(stage => (
+                            <option key={stage} value={stage} style={{ background: 'var(--card)', color: 'var(--text)' }}>{stage}</option>
+                          ))}
+                        </>
+                      ) : (
+                        HRMO_RECLASS_STAGES.map(stage => (
+                          <option key={stage} value={stage} style={{ background: 'var(--card)', color: 'var(--text)' }}>{stage}</option>
+                        ))
+                      )}
+                    </select>
                   </div>
-                )}
+                </div>
+
+                <div style={{ marginTop: '12px', fontSize: '11px', color: 'var(--text-secondary, #94a3b8)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#0284c7', flexShrink: 0 }} />
+                  <span>Actual reclassification position designated for: <b style={{ color: 'var(--text)' }}>{modalTargetPosition || selectedIncumbent.actual_position || selectedIncumbent.reclass_position || selectedIncumbent.target_position || 'School Counselor I'}</b></span>
+                </div>
               </div>
             </div>
 
@@ -6256,6 +5426,16 @@ export default function ReclassificationPage({ onBack }) {
           </div>
         </div>
       )}
+
+      {/* SUB-MODAL: DOCUMENT VAULT PREVIEW FOR INCUMBENT */}
+      <IncumbentDocumentVaultModal
+        isOpen={showIncumbentDocsModal && !!selectedIncumbent}
+        onClose={() => setShowIncumbentDocsModal(false)}
+        incumbent={selectedIncumbent}
+        docChecklist={docChecklist}
+        setFullScreenDoc={setFullScreenDoc}
+        isDark={isDark}
+      />
 
       {/* RECLASSIFICATION CSV INGESTION MODAL */}
       {showCsvModal && (

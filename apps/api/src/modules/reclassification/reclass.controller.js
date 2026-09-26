@@ -33,21 +33,23 @@ export async function getReclassApplications(req, res) {
     let query = `
       SELECT 
         ra.id,
-        ra.application_number,
         ra.applicant_id,
-        ra.employee_id,
+        ra.application_number,
+        ra.region,
+        ra.division,
+        ra.division AS station_division,
+        ra.school_id,
         ra.position_title,
-        ra.item_number,
-        ra.station_division,
-        ra.date_originally_submitted,
-        ra.proposed_qs_eval_result,
-        ra.csc_approved_qs_eval_result,
-        ra.evaluation_status,
-        ra.has_updated_credentials,
-        ra.updated_credentials_submitted_at,
+        ra.current_item_number,
+        ra.current_item_number AS item_number,
+        ra.qs_status,
+        ra.qs_status AS evaluation_status,
+        ra.indicative_position,
+        ra.actual_position,
+        ra.actual_position AS reclass_position,
+        ra.new_item_number,
+        ra.stage_of_reclassification,
         ra.documents,
-        ra.reevaluation_timestamp,
-        ra.dbm_export_timestamp,
         ra.created_at,
         ra.updated_at,
         COALESCE(
@@ -55,7 +57,7 @@ export async function getReclassApplications(req, res) {
           CONCAT('Applicant ', ra.application_number)
         ) AS applicant_name,
         COALESCE(a.email_address, 'applicant@deped.gov.ph') AS applicant_email
-      FROM reclassification_applications ra
+      FROM reclassification_application ra
       LEFT JOIN applicants a ON ra.applicant_id = a.id
       WHERE 1=1
     `;
@@ -64,12 +66,12 @@ export async function getReclassApplications(req, res) {
 
     if (status) {
       params.push(status);
-      query += ` AND ra.evaluation_status = $${params.length}`;
+      query += ` AND (ra.qs_status = $${params.length} OR ra.stage_of_reclassification = $${params.length})`;
     }
 
     if (division) {
       params.push(`%${division}%`);
-      query += ` AND ra.station_division ILIKE $${params.length}`;
+      query += ` AND ra.division ILIKE $${params.length}`;
     }
 
     if (search) {
@@ -77,13 +79,14 @@ export async function getReclassApplications(req, res) {
       query += ` AND (
         ra.application_number ILIKE $${params.length} OR
         ra.position_title ILIKE $${params.length} OR
-        ra.station_division ILIKE $${params.length} OR
+        ra.division ILIKE $${params.length} OR
+        ra.region ILIKE $${params.length} OR
         a.first_name ILIKE $${params.length} OR
         a.surname ILIKE $${params.length}
       )`;
     }
 
-    query += ` ORDER BY ra.date_originally_submitted DESC, ra.id DESC`;
+    query += ` ORDER BY ra.application_number DESC`;
 
     const result = await pool.query(query, params);
     res.json(result.rows);
@@ -99,12 +102,20 @@ export async function getReclassApplications(req, res) {
 export async function createReclassApplication(req, res) {
   try {
     const {
-      application_number,
       applicant_id,
-      position_title,
-      item_number,
+      application_number,
+      region,
+      division,
       station_division,
-      proposed_qs_eval_result,
+      school_id,
+      position_title,
+      current_item_number,
+      item_number,
+      qs_status,
+      indicative_position,
+      actual_position,
+      new_item_number,
+      stage_of_reclassification,
       documents
     } = req.body;
 
@@ -114,33 +125,42 @@ export async function createReclassApplication(req, res) {
 
     const appNum = application_number || `REC-${Date.now()}`;
     const userDivision = req.user?.division || 'SDO Main';
-    const finalDivision = station_division || userDivision;
+    const finalDivision = division || station_division || userDivision;
+    const finalRegion = region || req.user?.region || 'National Capital Region (NCR)';
+    const finalItemNumber = current_item_number || item_number || 'PENDING-ITEM';
 
     const insertQuery = `
-      INSERT INTO reclassification_applications (
-        application_number,
+      INSERT INTO reclassification_application (
         applicant_id,
-        employee_id,
+        application_number,
+        region,
+        division,
+        school_id,
         position_title,
-        item_number,
-        station_division,
-        date_originally_submitted,
-        proposed_qs_eval_result,
-        csc_approved_qs_eval_result,
-        evaluation_status,
+        current_item_number,
+        qs_status,
+        indicative_position,
+        actual_position,
+        new_item_number,
+        stage_of_reclassification,
         documents
-      ) VALUES ($1, $2, $3, $4, $5, $6, NOW(), $7, 'Pending CSC Review', 'pending_reevaluation', $8::jsonb)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb)
       RETURNING *;
     `;
 
     const result = await pool.query(insertQuery, [
-      appNum,
       applicant_id || null,
-      req.user?.id || null,
-      position_title,
-      item_number || 'PENDING-ITEM',
+      appNum,
+      finalRegion,
       finalDivision,
-      proposed_qs_eval_result || 'Qualified (Proposed QS)',
+      school_id || null,
+      position_title,
+      finalItemNumber,
+      qs_status || 'Pending Review',
+      indicative_position || position_title,
+      actual_position || position_title,
+      new_item_number || null,
+      stage_of_reclassification || 'For Review',
       JSON.stringify(documents || [])
     ]);
 
@@ -167,30 +187,27 @@ export async function reevaluateCSC(req, res) {
       return res.status(400).json({ error: 'CSC-approved QS evaluation result is required' });
     }
 
-    const validStatus = evaluation_status || (
-      csc_approved_qs_eval_result.toLowerCase().includes('qualified') ? 'reevaluated' : 'needs_applicant_update'
-    );
+    const nextStage = csc_approved_qs_eval_result.toLowerCase().includes('qualified') 
+      ? 'Endorsed to RO' 
+      : 'Needs Applicant Update';
 
     const updateQuery = `
-      UPDATE reclassification_applications
+      UPDATE reclassification_application
       SET 
-        csc_approved_qs_eval_result = $1,
-        evaluation_status = $2,
-        reevaluation_timestamp = NOW(),
-        updated_at = NOW()
-      WHERE id = $3
+        qs_status = $1,
+        stage_of_reclassification = $2
+      WHERE application_number = $3 OR CAST(applicant_id AS TEXT) = $3
       RETURNING *;
     `;
 
-    const result = await pool.query(updateQuery, [
-      csc_approved_qs_eval_result,
-      validStatus,
-      id
-    ]);
+    const result = await pool.query(updateQuery, [csc_approved_qs_eval_result, nextStage, id]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Reclassification record not found' });
     }
+
+    // Synchronize connected incumbent counselor
+    await syncApplicationToIncumbent(pool, result.rows[0], nextStage);
 
     res.json({
       message: 'Re-evaluation recorded successfully',
@@ -212,7 +229,10 @@ export async function updateCredentials(req, res) {
     const { documents, notes } = req.body;
 
     // Fetch existing docs to merge
-    const existing = await pool.query('SELECT documents FROM reclassification_applications WHERE id = $1', [id]);
+    const existing = await pool.query(
+      'SELECT documents FROM reclassification_application WHERE application_number = $1 OR CAST(applicant_id AS TEXT) = $1',
+      [id]
+    );
     if (existing.rows.length === 0) {
       return res.status(404).json({ error: 'Reclassification record not found' });
     }
@@ -230,21 +250,18 @@ export async function updateCredentials(req, res) {
     const mergedDocs = [...existingDocs, ...newDocs];
 
     const updateQuery = `
-      UPDATE reclassification_applications
+      UPDATE reclassification_application
       SET 
         documents = $1::jsonb,
-        has_updated_credentials = TRUE,
-        updated_credentials_submitted_at = NOW(),
-        evaluation_status = CASE 
-          WHEN evaluation_status = 'needs_applicant_update' THEN 'pending_reevaluation'
-          ELSE evaluation_status
-        END,
-        updated_at = NOW()
-      WHERE id = $2
+        stage_of_reclassification = 'Endorsed to SDO'
+      WHERE application_number = $2 OR CAST(applicant_id AS TEXT) = $2
       RETURNING *;
     `;
 
     const result = await pool.query(updateQuery, [JSON.stringify(mergedDocs), id]);
+
+    // Synchronize connected incumbent counselor
+    await syncApplicationToIncumbent(pool, result.rows[0], 'Endorsed to SDO');
 
     res.json({
       message: 'Applicant credentials updated successfully',
@@ -267,20 +284,13 @@ export async function exportDbmReport(req, res) {
         ra.*,
         COALESCE(TRIM(CONCAT(a.first_name, ' ', a.surname)), CONCAT('Applicant ', ra.application_number)) AS applicant_name,
         COALESCE(a.email_address, 'applicant@deped.gov.ph') AS applicant_email
-      FROM reclassification_applications ra
+      FROM reclassification_application ra
       LEFT JOIN applicants a ON ra.applicant_id = a.id
-      ORDER BY ra.id ASC;
+      ORDER BY ra.application_number ASC;
     `;
 
     const result = await pool.query(query);
     const rows = result.rows;
-
-    // Stamp DBM export timestamp for the exported records
-    await pool.query(`
-      UPDATE reclassification_applications
-      SET dbm_export_timestamp = NOW(), updated_at = NOW()
-      WHERE evaluation_status = 'reevaluated' AND dbm_export_timestamp IS NULL;
-    `);
 
     // Create Excel Workbook
     const workbook = new ExcelJS.Workbook();
@@ -345,10 +355,7 @@ export async function exportDbmReport(req, res) {
         row.applicant_name,
         row.position_title,
         row.item_number || '—',
-        row.station_division || '—',
-        row.proposed_qs_eval_result || '—',
-        row.csc_approved_qs_eval_result || 'Pending CSC Review',
-        row.evaluation_status || 'pending_reevaluation'
+        row.station_division || '—'
       ]);
 
       dataRow.height = 20;
@@ -392,8 +399,123 @@ export async function exportDbmReport(req, res) {
   }
 }
 
-const VALID_MANUAL_STAGES = ['For Review', 'Endorsed', 'Denied', 'Unfilled / Vacant', 'Abolition'];
+const VALID_MANUAL_STAGES = [
+  'For Review',
+  'Endorsed to RO',
+  'Endorsed to DBM RO',
+  'Endorsed to SDO',
+  'Endorsed', // Backward compatibility
+  'Approved',
+  'Denied'
+];
 const VALID_POSITIONS = ['School Counselor I', 'School Counselor II', 'School Counselor III', 'School Counselor IV'];
+
+/**
+ * Synchronize stage of reclassification from incumbent_guidance_counselors to reclassification_application
+ */
+export async function syncIncumbentToApplication(clientOrPool, incumbent, newStage) {
+  if (!incumbent || !incumbent.id) return;
+  try {
+    const itemNo = (incumbent.plantilla_item_number || '').trim();
+    const empId = (incumbent.employee_id || '').trim();
+
+    // 1. Check for existing connected application
+    const checkAppQuery = `
+      SELECT id FROM reclassification_application
+      WHERE incumbent_id = $1
+         OR ($2 <> '' AND current_item_number ILIKE $2)
+         OR ($3 <> '' AND current_item_number ILIKE $3)
+         OR ($2 <> '' AND new_item_number ILIKE $2)
+      ORDER BY id ASC
+    `;
+    const checkRes = await clientOrPool.query(checkAppQuery, [incumbent.id, itemNo, empId]);
+
+    if (checkRes.rows.length > 0) {
+      const appIds = checkRes.rows.map(r => r.id);
+      await clientOrPool.query(`
+        UPDATE reclassification_application
+        SET stage_of_reclassification = $1,
+            incumbent_id = COALESCE(incumbent_id, $2),
+            updated_at = NOW()
+        WHERE id = ANY($3::int[])
+      `, [newStage, incumbent.id, appIds]);
+    } else {
+      // 2. Create a connected application row so both tables have the application record
+      const appNum = `REC-GC-${String(incumbent.id).padStart(5, '0')}`;
+      const itemToUse = itemNo || empId || `ITEM-${incumbent.id}`;
+      const reg = incumbent.region || 'National Capital Region (NCR)';
+      const div = incumbent.division || incumbent.station_division || 'SDO Main';
+      const pos = incumbent.current_position || 'Guidance Counselor';
+      const targetPos = incumbent.target_position || incumbent.current_position || 'School Counselor I';
+
+      await clientOrPool.query(`
+        INSERT INTO reclassification_application (
+          incumbent_id,
+          application_number,
+          region,
+          division,
+          position_title,
+          current_item_number,
+          indicative_position,
+          actual_position,
+          stage_of_reclassification,
+          qs_status,
+          documents
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'Pending Review', '[]'::jsonb)
+        ON CONFLICT (application_number)
+        DO UPDATE SET
+          stage_of_reclassification = EXCLUDED.stage_of_reclassification,
+          incumbent_id = EXCLUDED.incumbent_id,
+          updated_at = NOW();
+      `, [
+        incumbent.id,
+        appNum,
+        reg,
+        div,
+        pos,
+        itemToUse,
+        targetPos,
+        targetPos,
+        newStage
+      ]);
+    }
+  } catch (err) {
+    console.error('[syncIncumbentToApplication Error]', err.message);
+  }
+}
+
+/**
+ * Synchronize stage of reclassification from reclassification_application to incumbent_guidance_counselors
+ */
+export async function syncApplicationToIncumbent(clientOrPool, appRecord, newStage) {
+  if (!appRecord) return;
+  try {
+    const incumbentId = appRecord.incumbent_id;
+    const itemNo = (appRecord.current_item_number || '').trim();
+    const newItemNo = (appRecord.new_item_number || '').trim();
+
+    const updateRes = await clientOrPool.query(`
+      UPDATE incumbent_guidance_counselors
+      SET stage_of_reclassification = $1,
+          updated_at = NOW()
+      WHERE ($2::int IS NOT NULL AND id = $2)
+         OR ($3 <> '' AND plantilla_item_number ILIKE $3)
+         OR ($3 <> '' AND employee_id ILIKE $3)
+         OR ($4 <> '' AND plantilla_item_number ILIKE $4)
+      RETURNING id;
+    `, [newStage, incumbentId || null, itemNo, newItemNo]);
+
+    if (updateRes.rows.length > 0 && !incumbentId) {
+      await clientOrPool.query(`
+        UPDATE reclassification_application
+        SET incumbent_id = $1
+        WHERE id = $2
+      `, [updateRes.rows[0].id, appRecord.id]);
+    }
+  } catch (err) {
+    console.error('[syncApplicationToIncumbent Error]', err.message);
+  }
+}
 
 /**
  * Fetch all incumbent guidance counselors with evaluation credentials
@@ -416,8 +538,11 @@ export async function getIncumbents(req, res) {
         g.station_division,
         g.org_cd,
         g.remarks,
-        g.stage_of_reclassification,
+        COALESCE(ra.stage_of_reclassification, g.stage_of_reclassification) AS stage_of_reclassification,
         g.target_position,
+        COALESCE(ra.actual_position, g.actual_position, g.reclass_position, g.target_position) AS actual_position,
+        COALESCE(ra.actual_position, g.reclass_position, g.actual_position, g.target_position) AS reclass_position,
+        COALESCE(ra.new_item_number, g.new_item_number) AS new_item_number,
         g.dbm_status,
         g.document_checklist,
         g.qs_evaluation,
@@ -428,6 +553,24 @@ export async function getIncumbents(req, res) {
         g.created_at,
         g.updated_at
       FROM incumbent_guidance_counselors g
+      LEFT JOIN LATERAL (
+        SELECT actual_position, new_item_number, stage_of_reclassification
+        FROM reclassification_application ra
+        WHERE ra.incumbent_id = g.id
+           OR (
+             ra.current_item_number IS NOT NULL 
+             AND (
+               TRIM(LOWER(ra.current_item_number)) = TRIM(LOWER(g.plantilla_item_number))
+               OR TRIM(LOWER(ra.current_item_number)) = TRIM(LOWER(g.employee_id))
+             )
+           )
+           OR (
+             ra.new_item_number IS NOT NULL
+             AND TRIM(LOWER(ra.new_item_number)) = TRIM(LOWER(g.plantilla_item_number))
+           )
+        ORDER BY ra.updated_at DESC NULLS LAST, ra.id DESC
+        LIMIT 1
+      ) ra ON true
       WHERE 1=1
     `;
 
@@ -435,15 +578,20 @@ export async function getIncumbents(req, res) {
 
     if (stage) {
       params.push(stage);
-      query += ` AND g.stage_of_reclassification = $${params.length}`;
+      query += ` AND (COALESCE(ra.stage_of_reclassification, g.stage_of_reclassification) = $${params.length})`;
     }
 
     if (position) {
       if (position === 'UNASSIGNED') {
-        query += ` AND g.target_position IS NULL`;
+        query += ` AND (g.target_position IS NULL AND ra.actual_position IS NULL AND g.reclass_position IS NULL)`;
       } else {
         params.push(position);
-        query += ` AND g.target_position = $${params.length}`;
+        query += ` AND (
+          g.target_position = $${params.length} 
+          OR ra.actual_position = $${params.length}
+          OR g.reclass_position = $${params.length}
+          OR g.actual_position = $${params.length}
+        )`;
       }
     }
 
@@ -457,9 +605,12 @@ export async function getIncumbents(req, res) {
       query += ` AND (
         g.employee_id ILIKE $${params.length} OR
         g.plantilla_item_number ILIKE $${params.length} OR
+        COALESCE(ra.new_item_number, g.new_item_number, '') ILIKE $${params.length} OR
         g.full_name ILIKE $${params.length} OR
         g.current_position ILIKE $${params.length} OR
         g.target_position ILIKE $${params.length} OR
+        ra.actual_position ILIKE $${params.length} OR
+        g.reclass_position ILIKE $${params.length} OR
         g.station_division ILIKE $${params.length} OR
         g.division ILIKE $${params.length} OR
         g.region ILIKE $${params.length} OR
@@ -473,10 +624,12 @@ export async function getIncumbents(req, res) {
     const result = await pool.query(query, params);
 
     const formatted = result.rows.map(row => {
+      const resolvedActualPos = row.actual_position || row.reclass_position || row.target_position || null;
       return {
         id: row.id,
         employee_id: row.employee_id,
         plantilla_item_number: row.plantilla_item_number,
+        new_item_number: row.new_item_number || null,
         full_name: row.full_name,
         current_position: row.current_position,
         salary_grade: row.salary_grade,
@@ -487,8 +640,9 @@ export async function getIncumbents(req, res) {
         org_cd: row.org_cd,
         remarks: row.remarks,
         stage_of_reclassification: row.stage_of_reclassification,
-        target_position: row.target_position,
-        reclass_position: row.target_position,
+        target_position: resolvedActualPos,
+        actual_position: resolvedActualPos,
+        reclass_position: resolvedActualPos,
         dbm_status: row.dbm_status || null,
         document_checklist: row.document_checklist || [],
         qs_evaluation: row.qs_evaluation || {},
@@ -520,19 +674,34 @@ export async function getIncumbents(req, res) {
  */
 export async function updateIncumbentStage(req, res) {
   try {
-    if (isUserRegionalOffice(req)) {
-      return res.status(403).json({ error: 'Access denied: Step 2 (Assessment Workbench) is restricted to Division HRMO.' });
-    }
-
+    const isRO = isUserRegionalOffice(req);
+    const isAdmin = req.user?.role === 'admin';
     const { id } = req.params;
     const { stage_of_reclassification } = req.body;
+
+    const RO_ONLY_STAGES = ['Endorsed to DBM RO', 'Endorsed to SDO'];
+    const HRMO_STAGES = ['For Review', 'Endorsed to RO', 'Endorsed'];
+
+    if (!isAdmin) {
+      if (isRO && !RO_ONLY_STAGES.includes(stage_of_reclassification) && stage_of_reclassification !== 'Approved') {
+        return res.status(403).json({
+          error: `Regional Office personnel can only endorse to: ${RO_ONLY_STAGES.join(', ')}`
+        });
+      }
+
+      if (!isRO && RO_ONLY_STAGES.includes(stage_of_reclassification)) {
+        return res.status(403).json({
+          error: `Only Regional Office personnel can update status to ${stage_of_reclassification}.`
+        });
+      }
+    }
 
     if (stage_of_reclassification === 'Approved') {
       const current = await pool.query('SELECT dbm_status FROM incumbent_guidance_counselors WHERE id = $1', [id]);
       if (current.rows.length === 0) {
         return res.status(404).json({ error: 'Incumbent counselor not found' });
       }
-      if (current.rows[0].dbm_status !== 'With DBM NOSCA') {
+      if (current.rows[0].dbm_status !== 'With DBM NOSCA' && !isAdmin) {
         return res.status(400).json({
           error: 'The "Approved" stage is automatically set when DBM Status is "With DBM NOSCA" and cannot be manually selected.'
         });
@@ -556,7 +725,12 @@ export async function updateIncumbentStage(req, res) {
       return res.status(404).json({ error: 'Incumbent counselor not found' });
     }
 
-    res.json(result.rows[0]);
+    const updatedIncumbent = result.rows[0];
+
+    // Synchronize connected reclassification_application
+    await syncIncumbentToApplication(pool, updatedIncumbent, stage_of_reclassification);
+
+    res.json(updatedIncumbent);
   } catch (error) {
     console.error('[Reclass Controller - updateIncumbentStage]', error);
     res.status(500).json({ error: error.message || 'Failed to update reclassification stage' });
@@ -586,7 +760,10 @@ export async function updateIncumbentPosition(req, res) {
 
     const updateQuery = `
       UPDATE incumbent_guidance_counselors
-      SET target_position = $1, updated_at = NOW()
+      SET target_position = $1,
+          actual_position = $1,
+          reclass_position = $1,
+          updated_at = NOW()
       WHERE id = $2
       RETURNING *;
     `;
@@ -597,7 +774,27 @@ export async function updateIncumbentPosition(req, res) {
       return res.status(404).json({ error: 'Incumbent counselor not found' });
     }
 
-    res.json(result.rows[0]);
+    const updatedIncumbent = result.rows[0];
+
+    // Synchronize actual_position to connected reclassification_application
+    const itemNo = (updatedIncumbent.plantilla_item_number || '').trim();
+    const empId = (updatedIncumbent.employee_id || '').trim();
+    await pool.query(`
+      UPDATE reclassification_application
+      SET actual_position = $1,
+          indicative_position = COALESCE(indicative_position, $1),
+          updated_at = NOW()
+      WHERE incumbent_id = $2
+         OR ($3 <> '' AND current_item_number ILIKE $3)
+         OR ($4 <> '' AND current_item_number ILIKE $4)
+    `, [targetPosition, updatedIncumbent.id, itemNo, empId]);
+
+    res.json({
+      ...updatedIncumbent,
+      actual_position: updatedIncumbent.target_position,
+      reclass_position: updatedIncumbent.target_position,
+      new_item_number: updatedIncumbent.new_item_number || null
+    });
   } catch (error) {
     console.error('[Reclass Controller - updateIncumbentPosition]', error);
     res.status(500).json({ error: error.message || 'Failed to update reclassification position' });
@@ -621,12 +818,14 @@ export async function saveIncumbentQsEvaluation(req, res) {
       evaluator_remarks,
       target_position,
       reclass_position,
+      actual_position,
       stage_of_reclassification
     } = req.body;
 
     const evaluatedBy = req.user?.name || req.user?.fullName || req.user?.username || req.user?.email || 'Division HRMO';
     const evalResult = qs_eval_result || 'PENDING';
-    const targetPosToSave = target_position !== undefined ? target_position : (reclass_position !== undefined ? reclass_position : null);
+    const posParam = actual_position !== undefined ? actual_position : (target_position !== undefined ? target_position : reclass_position);
+    const targetPosToSave = (posParam === '' || posParam === undefined) ? null : posParam;
 
     const updateQuery = `
       UPDATE incumbent_guidance_counselors
@@ -637,6 +836,8 @@ export async function saveIncumbentQsEvaluation(req, res) {
           evaluated_by = $5,
           evaluated_at = NOW(),
           target_position = COALESCE($6, target_position),
+          actual_position = COALESCE($6, actual_position, target_position),
+          reclass_position = COALESCE($6, reclass_position, target_position),
           stage_of_reclassification = COALESCE($7, stage_of_reclassification),
           updated_at = NOW()
       WHERE id = $8
@@ -658,7 +859,29 @@ export async function saveIncumbentQsEvaluation(req, res) {
       return res.status(404).json({ error: 'Incumbent counselor not found' });
     }
 
-    res.json(result.rows[0]);
+    // Synchronize actual_position and stage to reclassification_application
+    const updatedInc = result.rows[0];
+    if (targetPosToSave || stage_of_reclassification) {
+      const itemNo = (updatedInc.plantilla_item_number || '').trim();
+      const empId = (updatedInc.employee_id || '').trim();
+      await pool.query(`
+        UPDATE reclassification_application
+        SET actual_position = COALESCE($1, actual_position),
+            indicative_position = COALESCE(indicative_position, $1),
+            stage_of_reclassification = COALESCE($2, stage_of_reclassification),
+            updated_at = NOW()
+        WHERE incumbent_id = $3
+           OR ($4 <> '' AND current_item_number ILIKE $4)
+           OR ($5 <> '' AND current_item_number ILIKE $5)
+      `, [targetPosToSave, stage_of_reclassification || null, id, itemNo, empId]);
+    }
+
+    res.json({
+      ...updatedInc,
+      actual_position: updatedInc.actual_position || updatedInc.target_position,
+      reclass_position: updatedInc.reclass_position || updatedInc.target_position,
+      new_item_number: updatedInc.new_item_number || null
+    });
   } catch (error) {
     console.error('[Reclass Controller - saveIncumbentQsEvaluation]', error);
     res.status(500).json({ error: error.message || 'Failed to save QS evaluation' });
@@ -724,6 +947,7 @@ export async function updateIncumbentDbmStatus(req, res) {
         SET dbm_status = $1,
             stage_of_reclassification = 'Approved',
             plantilla_item_number = $2,
+            new_item_number = $2,
             updated_at = NOW()
         WHERE id = $3
         RETURNING *;
@@ -744,7 +968,7 @@ export async function updateIncumbentDbmStatus(req, res) {
         UPDATE incumbent_guidance_counselors
         SET dbm_status = $1,
             stage_of_reclassification = CASE
-              WHEN stage_of_reclassification = 'Approved' THEN 'Endorsed'
+              WHEN stage_of_reclassification = 'Approved' THEN 'Endorsed to RO'
               ELSE stage_of_reclassification
             END,
             updated_at = NOW()
@@ -800,7 +1024,20 @@ export async function updateIncumbentDbmStatus(req, res) {
           ]
         );
       }
+
+      // Synchronize new_item_number to reclassification_application
+      await client.query(`
+        UPDATE reclassification_application
+        SET new_item_number = $1,
+            stage_of_reclassification = 'Approved',
+            updated_at = NOW()
+        WHERE incumbent_id = $2
+           OR (current_item_number IS NOT NULL AND (TRIM(LOWER(current_item_number)) = TRIM(LOWER($3)) OR TRIM(LOWER(current_item_number)) = TRIM(LOWER($4))))
+      `, [cleanItemNo, id, incumbent.plantilla_item_number || '', incumbent.employee_id || '']);
     }
+
+    // Synchronize connected reclassification_application stage
+    await syncIncumbentToApplication(client, updatedIncumbent, updatedIncumbent.stage_of_reclassification);
 
     await client.query('COMMIT');
     res.json(updatedIncumbent);
