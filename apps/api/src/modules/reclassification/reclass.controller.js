@@ -543,6 +543,10 @@ export async function getIncumbents(req, res) {
         COALESCE(ra.actual_position, g.actual_position, g.reclass_position, g.target_position) AS actual_position,
         COALESCE(ra.actual_position, g.reclass_position, g.actual_position, g.target_position) AS reclass_position,
         COALESCE(ra.new_item_number, g.new_item_number) AS new_item_number,
+        g.nosca_serial_no,
+        g.nosca_file_name,
+        g.nosca_file_url,
+        g.nosca_uploaded_at,
         g.dbm_status,
         g.document_checklist,
         g.qs_evaluation,
@@ -630,6 +634,10 @@ export async function getIncumbents(req, res) {
         employee_id: row.employee_id,
         plantilla_item_number: row.plantilla_item_number,
         new_item_number: row.new_item_number || null,
+        nosca_serial_no: row.nosca_serial_no || null,
+        nosca_file_name: row.nosca_file_name || null,
+        nosca_file_url: row.nosca_file_url || null,
+        nosca_uploaded_at: row.nosca_uploaded_at || null,
         full_name: row.full_name,
         current_position: row.current_position,
         salary_grade: row.salary_grade,
@@ -1684,4 +1692,383 @@ export async function importNoscaItems(req, res) {
     if (client) client.release();
   }
 }
+
+/**
+ * Upload official NOSCA (PDF/data/items), archive document, and automatically match
+ * NEW Item Numbers to personnel currently in Stage "Endorsed to SDO"
+ */
+export async function uploadNoscaAndMatch(req, res) {
+  let client;
+  let tempFilePath = null;
+  try {
+    const userRole = req.user?.role;
+    const isRegionalOffice = 
+      userRole === 'regional_office' || 
+      userRole === 'regional_director' || 
+      userRole === 'admin' ||
+      String(req.user?.position || '').toLowerCase().trim() === 'regional office';
+
+    if (!isRegionalOffice) {
+      return res.status(403).json({ error: 'Access denied: Only Regional Office personnel may upload NOSCA and match items.' });
+    }
+
+    const { fileData, fileName, serialNo, division, items: rawItems, schoolName, position } = req.body;
+    let items = Array.isArray(rawItems) ? rawItems.map(i => String(i).trim()).filter(Boolean) : [];
+    let detectedSerial = (serialNo || '').trim();
+    let detectedDivision = (division || '').trim();
+
+    // If fileData is provided and items array is empty, run the python scanner
+    if (fileData && typeof fileData === 'string' && items.length === 0) {
+      const base64Clean = fileData.includes(',') ? fileData.split(',')[1] : fileData;
+      const pdfBuffer = Buffer.from(base64Clean, 'base64');
+      if (pdfBuffer.length > 0) {
+        const tempFileName = `nosca_match_${Date.now()}_${randomUUID().slice(0, 8)}.pdf`;
+        tempFilePath = path.join(os.tmpdir(), tempFileName);
+        fs.writeFileSync(tempFilePath, pdfBuffer);
+
+        const candidates = [
+          path.resolve(process.cwd(), 'scanner.py'),
+          path.resolve(__dirname, '../../../../../scanner.py'),
+          path.resolve(__dirname, '../../../../scanner.py'),
+          path.resolve(__dirname, '../../../scanner.py'),
+          path.resolve('c:/Users/SC/OneDrive - Department of Education/Desktop/agap_portal/scanner.py')
+        ];
+        let scannerPath = candidates.find(p => fs.existsSync(p)) || candidates[0];
+
+        const scanResult = await new Promise((resolve) => {
+          const pyProcess = spawn('python', [scannerPath, tempFilePath], { windowsHide: true, timeout: 60000 });
+          let stdout = '';
+          let stderr = '';
+          pyProcess.stdout.on('data', d => stdout += d.toString('utf8'));
+          pyProcess.stderr.on('data', d => stderr += d.toString('utf8'));
+          pyProcess.on('close', () => {
+            if (tempFilePath && fs.existsSync(tempFilePath)) {
+              try { fs.unlinkSync(tempFilePath); } catch (_) {}
+            }
+            const trimmed = stdout.trim();
+            const firstBrace = trimmed.indexOf('{');
+            const lastBrace = trimmed.lastIndexOf('}');
+            if (firstBrace !== -1 && lastBrace !== -1) {
+              try {
+                resolve(JSON.parse(trimmed.substring(firstBrace, lastBrace + 1)));
+              } catch (_) { resolve(null); }
+            } else { resolve(null); }
+          });
+          pyProcess.on('error', () => {
+            if (tempFilePath && fs.existsSync(tempFilePath)) {
+              try { fs.unlinkSync(tempFilePath); } catch (_) {}
+            }
+            resolve(null);
+          });
+        });
+
+        if (scanResult && Array.isArray(scanResult.items) && scanResult.items.length > 0) {
+          items = scanResult.items.map(i => String(i).trim()).filter(Boolean);
+          if (!detectedSerial && scanResult.serial_no && scanResult.serial_no !== 'UNKNOWN') {
+            detectedSerial = scanResult.serial_no;
+          }
+          if (!detectedDivision && scanResult.division) {
+            detectedDivision = scanResult.division;
+          }
+        }
+      }
+    }
+
+    if (!items || items.length === 0) {
+      return res.status(400).json({ error: 'No new plantilla items found or provided in the NOSCA upload.' });
+    }
+
+    const finalSerial = detectedSerial || `RO-NOSCA-${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`;
+    const finalFileName = fileName || `NOSCA_${finalSerial}.pdf`;
+    const finalDivision = detectedDivision || 'Regional Scope';
+
+    client = await pool.connect();
+    await client.query('BEGIN');
+
+    // 1. Insert into reclassification_nosca_documents (retain document for transaction)
+    const docRes = await client.query(`
+      INSERT INTO reclassification_nosca_documents (
+        serial_no,
+        file_name,
+        file_url,
+        division,
+        position_title,
+        total_items,
+        assigned_count,
+        uploaded_by,
+        uploaded_at,
+        metadata
+      ) VALUES ($1, $2, $3, $4, $5, $6, 0, $7, NOW(), $8)
+      RETURNING *;
+    `, [
+      finalSerial,
+      finalFileName,
+      fileData && typeof fileData === 'string' && fileData.length < 2000000 ? fileData : null,
+      finalDivision,
+      position || 'School Counselor Associate I',
+      items.length,
+      req.user?.fullName || req.user?.username || 'Regional Office',
+      JSON.stringify({ itemCount: items.length, originalName: fileName })
+    ]);
+    const savedDoc = docRes.rows[0];
+
+    // 2. Insert items into reclassification_nosca_items
+    for (const item of items) {
+      await client.query(`
+        INSERT INTO reclassification_nosca_items (
+          serial_no,
+          plantilla_item_number,
+          category,
+          position_title,
+          division,
+          school_name,
+          source_type,
+          file_name,
+          assignment_status,
+          created_at,
+          updated_at
+        ) VALUES ($1, $2, 'ELEMENTARY', $3, $4, $5, 'pdf_scan', $6, 'AVAILABLE', NOW(), NOW())
+        ON CONFLICT DO NOTHING;
+      `, [
+        finalSerial,
+        item,
+        position || 'School Counselor Associate I',
+        finalDivision,
+        schoolName || 'Regional Allocation Station',
+        finalFileName
+      ]);
+    }
+
+    // 3. AUTOMATIC MATCHING for personnel whose Stage is "Endorsed to SDO"
+    const sdoCandidatesRes = await client.query(`
+      SELECT id, employee_id, full_name, plantilla_item_number, new_item_number, division, station_division
+      FROM incumbent_guidance_counselors
+      WHERE stage_of_reclassification = 'Endorsed to SDO'
+      ORDER BY 
+        CASE WHEN new_item_number IS NULL OR new_item_number = '' THEN 0 ELSE 1 END,
+        CASE WHEN (division ILIKE '%' || $1 || '%' OR station_division ILIKE '%' || $1 || '%') THEN 0 ELSE 1 END,
+        id ASC;
+    `, [finalDivision.replace(/^Division of\s+/i, '')]);
+
+    const sdoCandidates = sdoCandidatesRes.rows;
+    const pendingCandidates = sdoCandidates.filter(c => !c.new_item_number);
+
+    let matchedCount = 0;
+    const matchedPersonnel = [];
+    const availableItems = [...items];
+
+    // Match up to available items count
+    for (let i = 0; i < Math.min(pendingCandidates.length, availableItems.length); i++) {
+      const candidate = pendingCandidates[i];
+      const newItemNo = availableItems[i];
+
+      // Update candidate record
+      await client.query(`
+        UPDATE incumbent_guidance_counselors
+        SET new_item_number = $1,
+            nosca_serial_no = $2,
+            nosca_file_name = $3,
+            nosca_uploaded_at = NOW(),
+            dbm_status = 'With DBM NOSCA',
+            updated_at = NOW()
+        WHERE id = $4;
+      `, [newItemNo, finalSerial, finalFileName, candidate.id]);
+
+      // Sync to reclassification_application
+      await client.query(`
+        UPDATE reclassification_application
+        SET new_item_number = $1,
+            nosca_serial_no = $2,
+            nosca_file_name = $3,
+            nosca_uploaded_at = NOW(),
+            updated_at = NOW()
+        WHERE incumbent_id = $4;
+      `, [newItemNo, finalSerial, finalFileName, candidate.id]);
+
+      // Mark in reclassification_nosca_items as ASSIGNED
+      await client.query(`
+        UPDATE reclassification_nosca_items
+        SET assignment_status = 'ASSIGNED',
+            assigned_to_incumbent_id = $1,
+            assigned_to_employee_id = $2,
+            assigned_at = NOW(),
+            updated_at = NOW()
+        WHERE plantilla_item_number = $3;
+      `, [candidate.id, candidate.employee_id, newItemNo]);
+
+      matchedCount++;
+      matchedPersonnel.push({
+        id: candidate.id,
+        fullName: candidate.full_name,
+        previousItemNumber: candidate.plantilla_item_number,
+        newItemNumber: newItemNo,
+        serialNo: finalSerial
+      });
+    }
+
+    // Update document assigned count
+    await client.query(`
+      UPDATE reclassification_nosca_documents
+      SET assigned_count = $1
+      WHERE id = $2;
+    `, [matchedCount, savedDoc.id]);
+
+    await client.query('COMMIT');
+
+    return res.json({
+      success: true,
+      message: `NOSCA "${finalFileName}" uploaded successfully! Extracted ${items.length} item(s) and automatically linked ${matchedCount} personnel Endorsed to SDO.`,
+      serialNo: finalSerial,
+      fileName: finalFileName,
+      division: finalDivision,
+      totalItems: items.length,
+      assignedCount: matchedCount,
+      matchedPersonnel,
+      documentId: savedDoc.id
+    });
+  } catch (error) {
+    if (client) {
+      try { await client.query('ROLLBACK'); } catch (_) {}
+    }
+    if (tempFilePath && fs.existsSync(tempFilePath)) {
+      try { fs.unlinkSync(tempFilePath); } catch (_) {}
+    }
+    console.error('[Reclass Controller - uploadNoscaAndMatch]', error);
+    res.status(500).json({ error: error.message || 'Failed to process NOSCA upload.' });
+  } finally {
+    if (client) client.release();
+  }
+}
+
+/**
+ * Fetch all archived NOSCA documents and their transaction records
+ */
+export async function getNoscaDocuments(req, res) {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        d.id,
+        d.serial_no,
+        d.file_name,
+        d.file_url,
+        d.division,
+        d.position_title,
+        d.total_items,
+        d.assigned_count,
+        d.uploaded_by,
+        d.uploaded_at,
+        d.metadata,
+        (SELECT COUNT(*) FROM incumbent_guidance_counselors i WHERE i.nosca_serial_no = d.serial_no) AS actual_linked_count
+      FROM reclassification_nosca_documents d
+      ORDER BY d.uploaded_at DESC;
+    `);
+    res.json(result.rows);
+  } catch (error) {
+    console.error('[Reclass Controller - getNoscaDocuments]', error);
+    res.status(500).json({ error: error.message || 'Failed to fetch NOSCA documents' });
+  }
+}
+
+/**
+ * Manually assign, link, or clear a NEW Item No. on an incumbent
+ */
+export async function updateIncumbentNoscaItem(req, res) {
+  let client;
+  try {
+    const { id } = req.params;
+    const { newItemNumber, serialNo, fileName } = req.body;
+
+    client = await pool.connect();
+    await client.query('BEGIN');
+
+    const cleanItemNo = (typeof newItemNumber === 'string' && newItemNumber.trim()) ? newItemNumber.trim() : null;
+
+    if (cleanItemNo) {
+      await client.query(`
+        UPDATE incumbent_guidance_counselors
+        SET new_item_number = $1,
+            nosca_serial_no = COALESCE($2, nosca_serial_no, 'MANUAL-NOSCA'),
+            nosca_file_name = COALESCE($3, nosca_file_name, 'NOSCA_Manual.pdf'),
+            nosca_uploaded_at = COALESCE(nosca_uploaded_at, NOW()),
+            dbm_status = 'With DBM NOSCA',
+            updated_at = NOW()
+        WHERE id = $4;
+      `, [cleanItemNo, serialNo || null, fileName || null, id]);
+
+      await client.query(`
+        UPDATE reclassification_application
+        SET new_item_number = $1,
+            nosca_serial_no = COALESCE($2, nosca_serial_no, 'MANUAL-NOSCA'),
+            nosca_file_name = COALESCE($3, nosca_file_name, 'NOSCA_Manual.pdf'),
+            nosca_uploaded_at = COALESCE(nosca_uploaded_at, NOW()),
+            updated_at = NOW()
+        WHERE incumbent_id = $4;
+      `, [cleanItemNo, serialNo || null, fileName || null, id]);
+
+      await client.query(`
+        INSERT INTO reclassification_nosca_items (
+          serial_no,
+          plantilla_item_number,
+          category,
+          position_title,
+          assignment_status,
+          assigned_to_incumbent_id,
+          assigned_at,
+          created_at,
+          updated_at
+        ) VALUES ($1, $2, 'ELEMENTARY', 'School Counselor Associate I', 'ASSIGNED', $3, NOW(), NOW(), NOW())
+        ON CONFLICT (plantilla_item_number) 
+        DO UPDATE SET
+          assignment_status = 'ASSIGNED',
+          assigned_to_incumbent_id = EXCLUDED.assigned_to_incumbent_id,
+          assigned_at = NOW(),
+          updated_at = NOW();
+      `, [serialNo || 'MANUAL-NOSCA', cleanItemNo, id]);
+    } else {
+      // Unlink item
+      await client.query(`
+        UPDATE incumbent_guidance_counselors
+        SET new_item_number = NULL,
+            nosca_serial_no = NULL,
+            nosca_file_name = NULL,
+            nosca_uploaded_at = NULL,
+            dbm_status = 'With DBM Request',
+            updated_at = NOW()
+        WHERE id = $1;
+      `, [id]);
+
+      await client.query(`
+        UPDATE reclassification_application
+        SET new_item_number = NULL,
+            nosca_serial_no = NULL,
+            nosca_file_name = NULL,
+            nosca_uploaded_at = NULL,
+            updated_at = NOW()
+        WHERE incumbent_id = $1;
+      `, [id]);
+
+      await client.query(`
+        UPDATE reclassification_nosca_items
+        SET assignment_status = 'AVAILABLE',
+            assigned_to_incumbent_id = NULL,
+            assigned_to_employee_id = NULL,
+            assigned_at = NULL,
+            updated_at = NOW()
+        WHERE assigned_to_incumbent_id = $1;
+      `, [id]);
+    }
+
+    await client.query('COMMIT');
+    res.json({ success: true, message: cleanItemNo ? `Linked new item ${cleanItemNo}` : 'Item unlinked successfully' });
+  } catch (error) {
+    if (client) {
+      try { await client.query('ROLLBACK'); } catch (_) {}
+    }
+    console.error('[Reclass Controller - updateIncumbentNoscaItem]', error);
+    res.status(500).json({ error: error.message || 'Failed to update incumbent NOSCA item.' });
+  } finally {
+    if (client) client.release();
+  }
+}
+
 

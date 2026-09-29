@@ -32,3 +32,36 @@ export function requireHrmoAccess(req, res, next) {
   }
   next();
 }
+
+export function requireHrOfficerAccess(req, res, next) {
+  const role = String(req.user?.role || '').toLowerCase().trim();
+  const position = String(req.user?.position || '').toLowerCase().trim();
+  const isRo = role === 'regional_office' || 
+               role === 'regional_director' || 
+               (role.includes('regional') && role !== 'admin') || 
+               position === 'regional office';
+  if (isRo && role !== 'admin' && role !== 'superadmin') {
+    return res.status(403).json({
+      error: 'Access restricted: Uploading NOSCA and assigning item numbers is restricted to the HR Officer and unavailable to Regional Office accounts.'
+    });
+  }
+  next();
+}
+
+export function requireRegionalOfficeAccess(req, res, next) {
+  const role = String(req.user?.role || '').toLowerCase().trim();
+  const position = String(req.user?.position || '').toLowerCase().trim();
+  const isRo = role === 'regional_office' || 
+               role === 'regional_director' || 
+               role.includes('regional') || 
+               position === 'regional office' || 
+               role === 'admin' || 
+               role === 'superadmin';
+  if (!isRo) {
+    return res.status(403).json({
+      error: 'Access restricted: SDO personnel are not authorized to perform this regional action.'
+    });
+  }
+  next();
+}
+

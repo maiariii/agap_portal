@@ -8,6 +8,7 @@ import HqBackground from '../../../components/HqBackground.jsx';
 import ThemeToggle from '../../../components/ThemeToggle.jsx';
 import { useTheme } from '../../../middleware/ThemeProvider.jsx';
 import IncumbentDocumentVaultModal from '../components/IncumbentDocumentVaultModal.jsx';
+import NoscaItemTrackingTab from '../components/NoscaItemTrackingTab.jsx';
 
 const ALL_RECLASS_STAGES = [
   'For Review',
@@ -97,6 +98,13 @@ export default function ReclassificationPage({ onBack }) {
     (String(user?.role || '').toLowerCase().includes('regional') && user?.role !== 'admin') ||
     String(user?.position || '').toLowerCase().trim() === 'regional office';
 
+  // HR Officer (SDO/HRMO) manages NOSCA upload & item allocation; Regional Office is view-only
+  const canManageNosca = Boolean(
+    (!isRegionalOffice) || 
+    user?.role === 'admin' || 
+    user?.role === 'superadmin'
+  );
+
   // Regional Office NOSCA Scanner & Modal state
   const [showNoscaModal, setShowNoscaModal] = useState(false);
   const [scanningNosca, setScanningNosca] = useState(false);
@@ -154,6 +162,21 @@ export default function ReclassificationPage({ onBack }) {
   const [assigningItemLoading, setAssigningItemLoading] = useState(false);
   const [currentPageIncumbents, setCurrentPageIncumbents] = useState(1);
   const [pageSizeIncumbents, setPageSizeIncumbents] = useState(10);
+
+  // Step 4: NOSCA Upload & SDO Item Tracking state
+  const [noscaDocuments, setNoscaDocuments] = useState([]);
+  const [loadingNoscaDocs, setLoadingNoscaDocs] = useState(false);
+  const [uploadingNoscaDoc, setUploadingNoscaDoc] = useState(false);
+  const [showNoscaDocsArchiveModal, setShowNoscaDocsArchiveModal] = useState(false);
+  const [sdoSearchTerm, setSdoSearchTerm] = useState('');
+  const [sdoStatusFilter, setSdoStatusFilter] = useState('ALL'); // 'ALL' | 'ASSIGNED' | 'PENDING'
+  const [sdoDivisionFilter, setSdoDivisionFilter] = useState('ALL');
+  const [sdoEditItemModal, setSdoEditItemModal] = useState({ open: false, personnel: null, newItemNumber: '', serialNo: '', fileName: '' });
+  const [savingSdoItem, setSavingSdoItem] = useState(false);
+  const [isSdoDragOver, setIsSdoDragOver] = useState(false);
+  const [currentPageSdo, setCurrentPageSdo] = useState(1);
+  const [pageSizeSdo, setPageSizeSdo] = useState(10);
+  const sdoNoscaFileInputRef = React.useRef(null);
 
   // Modal assessment decisions state
   const [modalTargetPosition, setModalTargetPosition] = useState('');
@@ -396,8 +419,6 @@ export default function ReclassificationPage({ onBack }) {
   const [replaceExisting, setReplaceExisting] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
 
-  // Workflow Stepper state: 1 = CSV Ingestion, 2 = Assessment Workbench, 3 = DBM Endorsement
-  // Regional Office defaults to Step 3, with View-Only permissions for Steps 1 & 2
   const [currentStep, setCurrentStep] = useState(() => isRegionalOffice ? 3 : 1);
 
   const handleStepClick = (targetStep) => {
@@ -499,9 +520,136 @@ export default function ReclassificationPage({ onBack }) {
     }
   };
 
-  useEffect(() => {
+  // Load Uploaded NOSCA Reference Documents
+  const fetchNoscaDocuments = async () => {
+    setLoadingNoscaDocs(true);
+    try {
+      const data = await apiFetch('/api/reclassification/nosca-documents');
+      if (Array.isArray(data)) {
+        setNoscaDocuments(data);
+      }
+    } catch (err) {
+      console.warn('[Reclass] Error loading NOSCA documents:', err);
+    } finally {
+      setLoadingNoscaDocs(false);
+    }
+  };
+
+  // Direct NOSCA upload and automatic matching for Step 4
+  const handleDirectNoscaUpload = async (file) => {
+    if (!canManageNosca) {
+      setToast({
+        title: 'Access Restricted',
+        message: 'Uploading NOSCA documents is restricted to the HR Officer and unavailable on Regional Office accounts.',
+        type: 'error'
+      });
+      return;
+    }
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith('.pdf') && file.type !== 'application/pdf') {
+      setToast({
+        title: 'PDF File Required',
+        message: 'Please upload an official DBM NOSCA document in PDF format.',
+        type: 'error'
+      });
+      return;
+    }
+
+    setUploadingNoscaDoc(true);
+    const reader = new FileReader();
+    reader.onload = async (uploadEvt) => {
+      try {
+        const fileData = uploadEvt.target.result;
+        const res = await apiFetch('/api/reclassification/upload-nosca-and-match', {
+          method: 'POST',
+          body: JSON.stringify({
+            fileData,
+            fileName: file.name
+          })
+        });
+
+        if (res && res.success) {
+          setToast({
+            title: 'NOSCA Processed & Linked',
+            message: res.message || 'NOSCA items extracted and linked to SDO endorsees!',
+            type: 'success'
+          });
+          fetchIncumbents();
+          fetchNoscaDocuments();
+          fetchNoscaItems();
+        } else {
+          throw new Error(res?.error || 'Failed to process NOSCA document.');
+        }
+      } catch (err) {
+        console.error('[Reclass] Upload NOSCA error:', err);
+        setToast({
+          title: 'NOSCA Upload Failed',
+          message: err.message || 'Error occurred while processing NOSCA.',
+          type: 'error'
+        });
+      } finally {
+        setUploadingNoscaDoc(false);
+        if (sdoNoscaFileInputRef.current) {
+          sdoNoscaFileInputRef.current.value = '';
+        }
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Manually link or edit NEW Item No. on an SDO endorsee
+  const handleSaveSdoItem = async () => {
+    if (!canManageNosca) {
+      setToast({
+        title: 'Access Restricted',
+        message: 'Adding or editing item numbers is restricted to the HR Officer and unavailable on Regional Office accounts.',
+        type: 'error'
+      });
+      return;
+    }
+    if (!sdoEditItemModal.personnel) return;
+    setSavingSdoItem(true);
+    try {
+      const res = await apiFetch(`/api/reclassification/incumbents/${sdoEditItemModal.personnel.id}/nosca-item`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          newItemNumber: sdoEditItemModal.newItemNumber,
+          serialNo: sdoEditItemModal.serialNo,
+          fileName: sdoEditItemModal.fileName
+        })
+      });
+
+      if (res && res.success) {
+        setToast({
+          title: 'Item No. Updated',
+          message: sdoEditItemModal.newItemNumber 
+            ? `Assigned NEW Item No. ${sdoEditItemModal.newItemNumber} to ${sdoEditItemModal.personnel.full_name}`
+            : `Unlinked Item No. from ${sdoEditItemModal.personnel.full_name}`,
+          type: 'success'
+        });
+        setSdoEditItemModal({ open: false, personnel: null, newItemNumber: '', serialNo: '', fileName: '' });
         fetchIncumbents();
+        fetchNoscaItems();
+        fetchNoscaDocuments();
+      } else {
+        throw new Error(res?.error || 'Failed to update Item No.');
+      }
+    } catch (err) {
+      console.error('[Reclass] Error saving item no:', err);
+      setToast({
+        title: 'Update Error',
+        message: err.message || 'Failed to update Item No.',
+        type: 'error'
+      });
+    } finally {
+      setSavingSdoItem(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchIncumbents();
     fetchNoscaItems();
+    fetchNoscaDocuments();
   }, []);
 
   // Autocomplete fetch schools from agap_schools
@@ -967,7 +1115,60 @@ export default function ReclassificationPage({ onBack }) {
     i.stage_of_reclassification === 'Approved' || 
     ((i.target_position || i.reclass_position) && (i.target_position || i.reclass_position) !== '#N/A')
   );
-  const isStep3Done = incumbents.some(i => i.stage_of_reclassification === 'Approved');
+  const isStep3Done = currentStep > 3 || incumbents.some(i => i.stage_of_reclassification === 'Endorsed to SDO' || i.stage_of_reclassification === 'Approved');
+  const isStep4Done = incumbents.some(i => i.stage_of_reclassification === 'Endorsed to SDO' && i.new_item_number);
+
+  // Personnel with stage "Endorsed to SDO"
+  const sdoEndorsees = useMemo(() => {
+    return incumbents.filter(i => (i.stage_of_reclassification || '').trim() === 'Endorsed to SDO');
+  }, [incumbents]);
+
+  const sdoMetrics = useMemo(() => {
+    const total = sdoEndorsees.length;
+    const assigned = sdoEndorsees.filter(i => i.new_item_number).length;
+    const pending = total - assigned;
+    return { total, assigned, pending };
+  }, [sdoEndorsees]);
+
+  const sdoDivisions = useMemo(() => {
+    const set = new Set();
+    sdoEndorsees.forEach(i => {
+      const d = i.division || i.station_division;
+      if (d) set.add(d);
+    });
+    return Array.from(set).sort();
+  }, [sdoEndorsees]);
+
+  const filteredSdoEndorsees = useMemo(() => {
+    return sdoEndorsees.filter(i => {
+      if (sdoStatusFilter === 'ASSIGNED' && !i.new_item_number) return false;
+      if (sdoStatusFilter === 'PENDING' && i.new_item_number) return false;
+      if (sdoDivisionFilter !== 'ALL') {
+        const div = (i.division || i.station_division || '').toLowerCase();
+        if (!div.includes(sdoDivisionFilter.toLowerCase())) return false;
+      }
+      if (sdoSearchTerm.trim()) {
+        const q = sdoSearchTerm.toLowerCase().trim();
+        const name = (i.full_name || '').toLowerCase();
+        const oldItem = (i.plantilla_item_number || i.employee_id || '').toLowerCase();
+        const newItem = (i.new_item_number || '').toLowerCase();
+        const station = (i.station_division || i.division || '').toLowerCase();
+        const pos = (i.actual_position || i.reclass_position || i.target_position || i.current_position || '').toLowerCase();
+        const serial = (i.nosca_serial_no || '').toLowerCase();
+        if (!name.includes(q) && !oldItem.includes(q) && !newItem.includes(q) && !station.includes(q) && !pos.includes(q) && !serial.includes(q)) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [sdoEndorsees, sdoStatusFilter, sdoDivisionFilter, sdoSearchTerm]);
+
+  const pagedSdoEndorsees = useMemo(() => {
+    const start = (currentPageSdo - 1) * pageSizeSdo;
+    return filteredSdoEndorsees.slice(start, start + pageSizeSdo);
+  }, [filteredSdoEndorsees, currentPageSdo, pageSizeSdo]);
+
+  const totalPagesSdo = Math.ceil(filteredSdoEndorsees.length / pageSizeSdo) || 1;
 
   // Global Escape key listener to close active modals
   useEffect(() => {
@@ -1724,33 +1925,32 @@ export default function ReclassificationPage({ onBack }) {
           }
         `}</style>
 
-
         <div style={{
           background: isDark ? 'rgba(15, 23, 42, 0.75)' : '#ffffff',
-          borderRadius: '16px',
+          borderRadius: '14px',
           border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid var(--line)',
-          padding: '12px 20px',
-          marginBottom: '24px',
+          padding: '8px 12px',
+          marginBottom: '20px',
           display: 'flex',
           alignItems: 'center',
-          gap: '12px',
-          boxShadow: isDark ? '0 8px 28px rgba(0, 0, 0, 0.35)' : '0 2px 12px rgba(0, 0, 0, 0.03)',
+          gap: '8px',
+          boxShadow: isDark ? '0 6px 20px rgba(0, 0, 0, 0.3)' : '0 2px 10px rgba(0, 0, 0, 0.03)',
           backdropFilter: 'blur(16px)',
           WebkitBackdropFilter: 'blur(16px)',
-          overflowX: 'auto',
+          overflow: 'hidden',
           transition: 'all 0.35s cubic-bezier(0.16, 1, 0.3, 1)'
         }}>
-          {/* Step 1: Inventory CSV Ingestion */}
+          {/* Step 1: Inventory Ingestion */}
           <div
             className="reclass-stepper-btn"
             onClick={() => handleStepClick(1)}
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '12px',
+              gap: '8px',
               cursor: 'pointer',
-              padding: '8px 16px',
-              borderRadius: '12px',
+              padding: '6px 10px',
+              borderRadius: '10px',
               backgroundColor: currentStep === 1
                 ? (isDark ? 'rgba(37, 99, 235, 0.2)' : '#eff6ff')
                 : (currentStep > 1 ? (isDark ? 'rgba(30, 41, 59, 0.4)' : '#f8fafc') : 'transparent'),
@@ -1758,20 +1958,21 @@ export default function ReclassificationPage({ onBack }) {
                 ? (isDark ? '1.5px solid rgba(59, 130, 246, 0.6)' : '1.5px solid #93c5fd')
                 : (currentStep > 1 ? (isDark ? '1px solid rgba(59, 130, 246, 0.35)' : '1px solid #bfdbfe') : (isDark ? '1px solid rgba(51, 65, 85, 0.5)' : '1px solid var(--line)')),
               boxShadow: currentStep === 1
-                ? (isDark ? '0 0 16px rgba(59, 130, 246, 0.25)' : '0 2px 10px rgba(37, 99, 235, 0.15)')
+                ? (isDark ? '0 0 14px rgba(59, 130, 246, 0.25)' : '0 2px 8px rgba(37, 99, 235, 0.15)')
                 : 'none',
               transform: currentStep === 1 ? 'translateY(-1px)' : 'translateY(0)',
               opacity: 1,
-              flexShrink: 0,
+              flex: '1 1 0',
+              minWidth: 0,
               userSelect: 'none'
             }}
           >
             <div
               className="reclass-stepper-badge"
               style={{
-                width: '34px',
-                height: '34px',
-                borderRadius: '10px',
+                width: '28px',
+                height: '28px',
+                borderRadius: '8px',
                 backgroundColor: currentStep === 1
                   ? '#2563eb'
                   : (currentStep > 1 ? '#2563eb' : (isDark ? 'rgba(51, 65, 85, 0.7)' : '#e2e8f0')),
@@ -1781,39 +1982,43 @@ export default function ReclassificationPage({ onBack }) {
                 alignItems: 'center',
                 justifyContent: 'center',
                 fontWeight: 800,
-                fontSize: '13.5px',
+                fontSize: '12px',
                 boxShadow: currentStep === 1
-                  ? (isDark ? '0 0 16px rgba(59, 130, 246, 0.5), 0 0 0 3.5px rgba(59, 130, 246, 0.25)' : '0 4px 12px rgba(37, 99, 235, 0.35), 0 0 0 3.5px rgba(59, 130, 246, 0.25)')
+                  ? (isDark ? '0 0 12px rgba(59, 130, 246, 0.5), 0 0 0 2.5px rgba(59, 130, 246, 0.25)' : '0 3px 10px rgba(37, 99, 235, 0.35), 0 0 0 2.5px rgba(59, 130, 246, 0.25)')
                   : 'none',
-                transform: currentStep === 1 ? 'scale(1.06)' : 'scale(1)',
+                transform: currentStep === 1 ? 'scale(1.05)' : 'scale(1)',
                 flexShrink: 0
               }}
             >
               1
             </div>
-            <div>
+            <div style={{ minWidth: 0, overflow: 'hidden' }}>
               <div
                 className="reclass-stepper-text"
                 style={{
-                  fontSize: '13px',
+                  fontSize: '12px',
                   fontWeight: 800,
                   color: currentStep === 1 ? (isDark ? '#60a5fa' : '#1d4ed8') : (currentStep > 1 ? (isDark ? '#f8fafc' : '#1e293b') : (isDark ? '#94a3b8' : '#64748b')),
                   lineHeight: 1.2,
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '6px'
+                  gap: '4px',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis'
                 }}
               >
-                <span>Step 1: Inventory CSV Ingestion</span>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>Inventory Ingestion</span>
                 {isRegionalOffice && (
                   <span style={{
-                    fontSize: '9.5px',
+                    fontSize: '9px',
                     fontWeight: 700,
-                    padding: '1px 6px',
+                    padding: '1px 5px',
                     borderRadius: '4px',
                     background: isDark ? 'rgba(99, 102, 241, 0.2)' : '#e0e7ff',
                     color: isDark ? '#a5b4fc' : '#4338ca',
-                    border: isDark ? '1px solid rgba(99, 102, 241, 0.35)' : '1px solid #c7d2fe'
+                    border: isDark ? '1px solid rgba(99, 102, 241, 0.35)' : '1px solid #c7d2fe',
+                    flexShrink: 0
                   }}>
                     👁️ View Only
                   </span>
@@ -1822,26 +2027,30 @@ export default function ReclassificationPage({ onBack }) {
               <div
                 className="reclass-stepper-text"
                 style={{
-                  fontSize: '11px',
+                  fontSize: '10px',
                   color: currentStep === 1 ? (isDark ? '#93c5fd' : '#2563eb') : 'var(--muted)',
                   fontWeight: 500,
-                  marginTop: '1px'
+                  marginTop: '1px',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis'
                 }}
               >
-                {isRegionalOffice ? 'Review Loaded Master Inventory' : (isStep1Done ? `${incumbents.length} Records Loaded` : 'Template & Master Inventory Sync')}
+                {isRegionalOffice ? 'Master Inventory' : (isStep1Done ? `${incumbents.length} Loaded` : 'Inventory Sync')}
               </div>
             </div>
           </div>
 
           {/* Connector Line 1 -> 2 */}
           <div style={{
-            flex: 1,
-            minWidth: '36px',
-            height: '4px',
+            width: '20px',
+            minWidth: '10px',
+            height: '3px',
             borderRadius: '999px',
             backgroundColor: isDark ? 'rgba(51, 65, 85, 0.5)' : '#e2e8f0',
             position: 'relative',
             overflow: 'hidden',
+            flexShrink: 1,
             transition: 'background-color 0.38s cubic-bezier(0.16, 1, 0.3, 1)'
           }}>
             <div
@@ -1850,23 +2059,23 @@ export default function ReclassificationPage({ onBack }) {
                 height: '100%',
                 width: currentStep >= 2 ? '100%' : '0%',
                 background: 'linear-gradient(90deg, #2563eb, #3b82f6)',
-                boxShadow: currentStep >= 2 ? '0 0 8px rgba(59, 130, 246, 0.45)' : 'none',
+                boxShadow: currentStep >= 2 ? '0 0 6px rgba(59, 130, 246, 0.45)' : 'none',
                 borderRadius: '999px'
               }}
             />
           </div>
 
-          {/* Step 2: Counselor Assessment & Workbench */}
+          {/* Step 2: Assessment Workbench */}
           <div
             className="reclass-stepper-btn"
             onClick={() => handleStepClick(2)}
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '12px',
+              gap: '8px',
               cursor: 'pointer',
-              padding: '8px 16px',
-              borderRadius: '12px',
+              padding: '6px 10px',
+              borderRadius: '10px',
               backgroundColor: currentStep === 2
                 ? (isDark ? 'rgba(37, 99, 235, 0.2)' : '#eff6ff')
                 : (currentStep > 2 ? (isDark ? 'rgba(30, 41, 59, 0.4)' : '#f8fafc') : 'transparent'),
@@ -1874,20 +2083,21 @@ export default function ReclassificationPage({ onBack }) {
                 ? (isDark ? '1.5px solid rgba(59, 130, 246, 0.6)' : '1.5px solid #93c5fd')
                 : (currentStep > 2 ? (isDark ? '1px solid rgba(59, 130, 246, 0.35)' : '1px solid #bfdbfe') : (isDark ? '1px solid rgba(51, 65, 85, 0.5)' : '1px solid var(--line)')),
               boxShadow: currentStep === 2
-                ? (isDark ? '0 0 16px rgba(59, 130, 246, 0.25)' : '0 2px 10px rgba(37, 99, 235, 0.15)')
+                ? (isDark ? '0 0 14px rgba(59, 130, 246, 0.25)' : '0 2px 8px rgba(37, 99, 235, 0.15)')
                 : 'none',
               transform: currentStep === 2 ? 'translateY(-1px)' : 'translateY(0)',
               opacity: currentStep >= 2 ? 1 : 0.55,
-              flexShrink: 0,
+              flex: '1 1 0',
+              minWidth: 0,
               userSelect: 'none'
             }}
           >
             <div
               className="reclass-stepper-badge"
               style={{
-                width: '34px',
-                height: '34px',
-                borderRadius: '10px',
+                width: '28px',
+                height: '28px',
+                borderRadius: '8px',
                 backgroundColor: currentStep === 2
                   ? '#2563eb'
                   : (currentStep > 2 ? '#2563eb' : (isDark ? 'rgba(51, 65, 85, 0.7)' : '#e2e8f0')),
@@ -1897,39 +2107,43 @@ export default function ReclassificationPage({ onBack }) {
                 alignItems: 'center',
                 justifyContent: 'center',
                 fontWeight: 800,
-                fontSize: '13.5px',
+                fontSize: '12px',
                 boxShadow: currentStep === 2
-                  ? (isDark ? '0 0 16px rgba(59, 130, 246, 0.5), 0 0 0 3.5px rgba(59, 130, 246, 0.25)' : '0 4px 12px rgba(37, 99, 235, 0.35), 0 0 0 3.5px rgba(59, 130, 246, 0.25)')
+                  ? (isDark ? '0 0 12px rgba(59, 130, 246, 0.5), 0 0 0 2.5px rgba(59, 130, 246, 0.25)' : '0 3px 10px rgba(37, 99, 235, 0.35), 0 0 0 2.5px rgba(59, 130, 246, 0.25)')
                   : 'none',
-                transform: currentStep === 2 ? 'scale(1.06)' : 'scale(1)',
+                transform: currentStep === 2 ? 'scale(1.05)' : 'scale(1)',
                 flexShrink: 0
               }}
             >
               2
             </div>
-            <div>
+            <div style={{ minWidth: 0, overflow: 'hidden' }}>
               <div
                 className="reclass-stepper-text"
                 style={{
-                  fontSize: '13px',
+                  fontSize: '12px',
                   fontWeight: 800,
                   color: currentStep === 2 ? (isDark ? '#60a5fa' : '#1d4ed8') : (currentStep > 2 ? (isDark ? '#f8fafc' : '#1e293b') : (isDark ? '#94a3b8' : '#64748b')),
                   lineHeight: 1.2,
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '6px'
+                  gap: '4px',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis'
                 }}
               >
-                <span>Step 2: Assessment Workbench</span>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>Assessment Workbench</span>
                 {isRegionalOffice && (
                   <span style={{
-                    fontSize: '9.5px',
+                    fontSize: '9px',
                     fontWeight: 700,
-                    padding: '1px 6px',
+                    padding: '1px 5px',
                     borderRadius: '4px',
                     background: isDark ? 'rgba(99, 102, 241, 0.2)' : '#e0e7ff',
                     color: isDark ? '#a5b4fc' : '#4338ca',
-                    border: isDark ? '1px solid rgba(99, 102, 241, 0.35)' : '1px solid #c7d2fe'
+                    border: isDark ? '1px solid rgba(99, 102, 241, 0.35)' : '1px solid #c7d2fe',
+                    flexShrink: 0
                   }}>
                     👁️ View Only
                   </span>
@@ -1938,26 +2152,30 @@ export default function ReclassificationPage({ onBack }) {
               <div
                 className="reclass-stepper-text"
                 style={{
-                  fontSize: '11px',
+                  fontSize: '10px',
                   color: currentStep === 2 ? (isDark ? '#93c5fd' : '#2563eb') : 'var(--muted)',
                   fontWeight: 500,
-                  marginTop: '1px'
+                  marginTop: '1px',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis'
                 }}
               >
-                {isRegionalOffice ? 'Review Counselor Assessments & Stages' : (isStep2Done ? 'Assessments & Position Assigned' : 'Stage Progression & Reclass Decisions')}
+                {isRegionalOffice ? 'Assessments & Stages' : (isStep2Done ? 'Decisions Done' : 'Progression & Decisions')}
               </div>
             </div>
           </div>
 
           {/* Connector Line 2 -> 3 */}
           <div style={{
-            flex: 1,
-            minWidth: '36px',
-            height: '4px',
+            width: '20px',
+            minWidth: '10px',
+            height: '3px',
             borderRadius: '999px',
             backgroundColor: isDark ? 'rgba(51, 65, 85, 0.5)' : '#e2e8f0',
             position: 'relative',
             overflow: 'hidden',
+            flexShrink: 1,
             transition: 'background-color 0.38s cubic-bezier(0.16, 1, 0.3, 1)'
           }}>
             <div
@@ -1966,86 +2184,91 @@ export default function ReclassificationPage({ onBack }) {
                 height: '100%',
                 width: currentStep >= 3 ? '100%' : '0%',
                 background: 'linear-gradient(90deg, #2563eb, #3b82f6)',
-                boxShadow: currentStep >= 3 ? '0 0 8px rgba(59, 130, 246, 0.45)' : 'none',
+                boxShadow: currentStep >= 3 ? '0 0 6px rgba(59, 130, 246, 0.45)' : 'none',
                 borderRadius: '999px'
               }}
             />
           </div>
 
-          {/* Step 3: DBM Endorsement & Report */}
+          {/* Step 3: DBM Endorsement */}
           <div
             className="reclass-stepper-btn"
-            onClick={() => setCurrentStep(3)}
+            onClick={() => handleStepClick(3)}
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '12px',
+              gap: '8px',
               cursor: 'pointer',
-              padding: '8px 16px',
-              borderRadius: '12px',
+              padding: '6px 10px',
+              borderRadius: '10px',
               backgroundColor: currentStep === 3
                 ? (isDark ? 'rgba(37, 99, 235, 0.2)' : '#eff6ff')
-                : 'transparent',
+                : (currentStep > 3 ? (isDark ? 'rgba(30, 41, 59, 0.4)' : '#f8fafc') : 'transparent'),
               border: currentStep === 3
                 ? (isDark ? '1.5px solid rgba(59, 130, 246, 0.6)' : '1.5px solid #93c5fd')
-                : (isDark ? '1px solid rgba(51, 65, 85, 0.5)' : '1px solid var(--line)'),
+                : (currentStep > 3 ? (isDark ? '1px solid rgba(59, 130, 246, 0.35)' : '1px solid #bfdbfe') : (isDark ? '1px solid rgba(51, 65, 85, 0.5)' : '1px solid var(--line)')),
               boxShadow: currentStep === 3
-                ? (isDark ? '0 0 16px rgba(59, 130, 246, 0.25)' : '0 2px 10px rgba(37, 99, 235, 0.15)')
+                ? (isDark ? '0 0 14px rgba(59, 130, 246, 0.25)' : '0 2px 8px rgba(37, 99, 235, 0.15)')
                 : 'none',
               transform: currentStep === 3 ? 'translateY(-1px)' : 'translateY(0)',
               opacity: 1,
-              flexShrink: 0,
+              flex: '1 1 0',
+              minWidth: 0,
               userSelect: 'none'
             }}
           >
             <div
               className="reclass-stepper-badge"
               style={{
-                width: '34px',
-                height: '34px',
-                borderRadius: '10px',
+                width: '28px',
+                height: '28px',
+                borderRadius: '8px',
                 backgroundColor: currentStep === 3
                   ? '#2563eb'
-                  : (isDark ? 'rgba(51, 65, 85, 0.7)' : '#e2e8f0'),
+                  : (currentStep > 3 ? '#2563eb' : (isDark ? 'rgba(51, 65, 85, 0.7)' : '#e2e8f0')),
                 backgroundImage: 'linear-gradient(135deg, rgba(255, 255, 255, 0.18) 0%, rgba(0, 0, 0, 0.08) 100%)',
-                color: currentStep === 3 ? '#ffffff' : (isDark ? '#94a3b8' : '#64748b'),
+                color: currentStep >= 3 ? '#ffffff' : (isDark ? '#94a3b8' : '#64748b'),
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 fontWeight: 800,
-                fontSize: '13.5px',
+                fontSize: '12px',
                 boxShadow: currentStep === 3
-                  ? (isDark ? '0 0 16px rgba(59, 130, 246, 0.5), 0 0 0 3.5px rgba(59, 130, 246, 0.25)' : '0 4px 12px rgba(37, 99, 235, 0.35), 0 0 0 3.5px rgba(59, 130, 246, 0.25)')
+                  ? (isDark ? '0 0 12px rgba(59, 130, 246, 0.5), 0 0 0 2.5px rgba(59, 130, 246, 0.25)' : '0 3px 10px rgba(37, 99, 235, 0.35), 0 0 0 2.5px rgba(59, 130, 246, 0.25)')
                   : 'none',
-                transform: currentStep === 3 ? 'scale(1.06)' : 'scale(1)',
+                transform: currentStep === 3 ? 'scale(1.05)' : 'scale(1)',
                 flexShrink: 0
               }}
             >
               3
             </div>
-            <div>
+            <div style={{ minWidth: 0, overflow: 'hidden' }}>
               <div
                 className="reclass-stepper-text"
                 style={{
-                  fontSize: '13px',
+                  fontSize: '12px',
                   fontWeight: 800,
-                  color: currentStep === 3 ? (isDark ? '#60a5fa' : '#1d4ed8') : (isDark ? '#94a3b8' : '#64748b'),
+                  color: currentStep === 3 ? (isDark ? '#60a5fa' : '#1d4ed8') : (currentStep > 3 ? (isDark ? '#f8fafc' : '#1e293b') : (isDark ? '#94a3b8' : '#64748b')),
                   lineHeight: 1.2,
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '6px'
+                  gap: '4px',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis'
                 }}
               >
-                <span>Step 3: DBM Endorsement</span>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>DBM Endorsement</span>
                 {isRegionalOffice && (
                   <span style={{
-                    fontSize: '9.5px',
+                    fontSize: '9px',
                     fontWeight: 700,
-                    padding: '1px 6px',
+                    padding: '1px 5px',
                     borderRadius: '4px',
                     background: isDark ? 'rgba(16, 185, 129, 0.2)' : '#dcfce7',
                     color: isDark ? '#6ee7b7' : '#059669',
-                    border: isDark ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #bbf7d0'
+                    border: isDark ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #bbf7d0',
+                    flexShrink: 0
                   }}>
                     RO Action
                   </span>
@@ -2054,13 +2277,141 @@ export default function ReclassificationPage({ onBack }) {
               <div
                 className="reclass-stepper-text"
                 style={{
-                  fontSize: '11px',
+                  fontSize: '10px',
                   color: currentStep === 3 ? (isDark ? '#93c5fd' : '#2563eb') : 'var(--muted)',
                   fontWeight: 500,
-                  marginTop: '1px'
+                  marginTop: '1px',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis'
                 }}
               >
-                {isStep3Done ? 'Ready for Transmittal' : (isRegionalOffice ? 'NOSCA Allocation & DBM Endorsement' : 'Summary & DBM Spreadsheet')}
+                {isStep3Done ? 'Transmittal Ready' : (isRegionalOffice ? 'NOSCA & Endorsement' : 'DBM Spreadsheet')}
+              </div>
+            </div>
+          </div>
+
+          {/* Connector Line 3 -> 4 */}
+          <div style={{
+            width: '20px',
+            minWidth: '10px',
+            height: '3px',
+            borderRadius: '999px',
+            backgroundColor: isDark ? 'rgba(51, 65, 85, 0.5)' : '#e2e8f0',
+            position: 'relative',
+            overflow: 'hidden',
+            flexShrink: 1,
+            transition: 'background-color 0.38s cubic-bezier(0.16, 1, 0.3, 1)'
+          }}>
+            <div
+              className="reclass-stepper-line"
+              style={{
+                height: '100%',
+                width: currentStep >= 4 ? '100%' : '0%',
+                background: 'linear-gradient(90deg, #2563eb, #10b981)',
+                boxShadow: currentStep >= 4 ? '0 0 6px rgba(16, 185, 129, 0.45)' : 'none',
+                borderRadius: '999px'
+              }}
+            />
+          </div>
+
+          {/* Step 4: NOSCA & Item Tracking */}
+          <div
+            className="reclass-stepper-btn"
+            onClick={() => handleStepClick(4)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              cursor: 'pointer',
+              padding: '6px 10px',
+              borderRadius: '10px',
+              backgroundColor: currentStep === 4
+                ? (isDark ? 'rgba(16, 185, 129, 0.2)' : '#ecfdf5')
+                : (currentStep > 4 ? (isDark ? 'rgba(30, 41, 59, 0.4)' : '#f8fafc') : 'transparent'),
+              border: currentStep === 4
+                ? (isDark ? '1.5px solid rgba(16, 185, 129, 0.6)' : '1.5px solid #6ee7b7')
+                : (currentStep > 4 ? (isDark ? '1px solid rgba(16, 185, 129, 0.35)' : '1px solid #a7f3d0') : (isDark ? '1px solid rgba(51, 65, 85, 0.5)' : '1px solid var(--line)')),
+              boxShadow: currentStep === 4
+                ? (isDark ? '0 0 14px rgba(16, 185, 129, 0.25)' : '0 2px 8px rgba(16, 185, 129, 0.15)')
+                : 'none',
+              transform: currentStep === 4 ? 'translateY(-1px)' : 'translateY(0)',
+              opacity: 1,
+              flex: '1 1 0',
+              minWidth: 0,
+              userSelect: 'none'
+            }}
+          >
+            <div
+              className="reclass-stepper-badge"
+              style={{
+                width: '28px',
+                height: '28px',
+                borderRadius: '8px',
+                backgroundColor: currentStep === 4
+                  ? '#10b981'
+                  : (isDark ? 'rgba(51, 65, 85, 0.7)' : '#e2e8f0'),
+                backgroundImage: 'linear-gradient(135deg, rgba(255, 255, 255, 0.18) 0%, rgba(0, 0, 0, 0.08) 100%)',
+                color: currentStep === 4 ? '#ffffff' : (isDark ? '#94a3b8' : '#64748b'),
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontWeight: 800,
+                fontSize: '12px',
+                boxShadow: currentStep === 4
+                  ? (isDark ? '0 0 12px rgba(16, 185, 129, 0.5), 0 0 0 2.5px rgba(16, 185, 129, 0.25)' : '0 3px 10px rgba(16, 185, 129, 0.35), 0 0 0 2.5px rgba(16, 185, 129, 0.25)')
+                  : 'none',
+                transform: currentStep === 4 ? 'scale(1.05)' : 'scale(1)',
+                flexShrink: 0
+              }}
+            >
+              4
+            </div>
+            <div style={{ minWidth: 0, overflow: 'hidden' }}>
+              <div
+                className="reclass-stepper-text"
+                style={{
+                  fontSize: '12px',
+                  fontWeight: 800,
+                  color: currentStep === 4 ? (isDark ? '#34d399' : '#059669') : (isDark ? '#94a3b8' : '#64748b'),
+                  lineHeight: 1.2,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis'
+                }}
+              >
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>NOSCA & Item Tracking</span>
+                {isRegionalOffice && (
+                  <span style={{
+                    fontSize: '9px',
+                    fontWeight: 700,
+                    padding: '1px 5px',
+                    borderRadius: '4px',
+                    background: isDark ? 'rgba(99, 102, 241, 0.2)' : '#e0e7ff',
+                    color: isDark ? '#a5b4fc' : '#4338ca',
+                    border: isDark ? '1px solid rgba(99, 102, 241, 0.35)' : '1px solid #c7d2fe',
+                    flexShrink: 0
+                  }}>
+                    👁️ View Only
+                  </span>
+                )}
+              </div>
+              <div
+                className="reclass-stepper-text"
+                style={{
+                  fontSize: '10px',
+                  color: currentStep === 4 ? (isDark ? '#a7f3d0' : '#059669') : 'var(--muted)',
+                  fontWeight: 500,
+                  marginTop: '1px',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis'
+                }}
+              >
+                {isRegionalOffice ? 'SDO Item Registry' : (isStep4Done ? `${sdoMetrics.assigned}/${sdoMetrics.total} Linked` : 'Endorsed Items')}
               </div>
             </div>
           </div>
@@ -2970,19 +3321,18 @@ export default function ReclassificationPage({ onBack }) {
                   <th style={{ padding: '14px 18px', minWidth: '170px', whiteSpace: 'nowrap', textAlign: 'left' }}>Stage of Reclassification</th>
                   <th style={{ padding: '14px 18px', minWidth: '220px', whiteSpace: 'nowrap', textAlign: 'left' }}>Actual Reclassification Position</th>
                   <th style={{ padding: '14px 18px', minWidth: '210px', whiteSpace: 'nowrap', textAlign: 'left' }}>Credentials Overview</th>
-                  <th style={{ padding: '14px 18px', textAlign: 'right', minWidth: '120px', whiteSpace: 'nowrap' }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {loadingIncumbents ? (
                   <tr>
-                    <td colSpan="9" style={{ textAlign: 'center', padding: '40px', color: 'var(--text-secondary, #94a3b8)' }}>
+                    <td colSpan="8" style={{ textAlign: 'center', padding: '40px', color: 'var(--text-secondary, #94a3b8)' }}>
                       Loading incumbent guidance counselors...
                     </td>
                   </tr>
                 ) : pagedIncumbents.length === 0 ? (
                   <tr>
-                    <td colSpan="9" style={{ textAlign: 'center', padding: '40px', color: 'var(--text-secondary, #94a3b8)' }}>
+                    <td colSpan="8" style={{ textAlign: 'center', padding: '40px', color: 'var(--text-secondary, #94a3b8)' }}>
                       No incumbent guidance counselors found matching your criteria.
                     </td>
                   </tr>
@@ -3114,149 +3464,71 @@ export default function ReclassificationPage({ onBack }) {
                             {inc.region || '—'}
                           </div>
                         </td>
-                        <td style={{ padding: '14px 18px', verticalAlign: 'middle' }} onClick={e => e.stopPropagation()}>
-                          <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
-                            <select
-                              value={inc.stage_of_reclassification || 'For Review'}
-                              disabled={updatingStageId === inc.id}
-                              onChange={(e) => handleUpdateIncumbentStage(inc.id, e.target.value, e)}
-                              title="Click to update Stage of Reclassification (connected to reclassification_application)"
-                              style={{
-                                appearance: 'none',
-                                WebkitAppearance: 'none',
-                                MozAppearance: 'none',
-                                padding: '6px 26px 6px 12px',
-                                borderRadius: '8px',
-                                border: `1.5px solid ${badgeStyle.border}`,
-                                background: badgeStyle.bg,
-                                color: badgeStyle.text,
-                                fontSize: '12px',
-                                fontWeight: 750,
-                                cursor: updatingStageId === inc.id ? 'wait' : 'pointer',
-                                outline: 'none',
-                                boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
-                                transition: 'all 0.15s ease',
-                                textAlign: 'left'
-                              }}
-                            >
-                              {(() => {
-                                const currentStage = inc.stage_of_reclassification || 'For Review';
-                                let stageOptions = [];
-
-                                if (currentUser?.role === 'admin') {
-                                  stageOptions = ['For Review', 'Endorsed to RO', 'Endorsed', 'Endorsed to DBM RO', 'Endorsed to SDO', 'Approved', 'Denied'];
-                                } else if (isRegionalOffice) {
-                                  stageOptions = [...RO_RECLASS_STAGES];
-                                  if (currentStage === 'Approved' || inc.dbm_status === 'With DBM NOSCA') {
-                                    stageOptions.push('Approved');
-                                  }
-                                } else {
-                                  stageOptions = [...HRMO_RECLASS_STAGES];
-                                  if (currentStage === 'Approved') {
-                                    stageOptions.push('Approved');
-                                  }
-                                }
-
-                                if (!stageOptions.includes(currentStage)) {
-                                  stageOptions.unshift(currentStage);
-                                }
-
-                                return stageOptions.map(stage => (
-                                  <option 
-                                    key={stage} 
-                                    value={stage}
-                                    style={{ 
-                                      background: isDark ? '#1e293b' : '#ffffff', 
-                                      color: isDark ? '#f8fafc' : '#0f172a',
-                                      fontWeight: 600,
-                                      padding: '6px'
-                                    }}
-                                  >
-                                    {stage === 'Approved' ? '✓ Approved' : stage}
-                                  </option>
-                                ));
-                              })()}
-                            </select>
-                            <div style={{
-                              position: 'absolute',
-                              right: '9px',
-                              pointerEvents: 'none',
-                              fontSize: '9px',
+                        <td style={{ padding: '14px 18px', verticalAlign: 'middle' }}>
+                          <span
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              padding: '5px 12px',
+                              borderRadius: '8px',
+                              border: `1.5px solid ${badgeStyle.border}`,
+                              background: badgeStyle.bg,
                               color: badgeStyle.text,
-                              opacity: 0.8,
-                              display: 'flex',
-                              alignItems: 'center'
-                            }}>
-                              {updatingStageId === inc.id ? '⏳' : '▼'}
-                            </div>
-                          </div>
+                              fontSize: '12px',
+                              fontWeight: 750,
+                              letterSpacing: '0.01em',
+                              whiteSpace: 'nowrap',
+                              boxShadow: '0 1px 2px rgba(0,0,0,0.03)'
+                            }}
+                          >
+                            {inc.stage_of_reclassification || 'For Review'}
+                          </span>
                         </td>
-                        <td style={{ padding: '14px 18px', verticalAlign: 'middle' }} onClick={e => e.stopPropagation()}>
+                        <td style={{ padding: '14px 18px', verticalAlign: 'middle' }}>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                            <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
-                              <select
-                                value={inc.reclass_position || inc.actual_position || inc.target_position || ''}
-                                disabled={isRegionalOffice || updatingPositionId === inc.id}
-                                onChange={(e) => handleUpdateIncumbentPosition(inc.id, e.target.value, e)}
-                                title={isRegionalOffice ? 'View-only for Regional Office' : 'Click to update Actual Reclassification Position'}
-                                style={{
-                                  appearance: 'none',
-                                  WebkitAppearance: 'none',
-                                  MozAppearance: 'none',
-                                  padding: isRegionalOffice ? '5px 10px' : '5px 24px 5px 10px',
-                                  borderRadius: '6px',
-                                  background: (inc.reclass_position || inc.actual_position || inc.target_position)
-                                    ? (isDark ? 'rgba(6, 78, 59, 0.35)' : '#ecfdf5')
-                                    : (isDark ? 'rgba(51, 65, 85, 0.4)' : '#f8fafc'),
-                                  color: (inc.reclass_position || inc.actual_position || inc.target_position)
-                                    ? (isDark ? '#6ee7b7' : '#047857')
-                                    : 'var(--text-secondary, #94a3b8)',
-                                  border: (inc.reclass_position || inc.actual_position || inc.target_position)
-                                    ? (isDark ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #a7f3d0')
-                                    : '1px solid var(--line)',
-                                  fontSize: '11.5px',
-                                  fontWeight: 750,
-                                  cursor: isRegionalOffice ? 'default' : (updatingPositionId === inc.id ? 'wait' : 'pointer'),
-                                  outline: 'none',
-                                  boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
-                                  transition: 'all 0.15s ease',
-                                  textAlign: 'left',
-                                  width: 'fit-content'
-                                }}
-                              >
-                                <option value="" style={{ background: isDark ? '#1e293b' : '#ffffff', color: isDark ? '#f8fafc' : '#0f172a' }}>
-                                  — Unassigned —
-                                </option>
-                                {RECLASS_POSITIONS_OPTIONS.map(pos => (
-                                  <option 
-                                    key={pos} 
-                                    value={pos}
-                                    style={{ 
-                                      background: isDark ? '#1e293b' : '#ffffff', 
-                                      color: isDark ? '#f8fafc' : '#0f172a',
-                                      fontWeight: 600,
-                                      padding: '4px'
+                            {(() => {
+                              const pos = inc.actual_position || inc.reclass_position || inc.target_position;
+                              if (pos) {
+                                return (
+                                  <span
+                                    style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      width: 'fit-content',
+                                      padding: '4px 10px',
+                                      borderRadius: '6px',
+                                      background: isDark ? 'rgba(6, 78, 59, 0.35)' : '#ecfdf5',
+                                      color: isDark ? '#6ee7b7' : '#047857',
+                                      border: isDark ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #a7f3d0',
+                                      fontSize: '11.5px',
+                                      fontWeight: 750,
+                                      whiteSpace: 'nowrap'
                                     }}
                                   >
                                     {pos}
-                                  </option>
-                                ))}
-                              </select>
-                              {!isRegionalOffice && (
-                                <div style={{
-                                  position: 'absolute',
-                                  right: '8px',
-                                  pointerEvents: 'none',
-                                  fontSize: '8px',
-                                  color: (inc.actual_position || inc.target_position || inc.reclass_position) ? (isDark ? '#6ee7b7' : '#047857') : 'var(--text-secondary, #94a3b8)',
-                                  opacity: 0.8,
-                                  display: 'flex',
-                                  alignItems: 'center'
-                                }}>
-                                  {updatingPositionId === inc.id ? '⏳' : '▼'}
-                                </div>
-                              )}
-                            </div>
+                                  </span>
+                                );
+                              }
+                              return (
+                                <span
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    width: 'fit-content',
+                                    padding: '4px 10px',
+                                    borderRadius: '6px',
+                                    background: isDark ? 'rgba(51, 65, 85, 0.3)' : '#f8fafc',
+                                    color: 'var(--text-secondary, #94a3b8)',
+                                    border: isDark ? '1px solid rgba(51, 65, 85, 0.5)' : '1px solid var(--line)',
+                                    fontSize: '11.5px',
+                                    fontWeight: 650,
+                                    whiteSpace: 'nowrap'
+                                  }}
+                                >
+                                  — Unassigned —
+                                </span>
+                              );
+                            })()}
                             {inc.remarks && !['CTI', 'Reclassification'].includes(inc.remarks.trim()) && (
                               <span style={{ fontSize: '10px', color: 'var(--text-secondary, #94a3b8)', fontStyle: 'italic' }}>
                                 {inc.remarks}
@@ -3354,27 +3626,6 @@ export default function ReclassificationPage({ onBack }) {
                               </div>
                             );
                           })()}
-                        </td>
-                        <td style={{ padding: '14px 18px', textAlign: 'right', whiteSpace: 'nowrap' }} onClick={e => e.stopPropagation()}>
-                          <button
-                            onClick={() => {
-                              setSelectedIncumbent(inc);
-                              setShowAssessmentModal(true);
-                            }}
-                            style={{
-                              padding: '7px 14px',
-                              borderRadius: '8px',
-                              background: 'linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%)',
-                              border: 'none',
-                              color: '#ffffff',
-                              fontSize: '12px',
-                              fontWeight: 750,
-                              cursor: 'pointer',
-                              boxShadow: '0 2px 6px rgba(37, 99, 235, 0.25)'
-                            }}
-                          >
-                            Assess / QS
-                          </button>
                         </td>
                       </tr>
                     );
@@ -3506,7 +3757,7 @@ export default function ReclassificationPage({ onBack }) {
             boxShadow: isDark ? '0 8px 32px rgba(0, 0, 0, 0.3)' : '0 4px 12px rgba(0, 0, 0, 0.03)'
           }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '10px', flexWrap: 'wrap', marginBottom: '18px' }}>
-              {isRegionalOffice && (
+              {canManageNosca && (
                 <>
                   <input
                     ref={noscaFileInputRef}
@@ -3686,7 +3937,6 @@ export default function ReclassificationPage({ onBack }) {
                     <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569' }}>Target Position</th>
                     <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569' }}>Division</th>
                     <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569' }}>Stage</th>
-                    <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569' }}>DBM Status</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -3749,160 +3999,12 @@ export default function ReclassificationPage({ onBack }) {
                               {badge.icon ? `${badge.icon} ` : ''}{counselor.stage_of_reclassification}
                             </span>
                           </td>
-                          <td style={{ padding: '8px 14px', verticalAlign: 'middle' }} onClick={e => e.stopPropagation()}>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                              {isRegionalOffice ? (
-                                <>
-                                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                                    <select
-                                      value={counselor.dbm_status || ''}
-                                      onChange={e => handleDbmStatusSelectChange(counselor, e.target.value, e)}
-                                      disabled={updatingDbmStatusId === counselor.id}
-                                      style={{
-                                        padding: '5px 10px',
-                                        borderRadius: '8px',
-                                        border: counselor.dbm_status === 'With DBM NOSCA'
-                                          ? (isDark ? '1.5px solid rgba(16, 185, 129, 0.6)' : '1.5px solid #10b981')
-                                          : counselor.dbm_status === 'With DBM Request'
-                                            ? (isDark ? '1.5px solid rgba(59, 130, 246, 0.6)' : '1.5px solid #3b82f6')
-                                            : (isDark ? '1px solid rgba(71, 85, 105, 0.6)' : '1px solid #cbd5e1'),
-                                        background: counselor.dbm_status === 'With DBM NOSCA'
-                                          ? (isDark ? 'rgba(6, 78, 59, 0.35)' : '#ecfdf5')
-                                          : counselor.dbm_status === 'With DBM Request'
-                                            ? (isDark ? 'rgba(30, 58, 138, 0.35)' : '#eff6ff')
-                                            : (isDark ? 'rgba(30, 41, 59, 0.6)' : '#ffffff'),
-                                        color: counselor.dbm_status === 'With DBM NOSCA'
-                                          ? (isDark ? '#6ee7b7' : '#047857')
-                                          : counselor.dbm_status === 'With DBM Request'
-                                            ? (isDark ? '#93c5fd' : '#1d4ed8')
-                                            : (isDark ? '#94a3b8' : '#64748b'),
-                                        fontSize: '12px',
-                                        fontWeight: 750,
-                                        cursor: updatingDbmStatusId === counselor.id ? 'not-allowed' : 'pointer',
-                                        outline: 'none'
-                                      }}
-                                    >
-                                      <option value="" style={{ background: 'var(--card)', color: 'var(--text)' }}>-- Select Status --</option>
-                                      <option value="With DBM Request" style={{ background: 'var(--card)', color: 'var(--text)' }}>With DBM Request</option>
-                                      <option value="With DBM NOSCA" style={{ background: 'var(--card)', color: 'var(--text)' }}>With DBM NOSCA</option>
-                                    </select>
-                                    {updatingDbmStatusId === counselor.id && (
-                                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2.5" style={{ animation: 'spin 1s linear infinite' }}>
-                                        <circle cx="12" cy="12" r="10" strokeDasharray="32" strokeDashoffset="10" />
-                                      </svg>
-                                    )}
-                                  </div>
-
-                                  {counselor.dbm_status === 'With DBM NOSCA' && (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        const currentItem = (counselor.plantilla_item_number || '').trim();
-                                        const isItemNA = !currentItem || currentItem.toUpperCase() === '#N/A' || currentItem.toUpperCase() === 'N/A';
-                                        setNoscaItemAssignModal({ open: true, personnel: counselor });
-                                        setSelectedNoscaItemNo(isItemNA ? '' : currentItem);
-                                        setCustomPlantillaNo(isItemNA ? '' : currentItem);
-                                        setIsCustomItemNo(isItemNA || availableNoscaItemOptions.length === 0);
-                                        setItemSearchTerm('');
-                                      }}
-                                      style={{
-                                        background: 'none',
-                                        border: 'none',
-                                        padding: '0',
-                                        color: isDark ? '#93c5fd' : '#2563eb',
-                                        fontSize: '11px',
-                                        fontWeight: 700,
-                                        cursor: 'pointer',
-                                        textAlign: 'left',
-                                        display: 'inline-flex',
-                                        alignItems: 'center',
-                                        gap: '4px',
-                                        textDecoration: 'underline'
-                                      }}
-                                      title="Click to select or assign specific DBM NOSCA Item No."
-                                    >
-                                      ✏️ {counselor.plantilla_item_number ? `Assigned: ${counselor.plantilla_item_number}` : 'Assign Item No.'}
-                                    </button>
-                                  )}
-                                </>
-                              ) : (
-                                /* Read-only for HRMO: Display only the resulting DBM status badge */
-                                <div style={{ display: 'inline-flex', flexDirection: 'column', gap: '3px', alignItems: 'flex-start' }}>
-                                  {counselor.dbm_status === 'With DBM NOSCA' ? (
-                                    <span style={{
-                                      padding: '4px 10px',
-                                      borderRadius: '6px',
-                                      fontSize: '11.5px',
-                                      fontWeight: 800,
-                                      background: isDark ? 'rgba(16, 185, 129, 0.2)' : '#ecfdf5',
-                                      color: isDark ? '#6ee7b7' : '#047857',
-                                      border: isDark ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #a7f3d0',
-                                      display: 'inline-flex',
-                                      alignItems: 'center',
-                                      gap: '5px'
-                                    }}>
-                                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                        <polyline points="20 6 9 17 4 12" />
-                                      </svg>
-                                      With DBM NOSCA
-                                    </span>
-                                  ) : counselor.dbm_status === 'With DBM Request' ? (
-                                    <span style={{
-                                      padding: '4px 10px',
-                                      borderRadius: '6px',
-                                      fontSize: '11.5px',
-                                      fontWeight: 800,
-                                      background: isDark ? 'rgba(59, 130, 246, 0.2)' : '#eff6ff',
-                                      color: isDark ? '#93c5fd' : '#1d4ed8',
-                                      border: isDark ? '1px solid rgba(59, 130, 246, 0.4)' : '1px solid #bfdbfe',
-                                      display: 'inline-flex',
-                                      alignItems: 'center',
-                                      gap: '5px'
-                                    }}>
-                                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                        <circle cx="12" cy="12" r="10" />
-                                        <polyline points="12 6 12 12 16 14" />
-                                      </svg>
-                                      With DBM Request
-                                    </span>
-                                  ) : (
-                                    <span style={{
-                                      padding: '3px 8px',
-                                      borderRadius: '6px',
-                                      fontSize: '11px',
-                                      fontWeight: 650,
-                                      background: isDark ? 'rgba(71, 85, 105, 0.2)' : '#f1f5f9',
-                                      color: isDark ? '#94a3b8' : '#64748b',
-                                      border: isDark ? '1px solid rgba(71, 85, 105, 0.3)' : '1px solid #e2e8f0',
-                                      display: 'inline-flex',
-                                      alignItems: 'center',
-                                      gap: '4px'
-                                    }}>
-                                      Pending DBM Action
-                                    </span>
-                                  )}
-
-                                  {counselor.dbm_status === 'With DBM NOSCA' && counselor.plantilla_item_number && counselor.plantilla_item_number !== '#N/A' && counselor.plantilla_item_number !== 'N/A' && (
-                                    <span style={{
-                                      fontSize: '10.5px',
-                                      color: isDark ? '#94a3b8' : '#64748b',
-                                      fontWeight: 700,
-                                      fontFamily: 'monospace',
-                                      marginLeft: '2px'
-                                    }}>
-                                      Item: {counselor.plantilla_item_number}
-                                    </span>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          </td>
                         </tr>
                       );
                     })}
                   {incumbents.filter(i => ['Endorsed to RO', 'Endorsed to DBM RO', 'Endorsed to SDO', 'Endorsed', 'Approved'].includes(i.stage_of_reclassification)).length === 0 && (
                     <tr>
-                      <td colSpan={7} style={{ padding: '24px', textAlign: 'center', color: isDark ? '#94a3b8' : '#64748b' }}>
+                      <td colSpan={6} style={{ padding: '24px', textAlign: 'center', color: isDark ? '#94a3b8' : '#64748b' }}>
                         No counselors have been marked as Endorsed or Approved yet. Move candidates to Endorsed/Approved in Step 2.
                       </td>
                     </tr>
@@ -3911,8 +4013,8 @@ export default function ReclassificationPage({ onBack }) {
               </table>
             </div>
 
-            {/* Navigation Back */}
-            <div style={{ display: 'flex', justifyContent: 'flex-start', marginTop: '20px' }}>
+            {/* Navigation Back & Next */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '20px', flexWrap: 'wrap', gap: '10px' }}>
               <button
                 type="button"
                 onClick={() => setCurrentStep(2)}
@@ -3923,7 +4025,7 @@ export default function ReclassificationPage({ onBack }) {
                   background: isDark ? 'rgba(30, 41, 59, 0.7)' : '#ffffff',
                   color: isDark ? '#f8fafc' : '#0f172a',
                   fontSize: '13px',
-                  fontWeight: 700,
+                  fontWeight: 750,
                   cursor: 'pointer',
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -3932,9 +4034,74 @@ export default function ReclassificationPage({ onBack }) {
               >
                 ← Return to Step 2: Assessment Workbench
               </button>
+
+              <button
+                type="button"
+                onClick={() => setCurrentStep(4)}
+                style={{
+                  padding: '9px 20px',
+                  borderRadius: '10px',
+                  background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)',
+                  border: 'none',
+                  color: '#ffffff',
+                  fontSize: '13px',
+                  fontWeight: 750,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  boxShadow: '0 4px 14px rgba(16, 185, 129, 0.35)'
+                }}
+              >
+                <span>Proceed to Step 4: NOSCA & Item Tracking</span>
+                <span>→</span>
+              </button>
             </div>
           </div>
         </div>
+      )}
+
+      {/* STEP 4 VIEW: NOSCA UPLOAD & SDO ITEM NUMBER TRACKING */}
+      {currentStep === 4 && (
+        <NoscaItemTrackingTab
+          incumbents={incumbents}
+          sdoEndorsees={sdoEndorsees}
+          sdoMetrics={sdoMetrics}
+          filteredSdoEndorsees={filteredSdoEndorsees}
+          pagedSdoEndorsees={pagedSdoEndorsees}
+          totalPagesSdo={totalPagesSdo}
+          currentPageSdo={currentPageSdo}
+          setCurrentPageSdo={setCurrentPageSdo}
+          pageSizeSdo={pageSizeSdo}
+          setPageSizeSdo={setPageSizeSdo}
+          sdoSearchTerm={sdoSearchTerm}
+          setSdoSearchTerm={setSdoSearchTerm}
+          sdoStatusFilter={sdoStatusFilter}
+          setSdoStatusFilter={setSdoStatusFilter}
+          sdoDivisionFilter={sdoDivisionFilter}
+          setSdoDivisionFilter={setSdoDivisionFilter}
+          sdoDivisions={sdoDivisions}
+          noscaDocuments={noscaDocuments}
+          loadingNoscaDocs={loadingNoscaDocs}
+          uploadingNoscaDoc={uploadingNoscaDoc}
+          onDirectNoscaUpload={handleDirectNoscaUpload}
+          onSaveSdoItem={handleSaveSdoItem}
+          sdoEditItemModal={sdoEditItemModal}
+          setSdoEditItemModal={setSdoEditItemModal}
+          savingSdoItem={savingSdoItem}
+          showNoscaDocsArchiveModal={showNoscaDocsArchiveModal}
+          setShowNoscaDocsArchiveModal={setShowNoscaDocsArchiveModal}
+          noscaItems={noscaItems}
+          onSelectIncumbent={(inc) => {
+            setSelectedIncumbent(inc);
+            setShowAssessmentModal(true);
+          }}
+          onSetFullScreenDoc={setFullScreenDoc}
+          onBackToStep3={() => setCurrentStep(3)}
+          isRegionalOffice={isRegionalOffice}
+          canManageNosca={canManageNosca}
+          isDark={isDark}
+        />
       )}
     </main>
 
