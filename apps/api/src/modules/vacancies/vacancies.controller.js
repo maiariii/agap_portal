@@ -4,7 +4,8 @@ import { clearDocListCache } from '../applications/apps.controller.js';
 import { 
   verifyApplicantEmailInDb, 
   findRegisteredApplicantEmails, 
-  upsertAgapInvitedRecords 
+  upsertAgapInvitedRecords,
+  checkSubmittedApplicantEmails
 } from './vacancies.service.js';
 import fs from 'fs';
 import path from 'path';
@@ -172,25 +173,15 @@ export async function getVacancies(req, res) {
         const vacIds = vacanciesWithAllowed.map(v => v.id);
         const { rows: appliedRows } = await pool.query(`
           SELECT DISTINCT 
-            LOWER(TRIM(ap.email_address)) AS email,
+            LOWER(TRIM(ai.email)) AS email,
             v.id AS vacancy_id
           FROM vacancies v
-          JOIN applications a ON (
-            (v.job_cluster_id IS NOT NULL AND a.job_cluster_id = v.job_cluster_id)
-            OR (v.job_cluster_id IS NULL AND a.job_cluster_id = v.id)
-            OR (a.appointment_item_no IS NOT NULL AND a.appointment_item_no = v.item_no)
-            OR (v.position_id IS NOT NULL AND a.job_cluster_id IN (SELECT jc.id FROM job_clusters jc WHERE jc.position_id = v.position_id))
-            OR (v.title IS NOT NULL AND a.job_cluster_id IN (
-                SELECT jc3.id FROM job_clusters jc3 
-                JOIN positions p3 ON jc3.position_id = p3.id 
-                WHERE LOWER(TRIM(p3.title)) = LOWER(TRIM(v.title)) 
-                   OR v.title ILIKE CONCAT(p3.title, '%')
-                   OR p3.title ILIKE CONCAT(v.title, '%')
-            ))
+          JOIN agap_invited ai ON (
+            (v.job_cluster_id IS NOT NULL AND ai.job_cluster_id = v.job_cluster_id)
+            OR (ai.job_cluster_id IS NULL)
           )
-          JOIN applicants ap ON a.applicant_id = ap.id
           WHERE v.id = ANY($1) 
-            AND ap.email_address IS NOT NULL
+            AND ai.is_submitted = TRUE
         `, [vacIds]);
 
         if (appliedRows.length > 0) {
@@ -359,6 +350,15 @@ export async function toggleVacancyStatus(req, res) {
         if (skipped.length > 0) {
           return res.status(400).json({
             error: `Unable to invite: "${skipped.join(', ')}" is not registered in the applicants database.`
+          });
+        }
+
+        // Enforce that applicants with is_submitted = true cannot be invited
+        const submittedSet = await checkSubmittedApplicantEmails(sanitizedEmails, null, id);
+        const alreadySubmittedList = sanitizedEmails.filter(e => submittedSet.has(e));
+        if (alreadySubmittedList.length > 0) {
+          return res.status(400).json({
+            error: `Applicant "${alreadySubmittedList[0]}" has already submitted an application for this vacancy and cannot be re-invited.`
           });
         }
       }
@@ -844,23 +844,13 @@ export async function autocompleteApplicantEmails(req, res) {
       params.push(vacancyId);
       excludeClause = `
         AND LOWER(TRIM(ap.email_address)) NOT IN (
-          SELECT DISTINCT LOWER(TRIM(ap2.email_address))
+          SELECT DISTINCT LOWER(TRIM(ai.email))
           FROM vacancies v
-          JOIN applications a ON (
-            (v.job_cluster_id IS NOT NULL AND a.job_cluster_id = v.job_cluster_id)
-            OR (v.job_cluster_id IS NULL AND a.job_cluster_id = v.id)
-            OR (a.appointment_item_no IS NOT NULL AND a.appointment_item_no = v.item_no)
-            OR (v.position_id IS NOT NULL AND a.job_cluster_id IN (SELECT jc.id FROM job_clusters jc WHERE jc.position_id = v.position_id))
-            OR (v.title IS NOT NULL AND a.job_cluster_id IN (
-                SELECT jc3.id FROM job_clusters jc3 
-                JOIN positions p3 ON jc3.position_id = p3.id 
-                WHERE LOWER(TRIM(p3.title)) = LOWER(TRIM(v.title)) 
-                   OR v.title ILIKE CONCAT(p3.title, '%')
-                   OR p3.title ILIKE CONCAT(v.title, '%')
-            ))
+          JOIN agap_invited ai ON (
+            (v.job_cluster_id IS NOT NULL AND ai.job_cluster_id = v.job_cluster_id)
+            OR (ai.job_cluster_id IS NULL)
           )
-          JOIN applicants ap2 ON a.applicant_id = ap2.id
-          WHERE v.id = $2 AND ap2.email_address IS NOT NULL
+          WHERE v.id = $2 AND ai.is_submitted = TRUE
         )
       `;
     }
@@ -885,7 +875,7 @@ export async function autocompleteApplicantEmails(req, res) {
 }
 
 export async function saveAgapInvited(req, res) {
-  const { emails, jobClusterId } = req.body;
+  const { emails, jobClusterId, vacancyId } = req.body;
   if (!Array.isArray(emails) || emails.length === 0) {
     return res.status(400).json({ error: 'emails array is required.' });
   }
@@ -900,8 +890,19 @@ export async function saveAgapInvited(req, res) {
       });
     }
 
+    const validEmailsList = Array.from(validEmails);
+
+    // Enforce that applicants with is_submitted = true cannot be invited
+    const submittedSet = await checkSubmittedApplicantEmails(validEmailsList, jobClusterId || null, vacancyId || null);
+    const alreadySubmittedList = validEmailsList.filter(e => submittedSet.has(e));
+    if (alreadySubmittedList.length > 0) {
+      return res.status(400).json({
+        error: `Applicant "${alreadySubmittedList[0]}" has already submitted an application for this vacancy and cannot be re-invited.`
+      });
+    }
+
     // Upsert each email into agap_invited via service
-    const inserted = await upsertAgapInvitedRecords(Array.from(validEmails), jobClusterId || null);
+    const inserted = await upsertAgapInvitedRecords(validEmailsList, jobClusterId || null);
 
     res.json({
       success: true,
@@ -915,12 +916,12 @@ export async function saveAgapInvited(req, res) {
 }
 
 export async function verifyApplicantEmail(req, res) {
-  const { email } = req.query;
+  const { email, jobClusterId, vacancyId } = req.query;
   if (!email || !email.trim()) {
     return res.status(400).json({ error: 'Email parameter is required.' });
   }
   try {
-    const result = await verifyApplicantEmailInDb(email);
+    const result = await verifyApplicantEmailInDb(email, jobClusterId || null, vacancyId || null);
     res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });

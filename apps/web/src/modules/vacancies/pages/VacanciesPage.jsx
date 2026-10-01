@@ -238,20 +238,12 @@ export default function VacanciesPage() {
   const getSubmittedEmailsForVacancy = (vac) => {
     if (!vac || !applications) return new Set();
     const emails = new Set();
-    const vacTitle = (positions.find(p => p.id === vac.positionId)?.title || vac.title || '').trim().toLowerCase();
-    const cleanVacTitle = vacTitle.replace(/\s*\([^)]*\)/g, '').trim();
 
     (applications || []).forEach(a => {
       const matchCluster = vac.jobClusterId && a.jobClusterId && String(a.jobClusterId) === String(vac.jobClusterId);
       const matchVacId = vac.id && a.vacancyId && String(a.vacancyId) === String(vac.id);
-      const matchItem = vac.itemNo && (a.itemNo === vac.itemNo || a.vacancyItemNo === vac.itemNo);
-      const matchPosId = vac.positionId && (a.positionId === vac.positionId || a.positionObj?.id === vac.positionId);
-      
-      const appTitle = (a.positionTitle || a.vacancyTitle || a.vacancy || a.positionObj?.title || '').trim().toLowerCase();
-      const cleanAppTitle = appTitle.replace(/\s*\([^)]*\)/g, '').trim();
-      const matchTitle = Boolean(cleanVacTitle && cleanAppTitle && (cleanVacTitle === cleanAppTitle || cleanVacTitle.startsWith(cleanAppTitle) || cleanAppTitle.startsWith(cleanVacTitle)));
 
-      if (matchCluster || matchVacId || matchItem || matchPosId || matchTitle) {
+      if (matchCluster || matchVacId) {
         const e = a.applicant?.email_address || a.applicant_email_address || a.email_address || a.email || a.applicantObj?.email_address || '';
         if (e && e.trim()) {
           emails.add(e.trim().toLowerCase());
@@ -348,20 +340,24 @@ export default function VacanciesPage() {
         errorMsg = `Invalid email format: "${p}". Please enter a valid email address.`;
         break;
       }
-      if (submittedEmails.has(p)) {
-        errorMsg = `Applicant "${p}" has already submitted an application for this vacancy and cannot be re-invited.`;
-        continue;
-      }
       if (nextEmails.includes(p)) {
         errorMsg = `Email "${p}" is already in the invitation list.`;
         continue;
       }
 
-      // Check if email exists in applicants database
+      // Check if email exists in applicants database and whether already submitted in agap_invited
       try {
-        const verifyRes = await apiFetch(`/api/vacancies/applicants/verify?email=${encodeURIComponent(p)}`);
+        const clusterParam = inviteVacancy?.jobClusterId || inviteVacancy?.job_cluster_id ? `&jobClusterId=${encodeURIComponent(inviteVacancy.jobClusterId || inviteVacancy.job_cluster_id)}` : '';
+        const vacParam = inviteVacancy?.id ? `&vacancyId=${encodeURIComponent(inviteVacancy.id)}` : '';
+        const verifyRes = await apiFetch(`/api/vacancies/applicants/verify?email=${encodeURIComponent(p)}${clusterParam}${vacParam}`);
+        
         if (!verifyRes?.exists) {
           errorMsg = `Unable to invite: "${p}" is not registered in the applicants database. Only existing applicants can be invited.`;
+          break;
+        }
+
+        if (verifyRes?.isSubmitted) {
+          errorMsg = verifyRes.error || `Applicant "${p}" has already submitted an application for this vacancy and cannot be re-invited.`;
           break;
         }
       } catch (err) {
@@ -395,7 +391,9 @@ export default function VacanciesPage() {
     const submittedEmails = inviteVacancy ? getSubmittedEmailsForVacancy(inviteVacancy) : new Set();
 
     if (submittedEmails.has(cleanEmail)) {
-      setToast({ message: `Applicant "${cleanEmail}" has already submitted an application for this vacancy.`, type: 'warning' });
+      const msg = `Applicant "${cleanEmail}" has already submitted an application for this vacancy and cannot be re-invited.`;
+      setInviteEmailError(msg);
+      setToast({ message: msg, type: 'warning' });
       return;
     }
 
@@ -449,17 +447,26 @@ export default function VacanciesPage() {
 
     if (inviteEmailInput.trim()) {
       const raw = inviteEmailInput.trim().toLowerCase();
-      if (submittedEmails.has(raw)) {
-        setToast({ message: `Applicant "${raw}" has already submitted an application for this vacancy.`, type: 'warning' });
-      } else if (isValidEmailFormat(raw) && !currentEmails.includes(raw)) {
+      if (isValidEmailFormat(raw) && !currentEmails.includes(raw)) {
         try {
-          const verifyRes = await apiFetch(`/api/vacancies/applicants/verify?email=${encodeURIComponent(raw)}`);
+          const clusterParam = inviteVacancy?.jobClusterId || inviteVacancy?.job_cluster_id ? `&jobClusterId=${encodeURIComponent(inviteVacancy.jobClusterId || inviteVacancy.job_cluster_id)}` : '';
+          const vacParam = inviteVacancy?.id ? `&vacancyId=${encodeURIComponent(inviteVacancy.id)}` : '';
+          const verifyRes = await apiFetch(`/api/vacancies/applicants/verify?email=${encodeURIComponent(raw)}${clusterParam}${vacParam}`);
+          
           if (!verifyRes?.exists) {
             const err = `Unable to invite: "${raw}" is not registered in the applicants database. Only existing applicants can be invited.`;
             setInviteEmailError(err);
             setToast({ message: err, type: 'error' });
             return;
           }
+
+          if (verifyRes?.isSubmitted) {
+            const err = verifyRes.error || `Applicant "${raw}" has already submitted an application for this vacancy and cannot be re-invited.`;
+            setInviteEmailError(err);
+            setToast({ message: err, type: 'error' });
+            return;
+          }
+
           currentEmails.push(raw);
           setInviteAllowedEmails(currentEmails);
           setInviteEmailInput('');
@@ -484,7 +491,8 @@ export default function VacanciesPage() {
         method: 'POST',
         body: JSON.stringify({
           emails: currentEmails,
-          jobClusterId: inviteVacancy.jobClusterId || inviteVacancy.job_cluster_id || null
+          jobClusterId: inviteVacancy.jobClusterId || inviteVacancy.job_cluster_id || null,
+          vacancyId: inviteVacancy.id || null
         })
       });
 
