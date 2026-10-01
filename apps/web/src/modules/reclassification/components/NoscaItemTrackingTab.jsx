@@ -1041,7 +1041,6 @@ export default function NoscaItemTrackingTab({
                               whiteSpace: 'nowrap',
                               boxShadow: '0 1px 3px rgba(16, 185, 129, 0.12)'
                             }}>
-                              <span>✨</span>
                               <span>{inc.new_item_number}</span>
                             </span>
                             {inc.nosca_serial_no && (
@@ -1092,7 +1091,7 @@ export default function NoscaItemTrackingTab({
                             fontWeight: 750,
                             whiteSpace: 'nowrap'
                           }}>
-                            <span>⏳</span> Pending NOSCA
+                            Pending NOSCA
                           </span>
                         )}
                       </td>
@@ -1113,7 +1112,7 @@ export default function NoscaItemTrackingTab({
                             fontWeight: 800,
                             whiteSpace: 'nowrap'
                           }}>
-                            ✓ NOSCA Assigned
+                            NOSCA Assigned
                           </span>
                         ) : (
                           <span style={{
@@ -1129,7 +1128,7 @@ export default function NoscaItemTrackingTab({
                             fontWeight: 800,
                             whiteSpace: 'nowrap'
                           }}>
-                            ⏳ Pending Upload
+                            Pending Upload
                           </span>
                         )}
                       </td>
