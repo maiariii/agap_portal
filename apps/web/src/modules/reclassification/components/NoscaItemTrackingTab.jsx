@@ -910,9 +910,9 @@ export default function NoscaItemTrackingTab({
                 <th style={{ padding: '9px 6px', width: '32px', textAlign: 'center' }}>#</th>
                 <th style={{ padding: '9px 8px', textAlign: 'left' }}>Personnel &amp; Email</th>
                 <th style={{ padding: '9px 8px', textAlign: 'left' }}>Current Position &amp; Item</th>
-                <th style={{ padding: '9px 8px', textAlign: 'left' }}>Actual Reclass Position</th>
-                <th style={{ padding: '9px 8px', textAlign: 'left' }}>NEW Item No. (NOSCA)</th>
-                <th style={{ padding: '9px 8px', textAlign: 'left' }}>Status</th>
+                <th style={{ padding: '9px 8px', textAlign: 'center' }}>Actual Reclass Position</th>
+                <th style={{ padding: '9px 8px', textAlign: 'center' }}>NEW Item No. (NOSCA)</th>
+                <th style={{ padding: '9px 8px', textAlign: 'center' }}>Status</th>
                 <th style={{ padding: '9px 12px', textAlign: 'center', width: '90px' }}>Actions</th>
               </tr>
             </thead>
@@ -1004,7 +1004,7 @@ export default function NoscaItemTrackingTab({
                       </td>
 
                       {/* 4. Actual Reclassification Position */}
-                      <td style={{ padding: '8px 8px', verticalAlign: 'middle' }}>
+                      <td style={{ padding: '8px 8px', textAlign: 'center', verticalAlign: 'middle' }}>
                         <span style={{
                           display: 'inline-block',
                           padding: '2px 7px',
@@ -1023,9 +1023,9 @@ export default function NoscaItemTrackingTab({
                       </td>
 
                       {/* 6. NEW Item No. (from NOSCA) */}
-                      <td style={{ padding: '8px 8px', verticalAlign: 'middle' }}>
+                      <td style={{ padding: '8px 8px', textAlign: 'center', verticalAlign: 'middle' }}>
                         {hasNewItem ? (
-                          <div style={{ display: 'inline-flex', flexDirection: 'column', gap: '2px' }}>
+                          <div style={{ display: 'inline-flex', flexDirection: 'column', gap: '2px', alignItems: 'center' }}>
                             <span style={{
                               display: 'inline-flex',
                               alignItems: 'center',
@@ -1065,7 +1065,7 @@ export default function NoscaItemTrackingTab({
                                     border: 'none',
                                     cursor: 'pointer',
                                     textDecoration: 'underline',
-                                    textAlign: 'left'
+                                    textAlign: 'center'
                                   }}
                                   title="View official retained NOSCA document"
                                 >
@@ -1098,7 +1098,7 @@ export default function NoscaItemTrackingTab({
                       </td>
 
                       {/* 7. Tracking Status */}
-                      <td style={{ padding: '8px 8px', verticalAlign: 'middle' }}>
+                      <td style={{ padding: '8px 8px', textAlign: 'center', verticalAlign: 'middle' }}>
                         {hasNewItem ? (
                           <span style={{
                             display: 'inline-flex',
