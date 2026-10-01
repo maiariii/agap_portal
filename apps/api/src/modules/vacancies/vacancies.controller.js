@@ -1,6 +1,11 @@
 import { pool } from '../../config/db.js';
 import { mapPosition, mapVacancy } from '../../utils/mappers.js';
 import { clearDocListCache } from '../applications/apps.controller.js';
+import { 
+  verifyApplicantEmailInDb, 
+  findRegisteredApplicantEmails, 
+  upsertAgapInvitedRecords 
+} from './vacancies.service.js';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
@@ -346,6 +351,16 @@ export async function toggleVacancyStatus(req, res) {
           .map(e => (typeof e === 'string' ? e.trim().toLowerCase() : ''))
           .filter(e => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e));
         sanitizedEmails = Array.from(new Set(sanitizedEmails));
+      }
+
+      if (sanitizedEmails.length > 0) {
+        // Enforce that all invited emails must exist in applicants table
+        const { skipped } = await findRegisteredApplicantEmails(sanitizedEmails);
+        if (skipped.length > 0) {
+          return res.status(400).json({
+            error: `Unable to invite: "${skipped.join(', ')}" is not registered in the applicants database.`
+          });
+        }
       }
 
       // Auto-filter out applicants who already submitted an application for this vacancy / cluster
@@ -864,6 +879,49 @@ export async function autocompleteApplicantEmails(req, res) {
       params
     );
     res.json(rows.filter(r => r.email && r.email.trim()));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+}
+
+export async function saveAgapInvited(req, res) {
+  const { emails, jobClusterId } = req.body;
+  if (!Array.isArray(emails) || emails.length === 0) {
+    return res.status(400).json({ error: 'emails array is required.' });
+  }
+  try {
+    // Only allow emails that already exist in applicants.email_address
+    const { validEmails, skipped } = await findRegisteredApplicantEmails(emails);
+
+    if (skipped.length > 0) {
+      return res.status(400).json({
+        error: `Unable to invite: "${skipped.join(', ')}" is not registered in the applicants database. Only existing registered applicants can be invited.`,
+        skipped
+      });
+    }
+
+    // Upsert each email into agap_invited via service
+    const inserted = await upsertAgapInvitedRecords(Array.from(validEmails), jobClusterId || null);
+
+    res.json({
+      success: true,
+      inserted: inserted.length,
+      skipped,
+      message: `${inserted.length} applicant(s) saved to invite list.`
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+}
+
+export async function verifyApplicantEmail(req, res) {
+  const { email } = req.query;
+  if (!email || !email.trim()) {
+    return res.status(400).json({ error: 'Email parameter is required.' });
+  }
+  try {
+    const result = await verifyApplicantEmailInDb(email);
+    res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

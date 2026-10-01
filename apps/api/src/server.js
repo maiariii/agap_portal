@@ -13,6 +13,7 @@ import { authenticateToken } from './middleware/auth.middleware.js';
 import { errorHandler } from './middleware/error.middleware.js';
 import { runMigration as runAuditLogMigration } from './db/migration_documents_audit_logs.js';
 import { runMigration as runVacanciesMigration } from './db/alter_vacancies_doc_fetch.js';
+import { runMigration as runAgapInvitedMigration } from './db/migration_agap_invited.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -26,6 +27,7 @@ const PORT = process.env.PORT || 5000;
   try {
     await runAuditLogMigration();
     await runVacanciesMigration();
+    await runAgapInvitedMigration();
   } catch (err) {
     console.error('[Server Startup Migration Error]', err.message);
   }

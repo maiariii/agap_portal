@@ -333,7 +333,7 @@ export default function VacanciesPage() {
     setShowInviteModal(true);
   };
 
-  const handleAddInviteEmail = () => {
+  const handleAddInviteEmail = async () => {
     const raw = inviteEmailInput.trim();
     if (!raw) return;
 
@@ -356,14 +356,31 @@ export default function VacanciesPage() {
         errorMsg = `Email "${p}" is already in the invitation list.`;
         continue;
       }
+
+      // Check if email exists in applicants database
+      try {
+        const verifyRes = await apiFetch(`/api/vacancies/applicants/verify?email=${encodeURIComponent(p)}`);
+        if (!verifyRes?.exists) {
+          errorMsg = `Unable to invite: "${p}" is not registered in the applicants database. Only existing applicants can be invited.`;
+          break;
+        }
+      } catch (err) {
+        errorMsg = err.message || `Unable to invite: "${p}" is not registered in the applicants database.`;
+        break;
+      }
+
       nextEmails.push(p);
       addedCount++;
     }
 
     if (errorMsg && addedCount === 0) {
       setInviteEmailError(errorMsg);
-      setToast({ message: errorMsg, type: 'warning' });
+      setToast({ message: errorMsg, type: 'error' });
       return;
+    }
+
+    if (errorMsg) {
+      setToast({ message: errorMsg, type: 'warning' });
     }
 
     setInviteAllowedEmails(nextEmails);
@@ -435,19 +452,43 @@ export default function VacanciesPage() {
       if (submittedEmails.has(raw)) {
         setToast({ message: `Applicant "${raw}" has already submitted an application for this vacancy.`, type: 'warning' });
       } else if (isValidEmailFormat(raw) && !currentEmails.includes(raw)) {
-        currentEmails.push(raw);
-        setInviteAllowedEmails(currentEmails);
-        setInviteEmailInput('');
+        try {
+          const verifyRes = await apiFetch(`/api/vacancies/applicants/verify?email=${encodeURIComponent(raw)}`);
+          if (!verifyRes?.exists) {
+            const err = `Unable to invite: "${raw}" is not registered in the applicants database. Only existing applicants can be invited.`;
+            setInviteEmailError(err);
+            setToast({ message: err, type: 'error' });
+            return;
+          }
+          currentEmails.push(raw);
+          setInviteAllowedEmails(currentEmails);
+          setInviteEmailInput('');
+        } catch (err) {
+          const errMsg = err.message || `Unable to invite: "${raw}" is not registered in the applicants database.`;
+          setInviteEmailError(errMsg);
+          setToast({ message: errMsg, type: 'error' });
+          return;
+        }
       }
     }
 
     if (currentEmails.length === 0) {
-      setInviteEmailError('Please add at least one valid email address to invite.');
-      setToast({ message: 'Please add at least one valid email address to invite.', type: 'error' });
+      setInviteEmailError('Please add at least one valid registered applicant email address to invite.');
+      setToast({ message: 'Please add at least one valid registered applicant email address to invite.', type: 'error' });
       return;
     }
 
     try {
+      // 1. First persist to agap_invited table (which validates against applicants and inserts)
+      await apiFetch('/api/vacancies/invited', {
+        method: 'POST',
+        body: JSON.stringify({
+          emails: currentEmails,
+          jobClusterId: inviteVacancy.jobClusterId || inviteVacancy.job_cluster_id || null
+        })
+      });
+
+      // 2. Update vacancy allowedEmails
       await apiFetch(`/api/vacancies/${inviteVacancy.id}`, {
         method: 'PUT',
         body: JSON.stringify({
@@ -463,7 +504,8 @@ export default function VacanciesPage() {
       setInviteModalTab('invitations');
       loadAllData();
     } catch (e) {
-      setToast({ message: e.message, type: 'error' });
+      setInviteEmailError(e.message || 'Unable to invite applicants.');
+      setToast({ message: e.message || 'Unable to invite applicants.', type: 'error' });
     }
   };
 
