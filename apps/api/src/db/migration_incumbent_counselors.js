@@ -39,7 +39,6 @@ export async function runMigration() {
       ADD COLUMN IF NOT EXISTS plantilla_item_number VARCHAR(150),
       ADD COLUMN IF NOT EXISTS salary_grade VARCHAR(50),
       ADD COLUMN IF NOT EXISTS remarks TEXT,
-      ADD COLUMN IF NOT EXISTS dbm_status VARCHAR(100),
       ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW(),
       ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
     `);

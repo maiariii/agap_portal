@@ -200,7 +200,7 @@ export async function runMigration() {
           indicative_position: 'Special Education Teacher I',
           actual_position: 'Special Education Teacher I',
           new_item_number: null,
-          stage_of_reclassification: 'Endorsed to SDO',
+          stage_of_reclassification: 'Endorsed to DBM RO',
           documents: JSON.stringify([])
         }
       ];

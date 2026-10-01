@@ -51,8 +51,7 @@ export default function IncumbentDocumentVaultModal({
   const docUrl = directAttachment?.url ||
     (incumbent.application_id
       ? `${import.meta.env.VITE_API_URL || window.location.origin}/api/applications/${incumbent.application_id}/documents/${activeItem.key}/download?token=${localStorage.getItem('agap_token')}&dpi=98`
-      : null) ||
-    'https://raw.githubusercontent.com/mozilla/pdf.js/ba2edeae/web/compressed.tracemonkey-pldi-09.pdf';
+      : null);
 
   return (
     <div
@@ -154,12 +153,12 @@ export default function IncumbentDocumentVaultModal({
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               {VAULT_ITEMS.map((doc) => {
                 const isSelected = selectedKey === doc.key;
-                const matchingCheck = docChecklist.find(c => c.id === doc.checklistId);
+                const matchingCheck = docChecklist.find(c => c.id === doc.checklistId || c.key === doc.key || c.id === doc.key);
                 const hasMatchingAttachment = attachedList.some(att => {
                   const name = String(att.label || att.name || att.key || '').toLowerCase();
                   return name.includes(doc.key) || (doc.checklistId && name.includes(doc.checklistId));
                 });
-                const isUploaded = Boolean(matchingCheck?.submitted || matchingCheck?.verified || hasMatchingAttachment || doc.required);
+                const isUploaded = Boolean(matchingCheck?.submitted || matchingCheck?.verified || hasMatchingAttachment);
 
                 return (
                   <div
@@ -252,8 +251,9 @@ export default function IncumbentDocumentVaultModal({
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                 <button
                   type="button"
+                  disabled={!docUrl}
                   onClick={() => {
-                    if (setFullScreenDoc) {
+                    if (docUrl && setFullScreenDoc) {
                       setFullScreenDoc({
                         open: true,
                         url: docUrl,
@@ -268,11 +268,12 @@ export default function IncumbentDocumentVaultModal({
                     padding: '5px 12px',
                     fontSize: '12px',
                     fontWeight: 700,
-                    color: 'var(--text, #0f172a)',
+                    color: !docUrl ? (isDark ? '#64748b' : '#94a3b8') : 'var(--text, #0f172a)',
                     backgroundColor: isDark ? 'rgba(30, 41, 59, 0.8)' : '#ffffff',
                     border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid #cbd5e1',
                     borderRadius: '6px',
-                    cursor: 'pointer',
+                    cursor: !docUrl ? 'not-allowed' : 'pointer',
+                    opacity: !docUrl ? 0.6 : 1,
                     boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
                     transition: 'all 0.15s ease'
                   }}
@@ -282,28 +283,88 @@ export default function IncumbentDocumentVaultModal({
                   </svg>
                   Full Screen
                 </button>
-                <span style={{ fontSize: '12px', color: 'var(--text-secondary, #94a3b8)' }}>Page 1 of 1</span>
+                {docUrl && <span style={{ fontSize: '12px', color: 'var(--text-secondary, #94a3b8)' }}>Page 1 of 1</span>}
               </div>
             </div>
 
-            {/* Embedded Document Frame */}
+            {/* Embedded Document Frame or Empty State */}
             <div style={{
               width: '100%',
               height: '580px',
               position: 'relative',
-              background: '#334155',
-              overflow: 'hidden'
+              background: isDark ? '#0b1120' : '#f8fafc',
+              overflow: 'hidden',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
             }}>
-              <iframe
-                src={docUrl}
-                style={{
-                  width: '100%',
-                  height: '100%',
-                  border: 'none',
-                  display: 'block'
-                }}
-                title={activeItem.fullTitle || 'Document Viewer'}
-              />
+              {docUrl ? (
+                <iframe
+                  src={docUrl}
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    border: 'none',
+                    display: 'block'
+                  }}
+                  title={activeItem.fullTitle || 'Document Viewer'}
+                />
+              ) : (
+                <div style={{
+                  padding: '40px 24px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  textAlign: 'center',
+                  maxWidth: '440px'
+                }}>
+                  <div style={{
+                    width: '64px',
+                    height: '64px',
+                    borderRadius: '16px',
+                    background: isDark ? 'rgba(30, 41, 59, 0.7)' : '#e2e8f0',
+                    border: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid #cbd5e1',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    marginBottom: '16px',
+                    fontSize: '28px'
+                  }}>
+                    📄
+                  </div>
+                  <h4 style={{
+                    margin: '0 0 8px 0',
+                    fontSize: '16px',
+                    fontWeight: 800,
+                    color: isDark ? '#f8fafc' : '#0f172a'
+                  }}>
+                    No Document Attached
+                  </h4>
+                  <p style={{
+                    margin: 0,
+                    fontSize: '13px',
+                    lineHeight: '1.55',
+                    color: isDark ? '#94a3b8' : '#64748b'
+                  }}>
+                    There is currently no document uploaded for <strong>{activeItem.fullTitle || activeItem.label}</strong> for this incumbent.
+                  </p>
+                  <div style={{
+                    marginTop: '16px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '5px 12px',
+                    borderRadius: '20px',
+                    fontSize: '11.5px',
+                    fontWeight: 700,
+                    background: isDark ? 'rgba(234, 179, 8, 0.12)' : '#fef9c3',
+                    border: isDark ? '1px solid rgba(234, 179, 8, 0.28)' : '1px solid #fde047',
+                    color: isDark ? '#facc15' : '#854d0e'
+                  }}>
+                    <span style={{ fontSize: '10px' }}>⏳</span> Pending Candidate Submission / Attachment
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>

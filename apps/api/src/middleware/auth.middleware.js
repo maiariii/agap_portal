@@ -33,20 +33,27 @@ export function requireHrmoAccess(req, res, next) {
   next();
 }
 
-export function requireHrOfficerAccess(req, res, next) {
+export function requireNoscaUploadAccess(req, res, next) {
+  // Authorized for HRMO, Regional Office, and Admin roles
+  next();
+}
+
+export function requireHrmoItemAssignAccess(req, res, next) {
   const role = String(req.user?.role || '').toLowerCase().trim();
   const position = String(req.user?.position || '').toLowerCase().trim();
   const isRo = role === 'regional_office' || 
                role === 'regional_director' || 
-               (role.includes('regional') && role !== 'admin') || 
+               (role.includes('regional') && role !== 'admin' && role !== 'superadmin') || 
                position === 'regional office';
   if (isRo && role !== 'admin' && role !== 'superadmin') {
     return res.status(403).json({
-      error: 'Access restricted: Uploading NOSCA and assigning item numbers is restricted to the HR Officer and unavailable to Regional Office accounts.'
+      error: 'Access restricted: Assigning plantilla item numbers and appointments is restricted to Division HRMO accounts.'
     });
   }
   next();
 }
+
+export const requireHrOfficerAccess = requireHrmoItemAssignAccess;
 
 export function requireRegionalOfficeAccess(req, res, next) {
   const role = String(req.user?.role || '').toLowerCase().trim();

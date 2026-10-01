@@ -7,8 +7,11 @@ import { spawn } from 'child_process';
 import os from 'os';
 import { randomUUID } from 'crypto';
 
+import jwt from 'jsonwebtoken';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-jwt-key-change-in-production';
 
 /**
  * Check if the authenticated user has a Regional Office role/position
@@ -33,32 +36,35 @@ export async function getReclassApplications(req, res) {
     let query = `
       SELECT 
         ra.id,
-        ra.applicant_id,
-        ra.application_number,
+        ra.reclass_gc_id,
+        ra.item_no,
+        ra.current_position,
         ra.region,
         ra.division,
-        ra.division AS station_division,
         ra.school_id,
-        ra.position_title,
-        ra.current_item_number,
-        ra.current_item_number AS item_number,
-        ra.qs_status,
-        ra.qs_status AS evaluation_status,
-        ra.indicative_position,
-        ra.actual_position,
-        ra.actual_position AS reclass_position,
-        ra.new_item_number,
-        ra.stage_of_reclassification,
-        ra.documents,
+        ra.school_name,
+        ra.reclass_position,
+        ra.new_item_no,
         ra.created_at,
         ra.updated_at,
+        -- Aliases for backwards compatibility:
+        ra.item_no AS current_item_number,
+        ra.current_position AS position_title,
+        ra.reclass_position AS actual_position,
+        ra.new_item_no AS new_item_number,
+        ra.division AS station_division,
+        rg.first_name,
+        rg.last_name,
+        rg.email,
+        rg.qs_status,
+        rg.stage_of_reclassification,
         COALESCE(
-          TRIM(CONCAT(a.first_name, ' ', a.surname)),
-          CONCAT('Applicant ', ra.application_number)
+          TRIM(CONCAT(rg.first_name, ' ', rg.last_name)),
+          CONCAT('Counselor #', ra.reclass_gc_id)
         ) AS applicant_name,
-        COALESCE(a.email_address, 'applicant@deped.gov.ph') AS applicant_email
-      FROM reclassification_application ra
-      LEFT JOIN applicants a ON ra.applicant_id = a.id
+        COALESCE(rg.email, 'applicant@deped.gov.ph') AS applicant_email
+      FROM reclass_applications ra
+      LEFT JOIN reclass_gc rg ON ra.reclass_gc_id = rg.id
       WHERE 1=1
     `;
 
@@ -66,7 +72,7 @@ export async function getReclassApplications(req, res) {
 
     if (status) {
       params.push(status);
-      query += ` AND (ra.qs_status = $${params.length} OR ra.stage_of_reclassification = $${params.length})`;
+      query += ` AND (rg.qs_status = $${params.length} OR rg.stage_of_reclassification = $${params.length})`;
     }
 
     if (division) {
@@ -77,16 +83,19 @@ export async function getReclassApplications(req, res) {
     if (search) {
       params.push(`%${search}%`);
       query += ` AND (
-        ra.application_number ILIKE $${params.length} OR
-        ra.position_title ILIKE $${params.length} OR
+        ra.item_no ILIKE $${params.length} OR
+        ra.current_position ILIKE $${params.length} OR
+        ra.reclass_position ILIKE $${params.length} OR
         ra.division ILIKE $${params.length} OR
         ra.region ILIKE $${params.length} OR
-        a.first_name ILIKE $${params.length} OR
-        a.surname ILIKE $${params.length}
+        ra.school_name ILIKE $${params.length} OR
+        ra.school_id ILIKE $${params.length} OR
+        rg.first_name ILIKE $${params.length} OR
+        rg.last_name ILIKE $${params.length}
       )`;
     }
 
-    query += ` ORDER BY ra.application_number DESC`;
+    query += ` ORDER BY ra.id DESC`;
 
     const result = await pool.query(query, params);
     res.json(result.rows);
@@ -102,66 +111,54 @@ export async function getReclassApplications(req, res) {
 export async function createReclassApplication(req, res) {
   try {
     const {
-      applicant_id,
-      application_number,
+      reclass_gc_id,
+      item_no,
+      current_item_number,
+      current_position,
+      position_title,
       region,
       division,
       station_division,
       school_id,
-      position_title,
-      current_item_number,
-      item_number,
-      qs_status,
-      indicative_position,
+      school_name,
+      reclass_position,
       actual_position,
-      new_item_number,
-      stage_of_reclassification,
-      documents
+      new_item_no,
+      new_item_number
     } = req.body;
 
-    if (!position_title) {
-      return res.status(400).json({ error: 'Position title is required' });
-    }
-
-    const appNum = application_number || `REC-${Date.now()}`;
-    const userDivision = req.user?.division || 'SDO Main';
-    const finalDivision = division || station_division || userDivision;
+    const finalItemNo = item_no || current_item_number || 'PENDING-ITEM';
+    const finalCurrentPos = current_position || position_title || 'Guidance Counselor';
     const finalRegion = region || req.user?.region || 'National Capital Region (NCR)';
-    const finalItemNumber = current_item_number || item_number || 'PENDING-ITEM';
+    const finalDivision = division || station_division || req.user?.division || 'SDO Main';
+    const finalReclassPos = reclass_position || actual_position || null;
+    const finalNewItemNo = new_item_no || new_item_number || null;
 
     const insertQuery = `
-      INSERT INTO reclassification_application (
-        applicant_id,
-        application_number,
+      INSERT INTO reclass_applications (
+        reclass_gc_id,
+        item_no,
+        current_position,
         region,
         division,
         school_id,
-        position_title,
-        current_item_number,
-        qs_status,
-        indicative_position,
-        actual_position,
-        new_item_number,
-        stage_of_reclassification,
-        documents
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb)
+        school_name,
+        reclass_position,
+        new_item_no
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       RETURNING *;
     `;
 
     const result = await pool.query(insertQuery, [
-      applicant_id || null,
-      appNum,
+      reclass_gc_id || null,
+      finalItemNo,
+      finalCurrentPos,
       finalRegion,
       finalDivision,
       school_id || null,
-      position_title,
-      finalItemNumber,
-      qs_status || 'Pending Review',
-      indicative_position || position_title,
-      actual_position || position_title,
-      new_item_number || null,
-      stage_of_reclassification || 'For Review',
-      JSON.stringify(documents || [])
+      school_name || null,
+      finalReclassPos,
+      finalNewItemNo
     ]);
 
     res.status(201).json(result.rows[0]);
@@ -192,11 +189,12 @@ export async function reevaluateCSC(req, res) {
       : 'Needs Applicant Update';
 
     const updateQuery = `
-      UPDATE reclassification_application
+      UPDATE reclass_gc
       SET 
         qs_status = $1,
-        stage_of_reclassification = $2
-      WHERE application_number = $3 OR CAST(applicant_id AS TEXT) = $3
+        stage_of_reclassification = $2,
+        updated_at = NOW()
+      WHERE id = $3 OR CAST(id AS TEXT) = $3
       RETURNING *;
     `;
 
@@ -206,8 +204,12 @@ export async function reevaluateCSC(req, res) {
       return res.status(404).json({ error: 'Reclassification record not found' });
     }
 
-    // Synchronize connected incumbent counselor
-    await syncApplicationToIncumbent(pool, result.rows[0], nextStage);
+    // Touch application record if exists
+    await pool.query(`
+      UPDATE reclass_applications
+      SET updated_at = NOW()
+      WHERE reclass_gc_id = $1 OR id = $1
+    `, [id]);
 
     res.json({
       message: 'Re-evaluation recorded successfully',
@@ -228,40 +230,24 @@ export async function updateCredentials(req, res) {
     const { id } = req.params;
     const { documents, notes } = req.body;
 
-    // Fetch existing docs to merge
-    const existing = await pool.query(
-      'SELECT documents FROM reclassification_application WHERE application_number = $1 OR CAST(applicant_id AS TEXT) = $1',
-      [id]
-    );
-    if (existing.rows.length === 0) {
-      return res.status(404).json({ error: 'Reclassification record not found' });
-    }
-
-    let existingDocs = [];
-    try {
-      existingDocs = Array.isArray(existing.rows[0].documents)
-        ? existing.rows[0].documents
-        : JSON.parse(existing.rows[0].documents || '[]');
-    } catch {
-      existingDocs = [];
-    }
-
-    const newDocs = Array.isArray(documents) ? documents : (documents ? [documents] : []);
-    const mergedDocs = [...existingDocs, ...newDocs];
-
     const updateQuery = `
-      UPDATE reclassification_application
+      UPDATE reclass_gc
       SET 
-        documents = $1::jsonb,
-        stage_of_reclassification = 'Endorsed to SDO'
-      WHERE application_number = $2 OR CAST(applicant_id AS TEXT) = $2
+        updated_at = NOW()
+      WHERE id = $1 OR CAST(id AS TEXT) = $1
       RETURNING *;
     `;
 
-    const result = await pool.query(updateQuery, [JSON.stringify(mergedDocs), id]);
+    const result = await pool.query(updateQuery, [id]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Reclassification record not found' });
+    }
 
-    // Synchronize connected incumbent counselor
-    await syncApplicationToIncumbent(pool, result.rows[0], 'Endorsed to SDO');
+    await pool.query(`
+      UPDATE reclass_applications
+      SET updated_at = NOW()
+      WHERE reclass_gc_id = $1 OR id = $1
+    `, [id]);
 
     res.json({
       message: 'Applicant credentials updated successfully',
@@ -278,15 +264,26 @@ export async function updateCredentials(req, res) {
  */
 export async function exportDbmReport(req, res) {
   try {
-    // Select all re-evaluated or ready applications
+    // Select all applications joined with reclass_gc
     const query = `
       SELECT 
-        ra.*,
-        COALESCE(TRIM(CONCAT(a.first_name, ' ', a.surname)), CONCAT('Applicant ', ra.application_number)) AS applicant_name,
-        COALESCE(a.email_address, 'applicant@deped.gov.ph') AS applicant_email
-      FROM reclassification_application ra
-      LEFT JOIN applicants a ON ra.applicant_id = a.id
-      ORDER BY ra.application_number ASC;
+        ra.id,
+        ra.reclass_gc_id,
+        ra.item_no,
+        ra.current_position,
+        ra.region,
+        ra.division,
+        ra.school_id,
+        ra.school_name,
+        ra.reclass_position,
+        ra.new_item_no,
+        ra.created_at,
+        ra.updated_at,
+        COALESCE(TRIM(CONCAT(rg.first_name, ' ', rg.last_name)), CONCAT('GC #', ra.reclass_gc_id)) AS applicant_name,
+        COALESCE(rg.email, 'applicant@deped.gov.ph') AS applicant_email
+      FROM reclass_applications ra
+      LEFT JOIN reclass_gc rg ON ra.reclass_gc_id = rg.id
+      ORDER BY ra.id ASC;
     `;
 
     const result = await pool.query(query);
@@ -302,14 +299,14 @@ export async function exportDbmReport(req, res) {
     });
 
     // Title rows
-    sheet.mergeCells('A1:I1');
+    sheet.mergeCells('A1:L1');
     const titleCell = sheet.getCell('A1');
     titleCell.value = 'DEPARTMENT OF EDUCATION - RECLASSIFICATION SUBMISSION (DBM)';
     titleCell.font = { name: 'Calibri', size: 14, bold: true, color: { argb: 'FF08315F' } };
     titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
     sheet.getRow(1).height = 30;
 
-    sheet.mergeCells('A2:I2');
+    sheet.mergeCells('A2:L2');
     const subCell = sheet.getCell('A2');
     subCell.value = `Generated on: ${new Date().toLocaleDateString('en-PH', { timeZone: 'Asia/Manila' })} | Total Applications: ${rows.length}`;
     subCell.font = { name: 'Calibri', size: 10, italic: true, color: { argb: 'FF555555' } };
@@ -319,14 +316,17 @@ export async function exportDbmReport(req, res) {
     // Header row
     const headers = [
       'No.',
-      'Application Number',
+      'Application ID',
+      'GC ID',
       'Applicant Name',
-      'Position Title',
-      'Item Number',
-      'Station / Division',
-      'Proposed QS Result',
-      'CSC-Approved QS Result',
-      'Evaluation Status'
+      'Current Position',
+      'Item No.',
+      'Region',
+      'Division',
+      'School ID',
+      'School Name',
+      'Reclass Position',
+      'New Item No.'
     ];
 
     const headerRow = sheet.addRow(headers);
@@ -351,11 +351,17 @@ export async function exportDbmReport(req, res) {
     rows.forEach((row, idx) => {
       const dataRow = sheet.addRow([
         idx + 1,
-        row.application_number,
+        `APP-${row.id}`,
+        row.reclass_gc_id || '—',
         row.applicant_name,
-        row.position_title,
-        row.item_number || '—',
-        row.station_division || '—'
+        row.current_position || '—',
+        row.item_no || '—',
+        row.region || '—',
+        row.division || '—',
+        row.school_id || '—',
+        row.school_name || '—',
+        row.reclass_position || '—',
+        row.new_item_no || '—'
       ]);
 
       dataRow.height = 20;
@@ -367,7 +373,7 @@ export async function exportDbmReport(req, res) {
           bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
           right: { style: 'thin', color: { argb: 'FFE2E8F0' } }
         };
-        if (colNum === 1 || colNum === 2) {
+        if (colNum <= 3) {
           cell.alignment = { horizontal: 'center', vertical: 'middle' };
         } else {
           cell.alignment = { horizontal: 'left', vertical: 'middle' };
@@ -378,13 +384,16 @@ export async function exportDbmReport(req, res) {
     // Column widths
     sheet.columns = [
       { width: 8 },
-      { width: 22 },
-      { width: 30 },
-      { width: 32 },
+      { width: 16 },
+      { width: 12 },
+      { width: 28 },
       { width: 26 },
       { width: 22 },
-      { width: 25 },
-      { width: 25 },
+      { width: 22 },
+      { width: 24 },
+      { width: 14 },
+      { width: 28 },
+      { width: 26 },
       { width: 22 }
     ];
 
@@ -403,7 +412,6 @@ const VALID_MANUAL_STAGES = [
   'For Review',
   'Endorsed to RO',
   'Endorsed to DBM RO',
-  'Endorsed to SDO',
   'Endorsed', // Backward compatibility
   'Approved',
   'Denied'
@@ -411,72 +419,74 @@ const VALID_MANUAL_STAGES = [
 const VALID_POSITIONS = ['School Counselor I', 'School Counselor II', 'School Counselor III', 'School Counselor IV'];
 
 /**
- * Synchronize stage of reclassification from incumbent_guidance_counselors to reclassification_application
+ * Synchronize stage of reclassification from reclass_gc to reclass_applications
  */
 export async function syncIncumbentToApplication(clientOrPool, incumbent, newStage) {
   if (!incumbent || !incumbent.id) return;
   try {
-    const itemNo = (incumbent.plantilla_item_number || '').trim();
-    const empId = (incumbent.employee_id || '').trim();
+    const itemNo = (incumbent.item_no || incumbent.plantilla_item_number || '').trim();
 
     // 1. Check for existing connected application
     const checkAppQuery = `
-      SELECT id FROM reclassification_application
-      WHERE incumbent_id = $1
-         OR ($2 <> '' AND current_item_number ILIKE $2)
-         OR ($3 <> '' AND current_item_number ILIKE $3)
-         OR ($2 <> '' AND new_item_number ILIKE $2)
+      SELECT id FROM reclass_applications
+      WHERE reclass_gc_id = $1
+         OR ($2 <> '' AND item_no ILIKE $2)
+         OR ($2 <> '' AND new_item_no ILIKE $2)
       ORDER BY id ASC
     `;
-    const checkRes = await clientOrPool.query(checkAppQuery, [incumbent.id, itemNo, empId]);
+    const checkRes = await clientOrPool.query(checkAppQuery, [incumbent.id, itemNo]);
 
     if (checkRes.rows.length > 0) {
       const appIds = checkRes.rows.map(r => r.id);
       await clientOrPool.query(`
-        UPDATE reclassification_application
-        SET stage_of_reclassification = $1,
-            incumbent_id = COALESCE(incumbent_id, $2),
+        UPDATE reclass_applications
+        SET reclass_gc_id = COALESCE(reclass_gc_id, $1),
+            item_no = COALESCE(item_no, $2),
+            current_position = COALESCE(current_position, $3),
+            region = COALESCE(region, $4),
+            division = COALESCE(division, $5),
+            school_id = COALESCE(school_id, $6),
+            school_name = COALESCE(school_name, $7),
+            reclass_position = COALESCE(reclass_position, $8),
+            new_item_no = COALESCE(new_item_no, $9),
             updated_at = NOW()
-        WHERE id = ANY($3::int[])
-      `, [newStage, incumbent.id, appIds]);
-    } else {
-      // 2. Create a connected application row so both tables have the application record
-      const appNum = `REC-GC-${String(incumbent.id).padStart(5, '0')}`;
-      const itemToUse = itemNo || empId || `ITEM-${incumbent.id}`;
-      const reg = incumbent.region || 'National Capital Region (NCR)';
-      const div = incumbent.division || incumbent.station_division || 'SDO Main';
-      const pos = incumbent.current_position || 'Guidance Counselor';
-      const targetPos = incumbent.target_position || incumbent.current_position || 'School Counselor I';
-
-      await clientOrPool.query(`
-        INSERT INTO reclassification_application (
-          incumbent_id,
-          application_number,
-          region,
-          division,
-          position_title,
-          current_item_number,
-          indicative_position,
-          actual_position,
-          stage_of_reclassification,
-          qs_status,
-          documents
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'Pending Review', '[]'::jsonb)
-        ON CONFLICT (application_number)
-        DO UPDATE SET
-          stage_of_reclassification = EXCLUDED.stage_of_reclassification,
-          incumbent_id = EXCLUDED.incumbent_id,
-          updated_at = NOW();
+        WHERE id = ANY($10::int[])
       `, [
         incumbent.id,
-        appNum,
-        reg,
-        div,
-        pos,
-        itemToUse,
-        targetPos,
-        targetPos,
-        newStage
+        itemNo || null,
+        incumbent.current_position || null,
+        incumbent.region || null,
+        incumbent.division || null,
+        incumbent.school_id || null,
+        incumbent.school_name || null,
+        incumbent.reclass_position || null,
+        incumbent.new_item_no || null,
+        appIds
+      ]);
+    } else {
+      // 2. Create a connected application row
+      await clientOrPool.query(`
+        INSERT INTO reclass_applications (
+          reclass_gc_id,
+          item_no,
+          current_position,
+          region,
+          division,
+          school_id,
+          school_name,
+          reclass_position,
+          new_item_no
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);
+      `, [
+        incumbent.id,
+        itemNo || null,
+        incumbent.current_position || null,
+        incumbent.region || null,
+        incumbent.division || null,
+        incumbent.school_id || null,
+        incumbent.school_name || null,
+        incumbent.reclass_position || null,
+        incumbent.new_item_no || null
       ]);
     }
   } catch (err) {
@@ -485,30 +495,28 @@ export async function syncIncumbentToApplication(clientOrPool, incumbent, newSta
 }
 
 /**
- * Synchronize stage of reclassification from reclassification_application to incumbent_guidance_counselors
+ * Synchronize stage of reclassification from reclass_applications to reclass_gc
  */
 export async function syncApplicationToIncumbent(clientOrPool, appRecord, newStage) {
   if (!appRecord) return;
   try {
-    const incumbentId = appRecord.incumbent_id;
-    const itemNo = (appRecord.current_item_number || '').trim();
-    const newItemNo = (appRecord.new_item_number || '').trim();
+    const gcId = appRecord.reclass_gc_id;
+    const itemNo = (appRecord.item_no || '').trim();
+    const newItemNo = (appRecord.new_item_no || '').trim();
 
     const updateRes = await clientOrPool.query(`
-      UPDATE incumbent_guidance_counselors
-      SET stage_of_reclassification = $1,
-          updated_at = NOW()
-      WHERE ($2::int IS NOT NULL AND id = $2)
-         OR ($3 <> '' AND plantilla_item_number ILIKE $3)
-         OR ($3 <> '' AND employee_id ILIKE $3)
-         OR ($4 <> '' AND plantilla_item_number ILIKE $4)
+      UPDATE reclass_gc
+      SET updated_at = NOW()
+      WHERE ($1::int IS NOT NULL AND id = $1)
+         OR ($2 <> '' AND item_no ILIKE $2)
+         OR ($3 <> '' AND item_no ILIKE $3)
       RETURNING id;
-    `, [newStage, incumbentId || null, itemNo, newItemNo]);
+    `, [gcId || null, itemNo, newItemNo]);
 
-    if (updateRes.rows.length > 0 && !incumbentId) {
+    if (updateRes.rows.length > 0 && !gcId) {
       await clientOrPool.query(`
-        UPDATE reclassification_application
-        SET incumbent_id = $1
+        UPDATE reclass_applications
+        SET reclass_gc_id = $1
         WHERE id = $2
       `, [updateRes.rows[0].id, appRecord.id]);
     }
@@ -527,50 +535,42 @@ export async function getIncumbents(req, res) {
     let query = `
       SELECT 
         g.id,
-        g.employee_id,
-        g.plantilla_item_number,
-        g.full_name,
+        g.item_no,
+        g.item_no AS plantilla_item_number,
+        g.first_name,
+        g.last_name,
+        TRIM(CONCAT(COALESCE(g.first_name, ''), ' ', COALESCE(g.last_name, ''))) AS full_name,
+        g.email,
         g.current_position,
-        g.salary_grade,
         g.region,
         g.division,
-        g.uacs_oper_dsc,
-        g.station_division,
-        g.org_cd,
-        g.remarks,
-        COALESCE(ra.stage_of_reclassification, g.stage_of_reclassification) AS stage_of_reclassification,
-        g.target_position,
-        COALESCE(ra.actual_position, g.actual_position, g.reclass_position, g.target_position) AS actual_position,
-        COALESCE(ra.actual_position, g.reclass_position, g.actual_position, g.target_position) AS reclass_position,
-        COALESCE(ra.new_item_number, g.new_item_number) AS new_item_number,
-        g.nosca_serial_no,
-        g.nosca_file_name,
-        g.nosca_file_url,
-        g.nosca_uploaded_at,
-        g.dbm_status,
-        g.document_checklist,
-        g.qs_evaluation,
-        g.qs_eval_result,
-        g.evaluated_by,
-        g.evaluated_at,
-        g.evaluator_remarks,
+        g.division AS station_division,
+        g.school_id,
+        g.school_name,
+        g.qs_status,
+        g.qs_status AS qs_eval_result,
+        g.stage_of_reclassification,
+        COALESCE(ra.reclass_position, g.reclass_position) AS actual_position,
+        COALESCE(ra.reclass_position, g.reclass_position) AS reclass_position,
+        COALESCE(ra.reclass_position, g.reclass_position) AS target_position,
+        COALESCE(ra.new_item_no, g.new_item_no) AS new_item_number,
+        COALESCE(ra.new_item_no, g.new_item_no) AS new_item_no,
+        g.is_test,
+        g.reupload,
         g.created_at,
         g.updated_at
-      FROM incumbent_guidance_counselors g
+      FROM reclass_gc g
       LEFT JOIN LATERAL (
-        SELECT actual_position, new_item_number, stage_of_reclassification
-        FROM reclassification_application ra
-        WHERE ra.incumbent_id = g.id
+        SELECT reclass_position, new_item_no
+        FROM reclass_applications ra
+        WHERE ra.reclass_gc_id = g.id
            OR (
-             ra.current_item_number IS NOT NULL 
-             AND (
-               TRIM(LOWER(ra.current_item_number)) = TRIM(LOWER(g.plantilla_item_number))
-               OR TRIM(LOWER(ra.current_item_number)) = TRIM(LOWER(g.employee_id))
-             )
+             ra.item_no IS NOT NULL 
+             AND TRIM(LOWER(ra.item_no)) = TRIM(LOWER(g.item_no))
            )
            OR (
-             ra.new_item_number IS NOT NULL
-             AND TRIM(LOWER(ra.new_item_number)) = TRIM(LOWER(g.plantilla_item_number))
+             ra.new_item_no IS NOT NULL
+             AND TRIM(LOWER(ra.new_item_no)) = TRIM(LOWER(g.item_no))
            )
         ORDER BY ra.updated_at DESC NULLS LAST, ra.id DESC
         LIMIT 1
@@ -582,44 +582,41 @@ export async function getIncumbents(req, res) {
 
     if (stage) {
       params.push(stage);
-      query += ` AND (COALESCE(ra.stage_of_reclassification, g.stage_of_reclassification) = $${params.length})`;
+      query += ` AND (g.stage_of_reclassification = $${params.length})`;
     }
 
     if (position) {
       if (position === 'UNASSIGNED') {
-        query += ` AND (g.target_position IS NULL AND ra.actual_position IS NULL AND g.reclass_position IS NULL)`;
+        query += ` AND (ra.reclass_position IS NULL AND g.reclass_position IS NULL)`;
       } else {
         params.push(position);
         query += ` AND (
-          g.target_position = $${params.length} 
-          OR ra.actual_position = $${params.length}
+          ra.reclass_position = $${params.length}
           OR g.reclass_position = $${params.length}
-          OR g.actual_position = $${params.length}
         )`;
       }
     }
 
     if (division) {
       params.push(`%${division}%`);
-      query += ` AND (g.station_division ILIKE $${params.length} OR g.division ILIKE $${params.length})`;
+      query += ` AND (g.division ILIKE $${params.length})`;
     }
 
     if (search) {
       params.push(`%${search}%`);
       query += ` AND (
-        g.employee_id ILIKE $${params.length} OR
-        g.plantilla_item_number ILIKE $${params.length} OR
-        COALESCE(ra.new_item_number, g.new_item_number, '') ILIKE $${params.length} OR
-        g.full_name ILIKE $${params.length} OR
+        g.item_no ILIKE $${params.length} OR
+        COALESCE(ra.new_item_no, g.new_item_no, '') ILIKE $${params.length} OR
+        g.first_name ILIKE $${params.length} OR
+        g.last_name ILIKE $${params.length} OR
+        g.email ILIKE $${params.length} OR
         g.current_position ILIKE $${params.length} OR
-        g.target_position ILIKE $${params.length} OR
-        ra.actual_position ILIKE $${params.length} OR
         g.reclass_position ILIKE $${params.length} OR
-        g.station_division ILIKE $${params.length} OR
+        ra.reclass_position ILIKE $${params.length} OR
         g.division ILIKE $${params.length} OR
-        g.region ILIKE $${params.length} OR
-        g.uacs_oper_dsc ILIKE $${params.length} OR
-        g.remarks ILIKE $${params.length}
+        g.school_id ILIKE $${params.length} OR
+        g.school_name ILIKE $${params.length} OR
+        g.region ILIKE $${params.length}
       )`;
     }
 
@@ -627,45 +624,94 @@ export async function getIncumbents(req, res) {
 
     const result = await pool.query(query, params);
 
+    // Fetch records from reclass_documents to attach evaluated statuses and remarks
+    let docsByItemNo = new Map();
+    try {
+      const allDocsRes = await pool.query(`
+        SELECT 
+          id,
+          file_url,
+          file_name,
+          remarks,
+          status,
+          plantilla_item_number,
+          document_title,
+          uploaded_at,
+          updated_at
+        FROM reclass_documents
+        ORDER BY id ASC;
+      `);
+
+      for (const d of allDocsRes.rows) {
+        if (d.plantilla_item_number) {
+          const k = d.plantilla_item_number.trim().toLowerCase();
+          if (!docsByItemNo.has(k)) docsByItemNo.set(k, []);
+          docsByItemNo.get(k).push(d);
+        }
+      }
+    } catch (docErr) {
+      console.warn('[Reclass Controller] Could not fetch reclass_documents:', docErr.message);
+    }
+
     const formatted = result.rows.map(row => {
-      const resolvedActualPos = row.actual_position || row.reclass_position || row.target_position || null;
+      const resolvedActualPos = row.actual_position || row.reclass_position || null;
+      const rawDocs = docsByItemNo.get((row.item_no || '').trim().toLowerCase()) || [];
+      const documentChecklist = rawDocs.map(d => ({
+        id: d.document_title || d.file_name,
+        key: d.document_title || d.file_name,
+        label: d.document_title || d.file_name,
+        shortTitle: d.document_title || d.file_name,
+        status: d.status ? (d.status.toLowerCase() === 'approved' ? 'approved' : (d.status.toLowerCase() === 'for revision' || d.status.toLowerCase() === 'for_revision' ? 'for_revision' : d.status)) : null,
+        submitted: Boolean(d.status && d.status.toLowerCase() === 'approved'),
+        verified: Boolean(d.status && d.status.toLowerCase() === 'approved'),
+        remarks: d.remarks || '',
+        file_name: d.file_name,
+        file_url: d.file_url,
+        url: d.file_url
+      }));
+
       return {
         id: row.id,
-        employee_id: row.employee_id,
-        plantilla_item_number: row.plantilla_item_number,
-        new_item_number: row.new_item_number || null,
-        nosca_serial_no: row.nosca_serial_no || null,
-        nosca_file_name: row.nosca_file_name || null,
-        nosca_file_url: row.nosca_file_url || null,
-        nosca_uploaded_at: row.nosca_uploaded_at || null,
-        full_name: row.full_name,
+        item_no: row.item_no,
+        plantilla_item_number: row.item_no,
+        new_item_no: row.new_item_no,
+        new_item_number: row.new_item_number || row.new_item_no || null,
+        first_name: row.first_name,
+        last_name: row.last_name,
+        full_name: row.full_name || `${row.first_name || ''} ${row.last_name || ''}`.trim(),
+        email: row.email,
         current_position: row.current_position,
-        salary_grade: row.salary_grade,
         region: row.region,
         division: row.division,
-        uacs_oper_dsc: row.uacs_oper_dsc,
-        station_division: row.station_division,
-        org_cd: row.org_cd,
-        remarks: row.remarks,
+        station_division: row.division,
+        school_id: row.school_id,
+        school_name: row.school_name,
+        qs_status: row.qs_status,
+        qs_eval_result: row.qs_status || 'PENDING',
         stage_of_reclassification: row.stage_of_reclassification,
         target_position: resolvedActualPos,
         actual_position: resolvedActualPos,
         reclass_position: resolvedActualPos,
-        dbm_status: row.dbm_status || null,
-        document_checklist: row.document_checklist || [],
-        qs_evaluation: row.qs_evaluation || {},
-        qs_eval_result: row.qs_eval_result || 'PENDING',
-        evaluated_by: row.evaluated_by || null,
-        evaluated_at: row.evaluated_at || null,
-        evaluator_remarks: row.evaluator_remarks || null,
+        is_test: row.is_test,
+        reupload: row.reupload,
         created_at: row.created_at,
         updated_at: row.updated_at,
+        document_checklist: documentChecklist,
         assessment: {
           education: 'Bachelor of Science in Psychology / Guidance Counseling',
           years_experience: 5.0,
           hours_of_training: 40.0,
           eligibility: 'RA 1080 (Registered Guidance Counselor)',
-          documents: []
+          documents: rawDocs.map(d => ({
+            id: d.id,
+            key: d.document_title || d.file_name,
+            name: d.file_name || d.document_title,
+            label: d.document_title || d.file_name,
+            title: d.document_title || d.file_name,
+            url: d.file_url,
+            status: d.status,
+            remarks: d.remarks
+          }))
         }
       };
     });
@@ -687,31 +733,32 @@ export async function updateIncumbentStage(req, res) {
     const { id } = req.params;
     const { stage_of_reclassification } = req.body;
 
-    const RO_ONLY_STAGES = ['Endorsed to DBM RO', 'Endorsed to SDO'];
+    const RO_ALLOWED_STAGES = ['Endorsed to DBM RO', 'For Review', 'Endorsed to RO'];
     const HRMO_STAGES = ['For Review', 'Endorsed to RO', 'Endorsed'];
 
     if (!isAdmin) {
-      if (isRO && !RO_ONLY_STAGES.includes(stage_of_reclassification) && stage_of_reclassification !== 'Approved') {
+      if (isRO && !RO_ALLOWED_STAGES.includes(stage_of_reclassification) && stage_of_reclassification !== 'Approved') {
         return res.status(403).json({
-          error: `Regional Office personnel can only endorse to: ${RO_ONLY_STAGES.join(', ')}`
+          error: `Regional Office personnel can only set stages to: ${RO_ALLOWED_STAGES.join(', ')}`
         });
       }
 
-      if (!isRO && RO_ONLY_STAGES.includes(stage_of_reclassification)) {
+      if (!isRO && stage_of_reclassification === 'Endorsed to DBM RO') {
         return res.status(403).json({
-          error: `Only Regional Office personnel can update status to ${stage_of_reclassification}.`
+          error: `Access restricted: Endorsing to "${stage_of_reclassification}" is restricted to Regional Office accounts.`
         });
       }
     }
 
     if (stage_of_reclassification === 'Approved') {
-      const current = await pool.query('SELECT dbm_status FROM incumbent_guidance_counselors WHERE id = $1', [id]);
+      const current = await pool.query('SELECT nosca_serial_no, new_item_no FROM reclass_gc WHERE id = $1', [id]);
       if (current.rows.length === 0) {
         return res.status(404).json({ error: 'Incumbent counselor not found' });
       }
-      if (current.rows[0].dbm_status !== 'With DBM NOSCA' && !isAdmin) {
+      const hasNosca = Boolean(current.rows[0].nosca_serial_no || current.rows[0].new_item_no);
+      if (!hasNosca && !isAdmin) {
         return res.status(400).json({
-          error: 'The "Approved" stage is automatically set when DBM Status is "With DBM NOSCA" and cannot be manually selected.'
+          error: 'The "Approved" stage is automatically set when NOSCA is assigned and cannot be manually selected.'
         });
       }
     } else if (!stage_of_reclassification || !VALID_MANUAL_STAGES.includes(stage_of_reclassification)) {
@@ -721,7 +768,7 @@ export async function updateIncumbentStage(req, res) {
     }
 
     const updateQuery = `
-      UPDATE incumbent_guidance_counselors
+      UPDATE reclass_gc
       SET stage_of_reclassification = $1, updated_at = NOW()
       WHERE id = $2
       RETURNING *;
@@ -735,7 +782,7 @@ export async function updateIncumbentStage(req, res) {
 
     const updatedIncumbent = result.rows[0];
 
-    // Synchronize connected reclassification_application
+    // Synchronize connected reclass_applications
     await syncIncumbentToApplication(pool, updatedIncumbent, stage_of_reclassification);
 
     res.json(updatedIncumbent);
@@ -767,10 +814,8 @@ export async function updateIncumbentPosition(req, res) {
     }
 
     const updateQuery = `
-      UPDATE incumbent_guidance_counselors
-      SET target_position = $1,
-          actual_position = $1,
-          reclass_position = $1,
+      UPDATE reclass_gc
+      SET reclass_position = $1,
           updated_at = NOW()
       WHERE id = $2
       RETURNING *;
@@ -784,24 +829,22 @@ export async function updateIncumbentPosition(req, res) {
 
     const updatedIncumbent = result.rows[0];
 
-    // Synchronize actual_position to connected reclassification_application
-    const itemNo = (updatedIncumbent.plantilla_item_number || '').trim();
-    const empId = (updatedIncumbent.employee_id || '').trim();
+    // Synchronize reclass_position to connected reclass_applications
+    const itemNo = (updatedIncumbent.item_no || '').trim();
     await pool.query(`
-      UPDATE reclassification_application
-      SET actual_position = $1,
-          indicative_position = COALESCE(indicative_position, $1),
+      UPDATE reclass_applications
+      SET reclass_position = $1,
           updated_at = NOW()
-      WHERE incumbent_id = $2
-         OR ($3 <> '' AND current_item_number ILIKE $3)
-         OR ($4 <> '' AND current_item_number ILIKE $4)
-    `, [targetPosition, updatedIncumbent.id, itemNo, empId]);
+      WHERE reclass_gc_id = $2
+         OR ($3 <> '' AND item_no ILIKE $3)
+    `, [targetPosition, updatedIncumbent.id, itemNo]);
 
     res.json({
       ...updatedIncumbent,
-      actual_position: updatedIncumbent.target_position,
-      reclass_position: updatedIncumbent.target_position,
-      new_item_number: updatedIncumbent.new_item_number || null
+      plantilla_item_number: updatedIncumbent.item_no,
+      actual_position: updatedIncumbent.reclass_position,
+      target_position: updatedIncumbent.reclass_position,
+      new_item_number: updatedIncumbent.new_item_no || null
     });
   } catch (error) {
     console.error('[Reclass Controller - updateIncumbentPosition]', error);
@@ -836,28 +879,17 @@ export async function saveIncumbentQsEvaluation(req, res) {
     const targetPosToSave = (posParam === '' || posParam === undefined) ? null : posParam;
 
     const updateQuery = `
-      UPDATE incumbent_guidance_counselors
-      SET document_checklist = COALESCE($1, document_checklist),
-          qs_evaluation = COALESCE($2, qs_evaluation),
-          qs_eval_result = $3,
-          evaluator_remarks = $4,
-          evaluated_by = $5,
-          evaluated_at = NOW(),
-          target_position = COALESCE($6, target_position),
-          actual_position = COALESCE($6, actual_position, target_position),
-          reclass_position = COALESCE($6, reclass_position, target_position),
-          stage_of_reclassification = COALESCE($7, stage_of_reclassification),
+      UPDATE reclass_gc
+      SET qs_status = COALESCE($1, qs_status),
+          reclass_position = COALESCE($2, reclass_position),
+          stage_of_reclassification = COALESCE($3, stage_of_reclassification),
           updated_at = NOW()
-      WHERE id = $8
+      WHERE id = $4
       RETURNING *;
     `;
 
     const result = await pool.query(updateQuery, [
-      document_checklist ? JSON.stringify(document_checklist) : null,
-      qs_evaluation ? JSON.stringify(qs_evaluation) : null,
       evalResult,
-      evaluator_remarks || null,
-      evaluatedBy,
       targetPosToSave,
       stage_of_reclassification || null,
       id
@@ -867,28 +899,91 @@ export async function saveIncumbentQsEvaluation(req, res) {
       return res.status(404).json({ error: 'Incumbent counselor not found' });
     }
 
-    // Synchronize actual_position and stage to reclassification_application
+    // Synchronize reclass_position to reclass_applications
     const updatedInc = result.rows[0];
-    if (targetPosToSave || stage_of_reclassification) {
-      const itemNo = (updatedInc.plantilla_item_number || '').trim();
-      const empId = (updatedInc.employee_id || '').trim();
+    if (targetPosToSave) {
+      const itemNo = (updatedInc.item_no || '').trim();
       await pool.query(`
-        UPDATE reclassification_application
-        SET actual_position = COALESCE($1, actual_position),
-            indicative_position = COALESCE(indicative_position, $1),
-            stage_of_reclassification = COALESCE($2, stage_of_reclassification),
+        UPDATE reclass_applications
+        SET reclass_position = COALESCE($1, reclass_position),
             updated_at = NOW()
-        WHERE incumbent_id = $3
-           OR ($4 <> '' AND current_item_number ILIKE $4)
-           OR ($5 <> '' AND current_item_number ILIKE $5)
-      `, [targetPosToSave, stage_of_reclassification || null, id, itemNo, empId]);
+        WHERE reclass_gc_id = $2
+           OR ($3 <> '' AND item_no ILIKE $3)
+      `, [targetPosToSave, id, itemNo]);
     }
+
+    // Persist document evaluation results (Approved / For Revision) into reclass_documents
+    if (Array.isArray(document_checklist) && document_checklist.length > 0) {
+      const itemNo = (updatedInc.item_no || '').trim();
+      for (const doc of document_checklist) {
+        const docTitle = doc.shortTitle || doc.label || doc.title || doc.name || 'Document';
+        let docStatus = null;
+        if (doc.status === 'approved' || doc.status === 'Approved') docStatus = 'Approved';
+        else if (doc.status === 'for_revision' || doc.status === 'For Revision') docStatus = 'For Revision';
+        else if (doc.submitted && doc.verified) docStatus = 'Approved';
+
+        const docRemarks = doc.remarks !== undefined ? doc.remarks : null;
+
+        const existingDoc = await pool.query(`
+          SELECT id FROM reclass_documents
+          WHERE plantilla_item_number = $1
+            AND (TRIM(LOWER(document_title)) = TRIM(LOWER($2)) OR TRIM(LOWER(file_name)) = TRIM(LOWER($2)))
+          LIMIT 1;
+        `, [itemNo, docTitle]);
+
+        if (existingDoc.rows.length > 0) {
+          await pool.query(`
+            UPDATE reclass_documents
+            SET status = $1,
+                remarks = $2,
+                document_title = COALESCE($3, document_title),
+                plantilla_item_number = COALESCE(plantilla_item_number, $4),
+                updated_at = NOW()
+            WHERE id = $5;
+          `, [docStatus, docRemarks, docTitle, itemNo, existingDoc.rows[0].id]);
+        } else {
+          await pool.query(`
+            INSERT INTO reclass_documents (
+              plantilla_item_number,
+              document_title,
+              status,
+              remarks,
+              updated_at
+            ) VALUES ($1, $2, $3, $4, NOW());
+          `, [itemNo, docTitle, docStatus, docRemarks]);
+        }
+      }
+    }
+
+    // Fetch updated documents from reclass_documents
+    const updatedDocsRes = await pool.query(`
+      SELECT * FROM reclass_documents 
+      WHERE (plantilla_item_number = $1 AND $1 <> '')
+      ORDER BY id ASC;
+    `, [updatedInc.item_no || '']);
+
+    const updatedChecklist = updatedDocsRes.rows.map(d => ({
+      id: d.document_title || d.file_name,
+      key: d.document_title || d.file_name,
+      label: d.document_title,
+      shortTitle: d.document_title,
+      status: d.status ? (d.status.toLowerCase() === 'approved' ? 'approved' : (d.status.toLowerCase() === 'for revision' || d.status.toLowerCase() === 'for_revision' ? 'for_revision' : d.status)) : null,
+      submitted: Boolean(d.status && d.status.toLowerCase() === 'approved'),
+      verified: Boolean(d.status && d.status.toLowerCase() === 'approved'),
+      remarks: d.remarks || '',
+      file_name: d.file_name,
+      file_url: d.file_url,
+      url: d.file_url
+    }));
 
     res.json({
       ...updatedInc,
-      actual_position: updatedInc.actual_position || updatedInc.target_position,
-      reclass_position: updatedInc.reclass_position || updatedInc.target_position,
-      new_item_number: updatedInc.new_item_number || null
+      plantilla_item_number: updatedInc.item_no,
+      actual_position: updatedInc.reclass_position,
+      target_position: updatedInc.reclass_position,
+      new_item_number: updatedInc.new_item_no || null,
+      document_checklist: updatedChecklist,
+      documents: updatedDocsRes.rows
     });
   } catch (error) {
     console.error('[Reclass Controller - saveIncumbentQsEvaluation]', error);
@@ -908,143 +1003,96 @@ export async function updateIncumbentDbmStatus(req, res) {
     }
 
     const { id } = req.params;
-    const { dbm_status, plantilla_item_number } = req.body;
-
-    const validDbmStatuses = ['With DBM Request', 'With DBM NOSCA', 'None', null, ''];
-    if (dbm_status && !validDbmStatuses.includes(dbm_status)) {
-      return res.status(400).json({
-        error: `Invalid dbm_status. Must be 'With DBM Request', 'With DBM NOSCA', or empty.`
-      });
-    }
-
-    const valueToSet = (dbm_status === 'None' || dbm_status === '' || dbm_status === undefined) ? null : dbm_status;
-    const isNosca = valueToSet === 'With DBM NOSCA';
+    const { plantilla_item_number } = req.body;
     const cleanItemNo = (typeof plantilla_item_number === 'string' && plantilla_item_number.trim()) ? plantilla_item_number.trim() : null;
 
     client = await pool.connect();
     await client.query('BEGIN');
 
     // Retrieve incumbent counselor details
-    const incRes = await client.query('SELECT * FROM incumbent_guidance_counselors WHERE id = $1', [id]);
+    const incRes = await client.query('SELECT * FROM reclass_gc WHERE id = $1', [id]);
     if (incRes.rows.length === 0) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Incumbent counselor not found' });
     }
     const incumbent = incRes.rows[0];
 
-    // Release any previous NOSCA item assigned to this incumbent if changing item or unsetting NOSCA
-    if (!isNosca || (cleanItemNo && incumbent.plantilla_item_number !== cleanItemNo)) {
-      await client.query(
-        `UPDATE reclassification_nosca_items
-         SET assignment_status = 'AVAILABLE',
-             assigned_to_incumbent_id = NULL,
-             assigned_to_employee_id = NULL,
-             assigned_at = NULL,
-             updated_at = NOW()
-         WHERE assigned_to_incumbent_id = $1 OR assigned_to_employee_id = $2`,
-        [id, incumbent.employee_id]
-      );
-    }
-
     let updateQuery;
     let queryParams;
 
-    if (isNosca && cleanItemNo) {
+    if (cleanItemNo) {
       updateQuery = `
-        UPDATE incumbent_guidance_counselors
-        SET dbm_status = $1,
-            stage_of_reclassification = 'Approved',
-            plantilla_item_number = $2,
-            new_item_number = $2,
-            updated_at = NOW()
-        WHERE id = $3
-        RETURNING *;
-      `;
-      queryParams = [valueToSet, cleanItemNo, id];
-    } else if (isNosca) {
-      updateQuery = `
-        UPDATE incumbent_guidance_counselors
-        SET dbm_status = $1,
-            stage_of_reclassification = 'Approved',
+        UPDATE reclass_gc
+        SET stage_of_reclassification = 'Approved',
+            plantilla_item_number = $1,
+            new_item_number = $1,
             updated_at = NOW()
         WHERE id = $2
         RETURNING *;
       `;
-      queryParams = [valueToSet, id];
+      queryParams = [cleanItemNo, id];
     } else {
       updateQuery = `
-        UPDATE incumbent_guidance_counselors
-        SET dbm_status = $1,
-            stage_of_reclassification = CASE
-              WHEN stage_of_reclassification = 'Approved' THEN 'Endorsed to RO'
-              ELSE stage_of_reclassification
-            END,
-            updated_at = NOW()
-        WHERE id = $2
+        UPDATE reclass_gc
+        SET updated_at = NOW()
+        WHERE id = $1
         RETURNING *;
       `;
-      queryParams = [valueToSet, id];
+      queryParams = [id];
     }
 
     const result = await client.query(updateQuery, queryParams);
     const updatedIncumbent = result.rows[0];
 
-    // If With DBM NOSCA and cleanItemNo, link and mark item in reclassification_nosca_items as ASSIGNED
-    if (isNosca && cleanItemNo) {
+    // If cleanItemNo, link and mark item in reclass_item_no as ASSIGNED
+    if (cleanItemNo) {
       const updateItemRes = await client.query(
-        `UPDATE reclassification_nosca_items
-         SET assignment_status = 'ASSIGNED',
-             assigned_to_incumbent_id = $1,
-             assigned_to_employee_id = $2,
-             assigned_at = NOW(),
+        `UPDATE reclass_item_no
+         SET new_item_no_status = 'ASSIGNED',
+             reclass_gc_id = $1,
+             reclass_at = NOW(),
              updated_at = NOW()
-         WHERE plantilla_item_number = $3`,
-        [id, incumbent.employee_id, cleanItemNo]
+         WHERE new_item_no = $2`,
+        [id, cleanItemNo]
       );
 
-      // If the item wasn't in reclassification_nosca_items yet (e.g. manually entered), insert it as ASSIGNED
+      // If the item wasn't in reclass_item_no yet (e.g. manually entered), insert it as ASSIGNED
       if (updateItemRes.rowCount === 0) {
         await client.query(
-          `INSERT INTO reclassification_nosca_items (
-            serial_no,
-            plantilla_item_number,
+          `INSERT INTO reclass_item_no (
+            new_item_no,
             category,
-            position_title,
+            position,
             division,
             school_name,
-            assignment_status,
-            assigned_to_incumbent_id,
-            assigned_to_employee_id,
-            assigned_at,
+            new_item_no_status,
+            reclass_gc_id,
+            reclass_at,
             created_at,
             updated_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW(), NOW())`,
+          ) VALUES ($1, $2, $3, $4, $5, 'ASSIGNED', $6, NOW(), NOW(), NOW())`,
           [
-            'MANUAL-ASSIGNMENT',
             cleanItemNo,
             'ELEMENTARY',
             incumbent.target_position || incumbent.reclass_position || 'School Counselor Associate I',
             incumbent.division || incumbent.station_division || 'SDO Station',
             incumbent.station_division || incumbent.division || 'SDO Station',
-            'ASSIGNED',
-            id,
-            incumbent.employee_id
+            id
           ]
         );
       }
 
-      // Synchronize new_item_number to reclassification_application
+      // Synchronize new_item_no to reclass_applications
       await client.query(`
-        UPDATE reclassification_application
-        SET new_item_number = $1,
-            stage_of_reclassification = 'Approved',
+        UPDATE reclass_applications
+        SET new_item_no = $1,
             updated_at = NOW()
-        WHERE incumbent_id = $2
-           OR (current_item_number IS NOT NULL AND (TRIM(LOWER(current_item_number)) = TRIM(LOWER($3)) OR TRIM(LOWER(current_item_number)) = TRIM(LOWER($4))))
-      `, [cleanItemNo, id, incumbent.plantilla_item_number || '', incumbent.employee_id || '']);
+        WHERE reclass_gc_id = $2
+           OR (item_no IS NOT NULL AND TRIM(LOWER(item_no)) = TRIM(LOWER($3)))
+      `, [cleanItemNo, id, incumbent.item_no || incumbent.plantilla_item_number || '']);
     }
 
-    // Synchronize connected reclassification_application stage
+    // Synchronize connected reclass_applications
     await syncIncumbentToApplication(client, updatedIncumbent, updatedIncumbent.stage_of_reclassification);
 
     await client.query('COMMIT');
@@ -1070,9 +1118,10 @@ export async function getIncumbentDocuments(req, res) {
     const query = `
       SELECT 
         g.id,
-        g.employee_id,
-        g.full_name
-      FROM incumbent_guidance_counselors g
+        g.item_no,
+        g.item_no AS employee_id,
+        TRIM(CONCAT(COALESCE(g.first_name, ''), ' ', COALESCE(g.last_name, ''))) AS full_name
+      FROM reclass_gc g
       WHERE g.id = $1
     `;
 
@@ -1082,15 +1131,96 @@ export async function getIncumbentDocuments(req, res) {
       return res.status(404).json({ error: 'Incumbent counselor not found' });
     }
 
+    const itemNo = (result.rows[0].item_no || '').trim();
+
+    const docsRes = await pool.query(`
+      SELECT 
+        id,
+        file_url,
+        file_name,
+        remarks,
+        status,
+        document_title,
+        uploaded_at,
+        updated_at
+      FROM reclass_documents
+      WHERE plantilla_item_number = $1 AND $1 <> ''
+      ORDER BY id ASC;
+    `, [itemNo]);
+
     res.json({
       incumbent_id: result.rows[0].id,
-      employee_id: result.rows[0].employee_id,
+      employee_id: result.rows[0].item_no,
       full_name: result.rows[0].full_name,
-      documents: []
+      documents: docsRes.rows
     });
   } catch (error) {
     console.error('[Reclass Controller - getIncumbentDocuments]', error);
     res.status(500).json({ error: error.message || 'Failed to fetch incumbent documents' });
+  }
+}
+
+/**
+ * Update single document status and remarks in reclass_documents
+ */
+export async function updateIncumbentDocumentStatus(req, res) {
+  try {
+    if (isUserRegionalOffice(req)) {
+      return res.status(403).json({ error: 'Access denied: Restricted to Division HRMO.' });
+    }
+    const { id } = req.params;
+    const { document_title, status, remarks } = req.body;
+
+    const gcRes = await pool.query('SELECT item_no FROM reclass_gc WHERE id = $1', [id]);
+    if (gcRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Incumbent counselor not found' });
+    }
+    const itemNo = (gcRes.rows[0].item_no || '').trim();
+
+    let docStatus = null;
+    if (status === 'approved' || status === 'Approved') docStatus = 'Approved';
+    else if (status === 'for_revision' || status === 'For Revision') docStatus = 'For Revision';
+
+    const existingDoc = await pool.query(`
+      SELECT id FROM reclass_documents
+      WHERE plantilla_item_number = $1
+        AND (TRIM(LOWER(document_title)) = TRIM(LOWER($2)) OR TRIM(LOWER(file_name)) = TRIM(LOWER($2)))
+      LIMIT 1;
+    `, [itemNo, document_title]);
+
+    let savedRow;
+    if (existingDoc.rows.length > 0) {
+      const upd = await pool.query(`
+        UPDATE reclass_documents
+        SET status = COALESCE($1, status),
+            remarks = COALESCE($2, remarks),
+            document_title = COALESCE($3, document_title),
+            updated_at = NOW()
+        WHERE id = $4
+        RETURNING *;
+      `, [docStatus, remarks !== undefined ? remarks : null, document_title, existingDoc.rows[0].id]);
+      savedRow = upd.rows[0];
+    } else {
+      const ins = await pool.query(`
+        INSERT INTO reclass_documents (
+          plantilla_item_number,
+          document_title,
+          status,
+          remarks,
+          updated_at
+        ) VALUES ($1, $2, $3, $4, NOW())
+        RETURNING *;
+      `, [itemNo, document_title, docStatus, remarks || null]);
+      savedRow = ins.rows[0];
+    }
+
+    res.json({
+      success: true,
+      document: savedRow
+    });
+  } catch (err) {
+    console.error('[Reclass Controller - updateIncumbentDocumentStatus]', err);
+    res.status(500).json({ error: err.message || 'Failed to update document status' });
   }
 }
 
@@ -1142,7 +1272,7 @@ function parseCSVRows(csvText) {
 }
 
 /**
- * Ingest Reclassification Inventory CSV into incumbent_guidance_counselors
+ * Ingest Reclassification Inventory CSV into reclass_gc
  */
 export async function uploadReclassCsv(req, res) {
   let client;
@@ -1181,36 +1311,104 @@ export async function uploadReclassCsv(req, res) {
     const rawHeader = parsedRows[0];
     const normalizedHeaders = rawHeader.map(h => h.toLowerCase().replace(/[^a-z0-9]/g, ''));
 
-    // Find column indexes
+    // Find column indexes matching reclass_gc table and legacy formats
+    let itemNoIdx = normalizedHeaders.findIndex(h => h.includes('itemno') || h.includes('plantilla') || h.includes('itemnum') || h === 'item');
+    let posIdx = normalizedHeaders.findIndex(h => h.includes('currentposition') || h.includes('positiontitle') || (h.includes('position') && !h.includes('reclass') && !h.includes('target')));
+    let firstNameIdx = normalizedHeaders.findIndex(h => h.includes('firstname') || h === 'first' || h === 'fname');
+    let lastNameIdx = normalizedHeaders.findIndex(h => h.includes('lastname') || h === 'last' || h === 'lname' || h === 'surname');
+    let nameIdx = normalizedHeaders.findIndex(h => h.includes('incumbent') || h.includes('fullname') || h === 'name');
+    let emailIdx = normalizedHeaders.findIndex(h => h.includes('email') || h.includes('mail'));
     let regionIdx = normalizedHeaders.findIndex(h => h.includes('region'));
     let divisionIdx = normalizedHeaders.findIndex(h => h.includes('division'));
-    let stationIdx = normalizedHeaders.findIndex(h => h.includes('uacs') || h.includes('station') || h.includes('oper') || h.includes('school'));
-    let orgCdIdx = normalizedHeaders.findIndex(h => h.includes('orgcd') || h.includes('org'));
-    let itemNoIdx = normalizedHeaders.findIndex(h => h.includes('plantilla') || h.includes('itemno') || h.includes('itemnum'));
-    let posIdx = normalizedHeaders.findIndex(h => h.includes('positiontitle') || (h.includes('position') && !h.includes('reclass')));
-    let sgIdx = normalizedHeaders.findIndex(h => h.includes('salarygrade') || h === 'sg');
-    let nameIdx = normalizedHeaders.findIndex(h => h.includes('incumbent') || h.includes('fullname') || h === 'name');
-    let reclassPosIdx = normalizedHeaders.findIndex(h => h.includes('reclass') || h.includes('targetpos'));
+    let schoolIdIdx = normalizedHeaders.findIndex(h => h.includes('schoolid') || h.includes('schid') || h.includes('schoolno'));
+    let schoolNameIdx = normalizedHeaders.findIndex(h => h.includes('schoolname') || (h.includes('school') && !h.includes('id')) || h.includes('stationname'));
+    let qsStatusIdx = normalizedHeaders.findIndex(h => h.includes('qsstatus') || h.includes('qs'));
+    let stageIdx = normalizedHeaders.findIndex(h => h.includes('stageofreclassification') || h.includes('stage'));
+    let reclassPosIdx = normalizedHeaders.findIndex(h => h.includes('reclassposition') || h.includes('targetpos') || (h.includes('reclass') && !h.includes('stage')) || h.includes('targetposition'));
+    let newItemNoIdx = normalizedHeaders.findIndex(h => h.includes('newitem') || h.includes('newitemno') || h.includes('newplantilla'));
+    let isTestIdx = normalizedHeaders.findIndex(h => h.includes('istest') || h === 'test');
+    let reuploadIdx = normalizedHeaders.findIndex(h => h.includes('reupload'));
     let remarksIdx = normalizedHeaders.findIndex(h => h.includes('remark') || h.includes('notes'));
+    let stationIdx = normalizedHeaders.findIndex(h => h.includes('uacs') || h.includes('station') || h.includes('oper') || h.includes('school'));
 
-    // Fallback to default index positions if headers didn't match
-    if (itemNoIdx === -1) itemNoIdx = 4;
-    if (regionIdx === -1) regionIdx = 0;
-    if (divisionIdx === -1) divisionIdx = 1;
-    if (stationIdx === -1) stationIdx = 2;
-    if (orgCdIdx === -1) orgCdIdx = 3;
-    if (posIdx === -1) posIdx = 5;
-    if (sgIdx === -1) sgIdx = 6;
-    if (nameIdx === -1) nameIdx = 7;
-    if (reclassPosIdx === -1) reclassPosIdx = 8;
-    if (remarksIdx === -1) remarksIdx = 9;
+    // Fallback to legacy index positions if standard headers were not recognized
+    if (itemNoIdx === -1 && nameIdx !== -1) {
+      if (itemNoIdx === -1) itemNoIdx = 4;
+      if (regionIdx === -1) regionIdx = 0;
+      if (divisionIdx === -1) divisionIdx = 1;
+      if (stationIdx === -1) stationIdx = 2;
+      if (posIdx === -1) posIdx = 5;
+      if (nameIdx === -1) nameIdx = 7;
+      if (reclassPosIdx === -1) reclassPosIdx = 8;
+      if (remarksIdx === -1) remarksIdx = 9;
+    }
 
     const dataRows = parsedRows.slice(1);
+
+    // Validate station matching if division or region is attached to authenticated user
+    const userRole = req.user?.role;
+    const isSuperAdmin = userRole === 'admin' || userRole === 'superadmin' || userRole === 'central_office';
+    const userDiv = (req.user?.division || '').trim();
+    const userReg = (req.user?.region || '').trim();
+
+    if (!isSuperAdmin && (userDiv || userReg)) {
+      const normalizeStation = (str) => {
+        if (!str) return '';
+        return String(str)
+          .toUpperCase()
+          .replace(/DIVISION\s+OF\s+/gi, '')
+          .replace(/CITY\s+OF\s+/gi, '')
+          .replace(/SDO\s+/gi, '')
+          .replace(/[^A-Z0-9]/g, '')
+          .trim();
+      };
+
+      const normUserDiv = normalizeStation(userDiv);
+      const normUserReg = normalizeStation(userReg);
+
+      const isMatch = (rowVal, normUser) => {
+        if (!normUser) return true;
+        if (!rowVal || !rowVal.trim()) return false;
+        const normRow = normalizeStation(rowVal);
+        if (normRow === normUser) return true;
+        if (normRow.includes(normUser) || normUser.includes(normRow)) return true;
+        if ((normUser === 'NCR' || normUser.includes('NCR')) && (normRow.includes('NCR') || normRow.includes('NATIONALCAPITAL'))) return true;
+        if ((normUser.includes('IVA') || normUser.includes('CALABARZON')) && (normRow.includes('IVA') || normRow.includes('CALABARZON'))) return true;
+        return false;
+      };
+
+      const mismatches = [];
+      dataRows.forEach((row, idx) => {
+        if (!row.some(c => c && c.trim().length > 0)) return;
+        const rowReg = regionIdx !== -1 ? row[regionIdx] : '';
+        const rowDiv = divisionIdx !== -1 ? row[divisionIdx] : '';
+        const regMatches = isMatch(rowReg, normUserReg);
+        const divMatches = isMatch(rowDiv, normUserDiv);
+        if (!regMatches || !divMatches) {
+          mismatches.push({
+            rowNumber: idx + 2,
+            itemNo: (itemNoIdx !== -1 && row[itemNoIdx]) ? row[itemNoIdx] : `Row #${idx + 2}`,
+            foundRegion: rowReg || 'MISSING',
+            foundDivision: rowDiv || 'MISSING'
+          });
+        }
+      });
+
+      if (mismatches.length > 0) {
+        return res.status(400).json({
+          error: `Station mismatch detected: ${mismatches.length} record(s) do not match your assigned division (${userDiv}). Please check the file and re-upload.`,
+          mismatches: mismatches.slice(0, 50),
+          expectedDivision: userDiv,
+          expectedRegion: userReg
+        });
+      }
+    }
+
     client = await pool.connect();
 
     // If replaceExisting is requested, delete old records
     if (replaceExisting) {
-      await client.query('TRUNCATE TABLE incumbent_guidance_counselors CASCADE');
+      await client.query('TRUNCATE TABLE reclass_gc CASCADE');
     }
 
     let insertedOrUpdated = 0;
@@ -1218,111 +1416,174 @@ export async function uploadReclassCsv(req, res) {
     let abolitionCount = 0;
     let forReviewCount = 0;
 
+    // Deduplicate within the uploaded dataset so item_no never repeats in reclass_gc
+    const seenItemNos = new Map();
+    const deduplicatedDataRows = [];
+
+    for (let r = 0; r < dataRows.length; r++) {
+      const row = dataRows[r];
+      const rawItem = itemNoIdx !== -1 && row[itemNoIdx] ? String(row[itemNoIdx]).trim().toUpperCase() : null;
+      if (rawItem && rawItem !== '#N/A' && rawItem !== 'VACANT') {
+        if (seenItemNos.has(rawItem)) {
+          // Keep the latest row values for this item_no
+          const prevIdx = seenItemNos.get(rawItem);
+          deduplicatedDataRows[prevIdx] = row;
+        } else {
+          seenItemNos.set(rawItem, deduplicatedDataRows.length);
+          deduplicatedDataRows.push(row);
+        }
+      } else {
+        deduplicatedDataRows.push(row);
+      }
+    }
+
     const chunkSize = 200;
-    for (let i = 0; i < dataRows.length; i += chunkSize) {
-      const chunk = dataRows.slice(i, i + chunkSize);
+    for (let i = 0; i < deduplicatedDataRows.length; i += chunkSize) {
+      const chunk = deduplicatedDataRows.slice(i, i + chunkSize);
       const values = [];
       const placeholders = [];
       let pIdx = 1;
 
       for (let j = 0; j < chunk.length; j++) {
         const row = chunk[j];
-        const region = row[regionIdx] || null;
-        const division = row[divisionIdx] || null;
-        const uacs_oper_dsc = row[stationIdx] || null;
-        const org_cd = row[orgCdIdx] || null;
-        const plantilla_item_number = (row[itemNoIdx] || '').trim();
-        const current_position = (row[posIdx] || 'Unassigned').trim();
-        const salary_grade = row[sgIdx] || null;
-        const rawName = (row[nameIdx] || '').trim();
-        const rawReclass = (row[reclassPosIdx] || '').trim();
-        const remarks = row[remarksIdx] || null;
+        const item_no = itemNoIdx !== -1 && row[itemNoIdx] ? String(row[itemNoIdx]).trim() : null;
+        const current_position = posIdx !== -1 && row[posIdx] ? String(row[posIdx]).trim() : 'Unassigned';
 
-        const full_name = (!rawName || rawName.toUpperCase() === '#N/A') ? '#N/A' : rawName;
-        const target_position = (rawReclass && rawReclass.toUpperCase() !== '#N/A') ? rawReclass : null;
+        let first_name = firstNameIdx !== -1 && row[firstNameIdx] ? String(row[firstNameIdx]).trim() : null;
+        let last_name = lastNameIdx !== -1 && row[lastNameIdx] ? String(row[lastNameIdx]).trim() : null;
 
-        // Determine employee_id and station_division
-        const employee_id = plantilla_item_number || `ITEM-${i + j + 1}-${Date.now()}`;
-        const station_division = division || uacs_oper_dsc || 'Unknown Station';
+        if (!first_name && !last_name && nameIdx !== -1 && row[nameIdx]) {
+          const rawName = String(row[nameIdx]).trim();
+          if (rawName && rawName.toUpperCase() !== '#N/A' && rawName.toUpperCase() !== 'VACANT') {
+            if (rawName.includes(',')) {
+              const parts = rawName.split(',');
+              last_name = parts[0]?.trim() || null;
+              first_name = parts.slice(1).join(' ')?.trim() || null;
+            } else {
+              const parts = rawName.split(' ');
+              first_name = parts[0]?.trim() || null;
+              last_name = parts.slice(1).join(' ')?.trim() || null;
+            }
+          }
+        }
 
-        // Stage determination
-        let stage_of_reclassification = 'For Review';
-        const upperName = full_name.toUpperCase();
-        const upperRemarks = (remarks || '').toUpperCase();
+        const email = emailIdx !== -1 && row[emailIdx] ? String(row[emailIdx]).trim() : null;
+        const region = regionIdx !== -1 && row[regionIdx] ? String(row[regionIdx]).trim() : null;
+        const division = divisionIdx !== -1 && row[divisionIdx] ? String(row[divisionIdx]).trim() : (stationIdx !== -1 && row[stationIdx] ? String(row[stationIdx]).trim() : null);
+        const school_id = schoolIdIdx !== -1 && row[schoolIdIdx] ? String(row[schoolIdIdx]).trim() : null;
+        let school_name = schoolNameIdx !== -1 && row[schoolNameIdx] ? String(row[schoolNameIdx]).trim() : null;
+        if (!school_name && stationIdx !== -1 && row[stationIdx] && stationIdx !== divisionIdx && stationIdx !== schoolIdIdx) {
+          school_name = String(row[stationIdx]).trim();
+        }
 
-        if (upperName === '#N/A' || upperName === 'VACANT' || upperName === 'UNFILLED') {
-          stage_of_reclassification = 'Unfilled / Vacant';
+        let qs_status = qsStatusIdx !== -1 && row[qsStatusIdx] ? String(row[qsStatusIdx]).trim() : '';
+        if (!qs_status) {
+          qs_status = 'PENDING';
+        }
+
+        let stage_of_reclassification = stageIdx !== -1 && row[stageIdx] ? String(row[stageIdx]).trim() : '';
+        const remarks = remarksIdx !== -1 && row[remarksIdx] ? String(row[remarksIdx]).trim() : '';
+
+        if (!stage_of_reclassification) {
+          const upperRemarks = remarks.toUpperCase();
+          const upperName = (nameIdx !== -1 && row[nameIdx] ? String(row[nameIdx]).trim() : '').toUpperCase();
+          if ((!first_name && !last_name) || upperName === '#N/A' || upperName === 'VACANT' || upperName === 'UNFILLED') {
+            stage_of_reclassification = 'Unfilled / Vacant';
+          } else if (upperRemarks.includes('ABOLITION')) {
+            stage_of_reclassification = 'Abolition';
+          } else {
+            stage_of_reclassification = 'For Review';
+          }
+        }
+
+        if (stage_of_reclassification === 'Unfilled / Vacant') {
           vacantCount++;
-        } else if (upperRemarks.includes('ABOLITION')) {
-          stage_of_reclassification = 'Abolition';
+        } else if (stage_of_reclassification === 'Abolition') {
           abolitionCount++;
         } else {
           forReviewCount++;
         }
 
+        const rawReclass = reclassPosIdx !== -1 && row[reclassPosIdx] ? String(row[reclassPosIdx]).trim() : '';
+        const reclass_position = (rawReclass && rawReclass.toUpperCase() !== '#N/A') ? rawReclass : null;
+
+        const new_item_no = newItemNoIdx !== -1 && row[newItemNoIdx] ? String(row[newItemNoIdx]).trim() : null;
+
+        const rawTest = isTestIdx !== -1 && row[isTestIdx] ? String(row[isTestIdx]).toLowerCase().trim() : '';
+        const is_test = ['true', '1', 'yes', 't'].includes(rawTest);
+
+        const rawReupload = reuploadIdx !== -1 && row[reuploadIdx] ? String(row[reuploadIdx]).toLowerCase().trim() : '';
+        const reupload = ['true', '1', 'yes', 't'].includes(rawReupload);
+
         placeholders.push(
-          `($${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++})`
+          `($${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++})`
         );
 
         values.push(
-          employee_id,
-          plantilla_item_number,
-          full_name,
+          item_no,
           current_position,
-          salary_grade,
+          first_name,
+          last_name,
+          email,
           region,
           division,
-          uacs_oper_dsc,
-          station_division,
-          org_cd,
-          remarks,
+          school_id,
+          school_name,
+          qs_status,
           stage_of_reclassification,
-          target_position
+          reclass_position,
+          new_item_no,
+          is_test,
+          reupload
         );
       }
 
       if (placeholders.length > 0) {
         const query = `
-          INSERT INTO incumbent_guidance_counselors (
-            employee_id,
-            plantilla_item_number,
-            full_name,
+          INSERT INTO reclass_gc (
+            item_no,
             current_position,
-            salary_grade,
+            first_name,
+            last_name,
+            email,
             region,
             division,
-            uacs_oper_dsc,
-            station_division,
-            org_cd,
-            remarks,
+            school_id,
+            school_name,
+            qs_status,
             stage_of_reclassification,
-            target_position
+            reclass_position,
+            new_item_no,
+            is_test,
+            reupload
           ) VALUES ${placeholders.join(', ')}
-          ON CONFLICT (employee_id) DO UPDATE SET
-            plantilla_item_number = EXCLUDED.plantilla_item_number,
-            full_name = EXCLUDED.full_name,
+          ON CONFLICT (item_no) DO UPDATE SET
             current_position = EXCLUDED.current_position,
-            salary_grade = EXCLUDED.salary_grade,
+            first_name = EXCLUDED.first_name,
+            last_name = EXCLUDED.last_name,
+            email = EXCLUDED.email,
             region = EXCLUDED.region,
             division = EXCLUDED.division,
-            uacs_oper_dsc = EXCLUDED.uacs_oper_dsc,
-            station_division = EXCLUDED.station_division,
-            org_cd = EXCLUDED.org_cd,
-            remarks = EXCLUDED.remarks,
+            school_id = EXCLUDED.school_id,
+            school_name = EXCLUDED.school_name,
+            qs_status = EXCLUDED.qs_status,
             stage_of_reclassification = EXCLUDED.stage_of_reclassification,
-            target_position = COALESCE(EXCLUDED.target_position, incumbent_guidance_counselors.target_position),
-            updated_at = NOW();
+            reclass_position = EXCLUDED.reclass_position,
+            new_item_no = COALESCE(EXCLUDED.new_item_no, reclass_gc.new_item_no),
+            is_test = EXCLUDED.is_test,
+            reupload = EXCLUDED.reupload,
+            updated_at = NOW()
         `;
         await client.query(query, values);
         insertedOrUpdated += chunk.length;
       }
     }
 
-    const countRes = await client.query('SELECT COUNT(*) as total FROM incumbent_guidance_counselors');
+    const countRes = await client.query('SELECT COUNT(*) as total FROM reclass_gc');
 
     res.json({
       success: true,
-      message: `Successfully ingested ${insertedOrUpdated} records from ${fileName || 'official inventory'}.`,
+      message: `Successfully ingested ${insertedOrUpdated} records into reclass_gc from ${fileName || 'official inventory'}.`,
       totalProcessed: dataRows.length,
       insertedOrUpdated,
       totalInDatabase: parseInt(countRes.rows[0]?.total || 0, 10),
@@ -1341,20 +1602,79 @@ export async function uploadReclassCsv(req, res) {
 }
 
 /**
- * Stream/download the standard Guidance Counselor Reclassification CSV template
+ * Stream/download the standard Guidance Counselor Reclassification CSV template matching reclass_gc table
+ * Automatically fetches the logged-in user's account region and division to prefill in the template
  */
 export async function downloadReclassTemplate(req, res) {
   try {
-    const csvContent = [
-      'REGION,DIVISION,UACS_OPER_DSC,ORG_CD,PLANTILLA ITEM NUMBER,POSITION TITLE,SALARY GRADE,INCUMBENT,RECLASS POSITION,REMARKS',
-      'National Capital Region (NCR),Division of Quezon City,Batasan Hills National High School,1015.01,OSEC-DECSB-GCOOR3-0001-2024,Guidance Coordinator III,16,"SANTOS, MARIA CLARA",School Counselor III,Active Incumbent',
-      'Region IV-A - CALABARZON,Division of Cavite,Dasmariñas National High School,1015.02,OSEC-DECSB-GCOOR2-0002-2024,Guidance Coordinator II,15,"DELA CRUZ, JUAN",School Counselor II,Active Incumbent',
-      'Region III - Central Luzon,Division of Pampanga,San Fernando High School,1015.03,OSEC-DECSB-GCOOR1-0003-2024,Guidance Coordinator I,14,#N/A,#N/A,VACANT ITEM',
-      'Region VII - Central Visayas,Division of Cebu City,Abellana National School,1015.04,OSEC-DECSB-GCOOR3-0004-2024,Guidance Coordinator III,16,"REYES, ANA LORRAINE",School Counselor III,SUBMITTED FOR ABOLITION'
-    ].join('\r\n');
+    let userRegion = '';
+    let userDivision = '';
+
+    // 1. Extract from auth token if present
+    const authHeader = req.headers['authorization'];
+    const token = (authHeader && authHeader.split(' ')[1]) || req.query.token;
+
+    if (token) {
+      try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        if (decoded?.id) {
+          const userRes = await pool.query('SELECT region, division FROM users WHERE id = $1 LIMIT 1', [decoded.id]);
+          if (userRes.rows.length > 0) {
+            userRegion = (userRes.rows[0].region || decoded.region || '').trim().toUpperCase();
+            userDivision = (userRes.rows[0].division || decoded.division || '').trim().toUpperCase();
+          } else {
+            userRegion = (decoded.region || '').trim().toUpperCase();
+            userDivision = (decoded.division || '').trim().toUpperCase();
+          }
+        } else if (decoded) {
+          userRegion = (decoded.region || '').trim().toUpperCase();
+          userDivision = (decoded.division || '').trim().toUpperCase();
+        }
+      } catch (tokenErr) {
+        console.warn('[downloadReclassTemplate] Token verification note:', tokenErr.message);
+      }
+    }
+
+    // 2. Query param fallbacks
+    if (!userRegion && req.query.region) {
+      userRegion = String(req.query.region).trim().toUpperCase();
+    }
+    if (!userDivision && req.query.division) {
+      userDivision = String(req.query.division).trim().toUpperCase();
+    }
+
+    const cleanCsvCell = (val) => {
+      if (!val) return '';
+      const str = String(val).trim().toUpperCase();
+      if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
+        return `"${str.replace(/"/g, '""')}"`;
+      }
+      return str;
+    };
+
+    const header = 'item_no,current_position,first_name,last_name,email,region,division,school_id,school_name,reclass_position';
+    const lines = [header];
+
+    if (userRegion || userDivision) {
+      const templateRow = [
+        '', // item_no
+        '', // current_position
+        '', // first_name
+        '', // last_name
+        '', // email
+        cleanCsvCell(userRegion), // region
+        cleanCsvCell(userDivision), // division
+        '', // school_id
+        '', // school_name
+        ''  // reclass_position
+      ].join(',');
+      lines.push(templateRow);
+    }
+
+    const csvContent = lines.join('\r\n') + '\r\n';
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', 'attachment; filename="DepEd_GC_Reclassification_Template.csv"');
+    res.setHeader('Content-Disposition', 'attachment; filename="DepEd GC Reclassification Template.csv"');
     res.send(csvContent);
   } catch (error) {
     console.error('[Reclass Controller - downloadReclassTemplate]', error);
@@ -1368,16 +1688,7 @@ export async function downloadReclassTemplate(req, res) {
 export async function scanReclassNosca(req, res) {
   let tempFilePath = null;
   try {
-    const userRole = req.user?.role;
-    const isRegionalOffice = 
-      userRole === 'regional_office' || 
-      userRole === 'regional_director' || 
-      userRole === 'admin' ||
-      String(req.user?.position || '').toLowerCase().trim() === 'regional office';
-
-    if (!isRegionalOffice) {
-      return res.status(403).json({ error: 'Access denied: Only Regional Office personnel may scan NOSCA documents.' });
-    }
+    // Authorized for HRMO, Regional Office, and Admin roles
 
     const { fileData, fileName } = req.body;
     if (!fileData || typeof fileData !== 'string') {
@@ -1481,41 +1792,42 @@ export async function getNoscaItems(req, res) {
 
     let query = `
       SELECT 
-        id,
-        serial_no,
-        plantilla_item_number,
-        category,
-        position_title,
-        division,
-        school_id,
-        school_name,
-        assignment_status,
-        assigned_to_incumbent_id,
-        assigned_to_employee_id,
-        assigned_at,
-        created_at,
-        updated_at
-      FROM reclassification_nosca_items
+        r.id,
+        r.new_item_no AS plantilla_item_number,
+        r.new_item_no,
+        r.category,
+        r.position AS position_title,
+        r.position,
+        r.division,
+        r.region,
+        r.school_id,
+        r.school_name,
+        COALESCE(r.new_item_no_status, 'AVAILABLE') AS assignment_status,
+        r.new_item_no_status,
+        r.reclass_gc_id AS assigned_to_incumbent_id,
+        r.reclass_gc_id,
+        r.reclass_at AS assigned_at,
+        r.created_at,
+        r.updated_at,
+        TRIM(CONCAT(COALESCE(g.first_name, ''), ' ', COALESCE(g.last_name, ''))) AS assigned_to_name,
+        g.item_no AS assigned_to_employee_id
+      FROM reclass_item_no r
+      LEFT JOIN reclass_gc g ON (r.reclass_gc_id = g.id OR (r.new_item_no IS NOT NULL AND r.new_item_no = g.new_item_no))
       WHERE 1=1
     `;
     const params = [];
 
     if (status) {
       params.push(status.toUpperCase());
-      query += ` AND assignment_status = $${params.length}`;
+      query += ` AND (r.new_item_no_status = $${params.length} OR ($${params.length} = 'AVAILABLE' AND (r.new_item_no_status IS NULL OR r.new_item_no_status = 'AVAILABLE')))`;
     }
 
     if (division && division !== 'ALL') {
       params.push(`%${division}%`);
-      query += ` AND division ILIKE $${params.length}`;
+      query += ` AND r.division ILIKE $${params.length}`;
     }
 
-    if (serialNo) {
-      params.push(serialNo);
-      query += ` AND serial_no = $${params.length}`;
-    }
-
-    query += ` ORDER BY id ASC`;
+    query += ` ORDER BY r.id ASC`;
 
     const result = await pool.query(query, params);
     res.json(result.rows);
@@ -1580,16 +1892,7 @@ export async function searchSchools(req, res) {
 export async function importNoscaItems(req, res) {
   let client;
   try {
-    const userRole = req.user?.role;
-    const isRegionalOffice = 
-      userRole === 'regional_office' || 
-      userRole === 'regional_director' || 
-      userRole === 'admin' ||
-      String(req.user?.position || '').toLowerCase().trim() === 'regional office';
-
-    if (!isRegionalOffice) {
-      return res.status(403).json({ error: 'Access denied: Only Regional Office personnel may import NOSCA items.' });
-    }
+    // Authorized for HRMO, Regional Office, and Admin roles
 
     const { serialNo, division, schoolId, schoolName, position, items, categoryBreakdown } = req.body;
     if (!Array.isArray(items) || items.length === 0) {
@@ -1624,43 +1927,40 @@ export async function importNoscaItems(req, res) {
         : 'Regional Office';
       const schName = schoolName || 'Regional Allocation Station';
 
-      // Check if item already exists in reclassification_nosca_items
+      // Check if item already exists in reclass_item_no
       const existing = await client.query(
-        'SELECT id, assignment_status, assigned_to_incumbent_id FROM reclassification_nosca_items WHERE plantilla_item_number = $1 LIMIT 1',
+        'SELECT id, new_item_no_status, reclass_gc_id FROM reclass_item_no WHERE new_item_no = $1 LIMIT 1',
         [trimmedItem]
       );
 
       if (existing.rows.length > 0) {
         const row = existing.rows[0];
         await client.query(
-          `UPDATE reclassification_nosca_items
-           SET serial_no = COALESCE($1, serial_no),
-               division = COALESCE($2, division),
-               school_id = COALESCE($3, school_id),
-               school_name = COALESCE($4, school_name),
-               position_title = COALESCE($5, position_title),
-               category = COALESCE($6, category),
+          `UPDATE reclass_item_no
+           SET division = COALESCE($1, division),
+               school_id = COALESCE($2, school_id),
+               school_name = COALESCE($3, school_name),
+               position = COALESCE($4, position),
+               category = COALESCE($5, category),
                updated_at = NOW()
-           WHERE id = $7`,
-          [serialNo || null, divName, schoolId ? String(schoolId) : null, schName, position || 'School Counselor Associate I', itemCategory, row.id]
+           WHERE id = $6`,
+          [divName, schoolId ? String(schoolId) : null, schName, position || 'School Counselor Associate I', itemCategory, row.id]
         );
         updated++;
       } else {
         await client.query(
-          `INSERT INTO reclassification_nosca_items (
-            serial_no,
-            plantilla_item_number,
+          `INSERT INTO reclass_item_no (
+            new_item_no,
             category,
-            position_title,
+            position,
             division,
             school_id,
             school_name,
-            assignment_status,
+            new_item_no_status,
             created_at,
             updated_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'AVAILABLE', NOW(), NOW())`,
+          ) VALUES ($1, $2, $3, $4, $5, $6, 'AVAILABLE', NOW(), NOW())`,
           [
-            serialNo || null,
             trimmedItem,
             itemCategory,
             position || 'School Counselor Associate I',
@@ -1695,22 +1995,13 @@ export async function importNoscaItems(req, res) {
 
 /**
  * Upload official NOSCA (PDF/data/items), archive document, and automatically match
- * NEW Item Numbers to personnel currently in Stage "Endorsed to SDO"
+ * NEW Item Numbers to personnel currently in Stage "Endorsed to DBM RO"
  */
 export async function uploadNoscaAndMatch(req, res) {
   let client;
   let tempFilePath = null;
   try {
-    const userRole = req.user?.role;
-    const isRegionalOffice = 
-      userRole === 'regional_office' || 
-      userRole === 'regional_director' || 
-      userRole === 'admin' ||
-      String(req.user?.position || '').toLowerCase().trim() === 'regional office';
-
-    if (!isRegionalOffice) {
-      return res.status(403).json({ error: 'Access denied: Only Regional Office personnel may upload NOSCA and match items.' });
-    }
+    // Authorized for HRMO, Regional Office, and Admin roles
 
     const { fileData, fileName, serialNo, division, items: rawItems, schoolName, position } = req.body;
     let items = Array.isArray(rawItems) ? rawItems.map(i => String(i).trim()).filter(Boolean) : [];
@@ -1812,41 +2103,36 @@ export async function uploadNoscaAndMatch(req, res) {
     ]);
     const savedDoc = docRes.rows[0];
 
-    // 2. Insert items into reclassification_nosca_items
+    // 2. Insert items into reclass_item_no
     for (const item of items) {
       await client.query(`
-        INSERT INTO reclassification_nosca_items (
-          serial_no,
-          plantilla_item_number,
+        INSERT INTO reclass_item_no (
+          new_item_no,
           category,
-          position_title,
+          position,
           division,
           school_name,
-          source_type,
-          file_name,
-          assignment_status,
+          new_item_no_status,
           created_at,
           updated_at
-        ) VALUES ($1, $2, 'ELEMENTARY', $3, $4, $5, 'pdf_scan', $6, 'AVAILABLE', NOW(), NOW())
+        ) VALUES ($1, 'ELEMENTARY', $2, $3, $4, 'AVAILABLE', NOW(), NOW())
         ON CONFLICT DO NOTHING;
       `, [
-        finalSerial,
         item,
         position || 'School Counselor Associate I',
         finalDivision,
-        schoolName || 'Regional Allocation Station',
-        finalFileName
+        schoolName || 'Regional Allocation Station'
       ]);
     }
 
-    // 3. AUTOMATIC MATCHING for personnel whose Stage is "Endorsed to SDO"
+    // 3. AUTOMATIC MATCHING for personnel whose Stage is "Endorsed to DBM RO"
     const sdoCandidatesRes = await client.query(`
-      SELECT id, employee_id, full_name, plantilla_item_number, new_item_number, division, station_division
-      FROM incumbent_guidance_counselors
-      WHERE stage_of_reclassification = 'Endorsed to SDO'
+      SELECT id, item_no, first_name, last_name, TRIM(CONCAT(COALESCE(first_name, ''), ' ', COALESCE(last_name, ''))) AS full_name, item_no AS plantilla_item_number, new_item_no AS new_item_number, division
+      FROM reclass_gc
+      WHERE stage_of_reclassification IN ('Endorsed to DBM RO', 'Approved')
       ORDER BY 
-        CASE WHEN new_item_number IS NULL OR new_item_number = '' THEN 0 ELSE 1 END,
-        CASE WHEN (division ILIKE '%' || $1 || '%' OR station_division ILIKE '%' || $1 || '%') THEN 0 ELSE 1 END,
+        CASE WHEN new_item_no IS NULL OR new_item_no = '' THEN 0 ELSE 1 END,
+        CASE WHEN (division ILIKE '%' || $1 || '%') THEN 0 ELSE 1 END,
         id ASC;
     `, [finalDivision.replace(/^Division of\s+/i, '')]);
 
@@ -1864,43 +2150,36 @@ export async function uploadNoscaAndMatch(req, res) {
 
       // Update candidate record
       await client.query(`
-        UPDATE incumbent_guidance_counselors
-        SET new_item_number = $1,
-            nosca_serial_no = $2,
-            nosca_file_name = $3,
-            nosca_uploaded_at = NOW(),
-            dbm_status = 'With DBM NOSCA',
+        UPDATE reclass_gc
+        SET new_item_no = $1,
+            stage_of_reclassification = 'Approved',
             updated_at = NOW()
-        WHERE id = $4;
-      `, [newItemNo, finalSerial, finalFileName, candidate.id]);
+        WHERE id = $2;
+      `, [newItemNo, candidate.id]);
 
-      // Sync to reclassification_application
+      // Sync to reclass_applications
       await client.query(`
-        UPDATE reclassification_application
-        SET new_item_number = $1,
-            nosca_serial_no = $2,
-            nosca_file_name = $3,
-            nosca_uploaded_at = NOW(),
+        UPDATE reclass_applications
+        SET new_item_no = $1,
             updated_at = NOW()
-        WHERE incumbent_id = $4;
-      `, [newItemNo, finalSerial, finalFileName, candidate.id]);
+        WHERE reclass_gc_id = $2;
+      `, [newItemNo, candidate.id]);
 
-      // Mark in reclassification_nosca_items as ASSIGNED
+      // Mark in reclass_item_no as ASSIGNED
       await client.query(`
-        UPDATE reclassification_nosca_items
-        SET assignment_status = 'ASSIGNED',
-            assigned_to_incumbent_id = $1,
-            assigned_to_employee_id = $2,
-            assigned_at = NOW(),
+        UPDATE reclass_item_no
+        SET new_item_no_status = 'ASSIGNED',
+            reclass_gc_id = $1,
+            reclass_at = NOW(),
             updated_at = NOW()
-        WHERE plantilla_item_number = $3;
-      `, [candidate.id, candidate.employee_id, newItemNo]);
+        WHERE new_item_no = $2;
+      `, [candidate.id, newItemNo]);
 
       matchedCount++;
       matchedPersonnel.push({
         id: candidate.id,
         fullName: candidate.full_name,
-        previousItemNumber: candidate.plantilla_item_number,
+        previousItemNumber: candidate.item_no,
         newItemNumber: newItemNo,
         serialNo: finalSerial
       });
@@ -1917,7 +2196,7 @@ export async function uploadNoscaAndMatch(req, res) {
 
     return res.json({
       success: true,
-      message: `NOSCA "${finalFileName}" uploaded successfully! Extracted ${items.length} item(s) and automatically linked ${matchedCount} personnel Endorsed to SDO.`,
+      message: `NOSCA "${finalFileName}" uploaded successfully! Extracted ${items.length} item(s) and automatically linked ${matchedCount} candidate(s).`,
       serialNo: finalSerial,
       fileName: finalFileName,
       division: finalDivision,
@@ -1957,8 +2236,11 @@ export async function getNoscaDocuments(req, res) {
         d.assigned_count,
         d.uploaded_by,
         d.uploaded_at,
-        d.metadata,
-        (SELECT COUNT(*) FROM incumbent_guidance_counselors i WHERE i.nosca_serial_no = d.serial_no) AS actual_linked_count
+        COALESCE(d.assigned_count, (
+          SELECT COUNT(*) 
+          FROM reclass_gc gc 
+          WHERE gc.nosca_serial_no = d.serial_no AND gc.new_item_no IS NOT NULL
+        )) AS actual_linked_count
       FROM reclassification_nosca_documents d
       ORDER BY d.uploaded_at DESC;
     `);
@@ -1975,6 +2257,20 @@ export async function getNoscaDocuments(req, res) {
 export async function updateIncumbentNoscaItem(req, res) {
   let client;
   try {
+    const role = String(req.user?.role || '').toLowerCase().trim();
+    const userPosition = String(req.user?.position || '').toLowerCase().trim();
+    const isRegional = 
+      role === 'regional_office' || 
+      role === 'regional_director' || 
+      (role.includes('regional') && role !== 'admin' && role !== 'superadmin') ||
+      userPosition === 'regional office';
+
+    if (isRegional && role !== 'admin' && role !== 'superadmin') {
+      return res.status(403).json({
+        error: 'Access restricted: Assigning plantilla item numbers and appointments is restricted to Division HRMO accounts.'
+      });
+    }
+
     const { id } = req.params;
     const { newItemNumber, serialNo, fileName } = req.body;
 
@@ -1985,76 +2281,69 @@ export async function updateIncumbentNoscaItem(req, res) {
 
     if (cleanItemNo) {
       await client.query(`
-        UPDATE incumbent_guidance_counselors
-        SET new_item_number = $1,
-            nosca_serial_no = COALESCE($2, nosca_serial_no, 'MANUAL-NOSCA'),
-            nosca_file_name = COALESCE($3, nosca_file_name, 'NOSCA_Manual.pdf'),
-            nosca_uploaded_at = COALESCE(nosca_uploaded_at, NOW()),
-            dbm_status = 'With DBM NOSCA',
+        UPDATE reclass_gc
+        SET new_item_no = $1,
+            stage_of_reclassification = 'Approved',
             updated_at = NOW()
-        WHERE id = $4;
-      `, [cleanItemNo, serialNo || null, fileName || null, id]);
+        WHERE id = $2;
+      `, [cleanItemNo, id]);
 
       await client.query(`
-        UPDATE reclassification_application
-        SET new_item_number = $1,
-            nosca_serial_no = COALESCE($2, nosca_serial_no, 'MANUAL-NOSCA'),
-            nosca_file_name = COALESCE($3, nosca_file_name, 'NOSCA_Manual.pdf'),
-            nosca_uploaded_at = COALESCE(nosca_uploaded_at, NOW()),
+        UPDATE reclass_applications
+        SET new_item_no = $1,
             updated_at = NOW()
-        WHERE incumbent_id = $4;
-      `, [cleanItemNo, serialNo || null, fileName || null, id]);
+        WHERE reclass_gc_id = $2;
+      `, [cleanItemNo, id]);
 
       await client.query(`
-        INSERT INTO reclassification_nosca_items (
-          serial_no,
-          plantilla_item_number,
+        INSERT INTO reclass_item_no (
+          new_item_no,
           category,
-          position_title,
-          assignment_status,
-          assigned_to_incumbent_id,
-          assigned_at,
+          position,
+          new_item_no_status,
+          reclass_gc_id,
+          reclass_at,
           created_at,
           updated_at
-        ) VALUES ($1, $2, 'ELEMENTARY', 'School Counselor Associate I', 'ASSIGNED', $3, NOW(), NOW(), NOW())
-        ON CONFLICT (plantilla_item_number) 
-        DO UPDATE SET
-          assignment_status = 'ASSIGNED',
-          assigned_to_incumbent_id = EXCLUDED.assigned_to_incumbent_id,
-          assigned_at = NOW(),
-          updated_at = NOW();
-      `, [serialNo || 'MANUAL-NOSCA', cleanItemNo, id]);
+        ) VALUES ($1, 'ELEMENTARY', 'School Counselor Associate I', 'ASSIGNED', $2, NOW(), NOW(), NOW())
+        ON CONFLICT DO NOTHING;
+      `, [cleanItemNo, id]);
+
+      await client.query(`
+        UPDATE reclass_item_no
+        SET new_item_no_status = 'ASSIGNED',
+            reclass_gc_id = $1,
+            reclass_at = NOW(),
+            updated_at = NOW()
+        WHERE new_item_no = $2;
+      `, [id, cleanItemNo]);
     } else {
       // Unlink item
       await client.query(`
-        UPDATE incumbent_guidance_counselors
-        SET new_item_number = NULL,
-            nosca_serial_no = NULL,
-            nosca_file_name = NULL,
-            nosca_uploaded_at = NULL,
-            dbm_status = 'With DBM Request',
+        UPDATE reclass_gc
+        SET new_item_no = NULL,
+            stage_of_reclassification = CASE
+              WHEN stage_of_reclassification = 'Approved' THEN 'Endorsed to DBM RO'
+              ELSE stage_of_reclassification
+            END,
             updated_at = NOW()
         WHERE id = $1;
       `, [id]);
 
       await client.query(`
-        UPDATE reclassification_application
-        SET new_item_number = NULL,
-            nosca_serial_no = NULL,
-            nosca_file_name = NULL,
-            nosca_uploaded_at = NULL,
+        UPDATE reclass_applications
+        SET new_item_no = NULL,
             updated_at = NOW()
-        WHERE incumbent_id = $1;
+        WHERE reclass_gc_id = $1;
       `, [id]);
 
       await client.query(`
-        UPDATE reclassification_nosca_items
-        SET assignment_status = 'AVAILABLE',
-            assigned_to_incumbent_id = NULL,
-            assigned_to_employee_id = NULL,
-            assigned_at = NULL,
+        UPDATE reclass_item_no
+        SET new_item_no_status = 'AVAILABLE',
+            reclass_gc_id = NULL,
+            reclass_at = NULL,
             updated_at = NOW()
-        WHERE assigned_to_incumbent_id = $1;
+        WHERE reclass_gc_id = $1;
       `, [id]);
     }
 

@@ -54,15 +54,15 @@ export async function runMigration() {
       CREATE INDEX IF NOT EXISTS idx_nosca_docs_serial ON reclassification_nosca_documents(serial_no);
     `);
 
-    // 5. Seed test/sample personnel with 'Endorsed to SDO' if none exist, so the user can immediately experience the tab!
+    // 5. Seed test/sample personnel with 'Endorsed to DBM RO' if none exist, so the user can immediately experience the tab!
     const sdoCountRes = await client.query(`
       SELECT COUNT(*) as count 
       FROM incumbent_guidance_counselors 
-      WHERE stage_of_reclassification = 'Endorsed to SDO';
+      WHERE stage_of_reclassification = 'Endorsed to DBM RO';
     `);
 
     if (parseInt(sdoCountRes.rows[0].count, 10) === 0) {
-      console.log('[Migration] Promoting sample incumbents to "Endorsed to SDO" for immediate tracking demo...');
+      console.log('[Migration] Promoting sample incumbents to "Endorsed to DBM RO" for immediate tracking demo...');
       
       // Select 6 filled candidates across different divisions
       const candidates = await client.query(`
@@ -73,8 +73,8 @@ export async function runMigration() {
       `);
 
       if (candidates.rows.length > 0) {
-        // First 3: Endorsed to SDO with NOSCA already uploaded & new item assigned
-        // Next 3: Endorsed to SDO with NOSCA pending upload
+        // First 3: Endorsed to DBM RO with NOSCA already uploaded & new item assigned
+        // Next 3: Endorsed to DBM RO with NOSCA pending upload
         for (let i = 0; i < candidates.rows.length; i++) {
           const row = candidates.rows[i];
           const hasNosca = i < 3;
@@ -84,22 +84,20 @@ export async function runMigration() {
 
           await client.query(`
             UPDATE incumbent_guidance_counselors
-            SET stage_of_reclassification = 'Endorsed to SDO',
+            SET stage_of_reclassification = 'Endorsed to DBM RO',
                 target_position = 'School Counselor Associate I',
                 actual_position = 'School Counselor Associate I',
                 reclass_position = 'School Counselor Associate I',
                 new_item_number = $1,
                 nosca_serial_no = $2,
                 nosca_file_name = $3,
-                nosca_uploaded_at = $4,
-                dbm_status = $5
-            WHERE id = $6;
+                nosca_uploaded_at = $4
+            WHERE id = $5;
           `, [
             newItemNo,
             serialNo,
             fileName,
             hasNosca ? new Date() : null,
-            hasNosca ? 'With DBM NOSCA' : 'With DBM Request',
             row.id
           ]);
 

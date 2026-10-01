@@ -175,35 +175,31 @@ export const savedClusters = pgTable("saved_clusters", {
 	}
 });
 
-export const reclassificationApplication = pgTable("reclassification_application", {
+export const reclassApplications = pgTable("reclass_applications", {
 	id: serial("id").primaryKey().notNull(),
-	applicationNumber: varchar("application_number", { length: 100 }).notNull(),
-	applicantId: integer("applicant_id").references(() => applicants.id, { onDelete: "cascade" }),
-	incumbentId: integer("incumbent_id").references(() => incumbentGuidanceCounselors.id, { onDelete: "set null" }),
-	region: varchar("region", { length: 100 }),
+	reclassGcId: integer("reclass_gc_id").references(() => reclassGc.id, { onDelete: "set null" }),
+	itemNo: varchar("item_no", { length: 150 }),
+	currentPosition: varchar("current_position", { length: 255 }),
+	region: varchar("region", { length: 255 }),
 	division: varchar("division", { length: 255 }),
 	schoolId: varchar("school_id", { length: 50 }),
-	positionTitle: varchar("position_title", { length: 255 }).notNull(),
-	currentItemNumber: varchar("current_item_number", { length: 100 }),
-	qsStatus: varchar("qs_status", { length: 100 }).default('Pending Review'),
-	indicativePosition: varchar("indicative_position", { length: 255 }),
-	actualPosition: varchar("actual_position", { length: 255 }),
-	newItemNumber: varchar("new_item_number", { length: 100 }),
-	stageOfReclassification: varchar("stage_of_reclassification", { length: 100 }).default('For Review'),
-	documents: jsonb("documents").default([]),
+	schoolName: varchar("school_name", { length: 255 }),
+	reclassPosition: varchar("reclass_position", { length: 255 }),
+	newItemNo: varchar("new_item_no", { length: 150 }),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow(),
 },
 (table) => {
 	return {
-		idxReclassAppNum: index("idx_reclass_app_num").on(table.applicationNumber),
-		idxReclassApplicantId: index("idx_reclass_applicant_id").on(table.applicantId),
-		idxReclassIncumbentId: index("idx_reclass_incumbent_id").on(table.incumbentId),
-		reclassificationApplicationAppNumKey: unique("reclassification_application_application_number_unique").on(table.applicationNumber),
+		idxReclassGcId: index("idx_reclass_applications_gc_id").on(table.reclassGcId),
+		idxItemNo: index("idx_reclass_applications_item_no").on(table.itemNo),
+		idxDivision: index("idx_reclass_applications_division").on(table.division),
+		idxSchoolId: index("idx_reclass_applications_school_id").on(table.schoolId),
 	}
 });
 
-export const reclassificationApplications = reclassificationApplication;
+export const reclassificationApplication = reclassApplications;
+export const reclassificationApplications = reclassApplications;
 
 export const adminConversationList = pgTable("admin_conversation_list", {
 	id: uuid("id"),
@@ -564,60 +560,74 @@ export const vacancies = pgTable("vacancies", {
 	}
 });
 
-export const incumbentGuidanceCounselors = pgTable("incumbent_guidance_counselors", {
+export const reclassGc = pgTable("reclass_gc", {
 	id: serial("id").primaryKey().notNull(),
-	employeeId: text("employee_id").notNull(),
-	fullName: varchar("full_name", { length: 255 }).notNull(),
-	currentPosition: varchar("current_position", { length: 255 }).notNull(),
-	stationDivision: varchar("station_division", { length: 255 }).notNull(),
-	stageOfReclassification: varchar("stage_of_reclassification", { length: 100 }).default('For Review').notNull(),
-	targetPosition: varchar("target_position", { length: 100 }),
-	actualPosition: varchar("actual_position", { length: 255 }),
-	reclassPosition: varchar("reclass_position", { length: 255 }),
-	newItemNumber: varchar("new_item_number", { length: 100 }),
+	itemNo: varchar("item_no", { length: 150 }),
+	currentPosition: varchar("current_position", { length: 255 }),
+	firstName: varchar("first_name", { length: 150 }),
+	lastName: varchar("last_name", { length: 150 }),
+	email: varchar("email", { length: 255 }),
 	region: varchar("region", { length: 255 }),
-	division: varchar("division", { length: 255 }),
-	uacsOperDsc: text("uacs_oper_dsc"),
-	orgCd: varchar("org_cd", { length: 100 }),
-	plantillaItemNumber: varchar("plantilla_item_number", { length: 150 }),
-	salaryGrade: varchar("salary_grade", { length: 50 }),
-	remarks: text("remarks"),
-	documentChecklist: jsonb("document_checklist").default([]),
-	qsEvaluation: jsonb("qs_evaluation").default({}),
-	qsEvalResult: varchar("qs_eval_result", { length: 50 }).default('PENDING'),
-	evaluatedBy: varchar("evaluated_by", { length: 255 }),
-	evaluatedAt: timestamp("evaluated_at", { withTimezone: true, mode: 'string' }),
-	evaluatorRemarks: text("evaluator_remarks"),
-	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow(),
-	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow(),
-},
-(table) => {
-	return {
-		incumbentCounselorsEmployeeIdKey: unique("incumbent_guidance_counselors_employee_id_key").on(table.employeeId),
-	}
-});
-
-export const reclassificationNoscaItems = pgTable("reclassification_nosca_items", {
-	id: serial("id").primaryKey().notNull(),
-	serialNo: varchar("serial_no", { length: 100 }),
-	plantillaItemNumber: varchar("plantilla_item_number", { length: 150 }).notNull(),
-	category: varchar("category", { length: 50 }).default('ELEMENTARY'),
-	positionTitle: varchar("position_title", { length: 255 }).default('School Counselor Associate I'),
 	division: varchar("division", { length: 255 }),
 	schoolId: varchar("school_id", { length: 50 }),
 	schoolName: varchar("school_name", { length: 255 }),
-	assignmentStatus: varchar("assignment_status", { length: 50 }).default('AVAILABLE'),
-	assignedToIncumbentId: integer("assigned_to_incumbent_id").references(() => incumbentGuidanceCounselors.id, { onDelete: "set null" }),
-	assignedToEmployeeId: text("assigned_to_employee_id"),
-	assignedAt: timestamp("assigned_at", { withTimezone: true, mode: 'string' }),
+	qsStatus: varchar("qs_status", { length: 100 }),
+	stageOfReclassification: varchar("stage_of_reclassification", { length: 100 }).default('For Review'),
+	reclassPosition: varchar("reclass_position", { length: 255 }),
+	newItemNo: varchar("new_item_no", { length: 150 }),
+	isTest: boolean("is_test").default(false),
+	reupload: boolean("reupload").default(false),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow(),
+});
+
+export const incumbentGuidanceCounselors = reclassGc;
+
+export const reclassItemNo = pgTable("reclass_item_no", {
+	id: serial("id").primaryKey().notNull(),
+	newItemNo: varchar("new_item_no", { length: 150 }),
+	category: varchar("category", { length: 50 }).default('ELEMENTARY'),
+	position: varchar("position", { length: 255 }).default('School Counselor Associate I'),
+	region: varchar("region", { length: 255 }),
+	division: varchar("division", { length: 255 }),
+	schoolId: varchar("school_id", { length: 50 }),
+	schoolName: varchar("school_name", { length: 255 }),
+	newItemNoStatus: varchar("new_item_no_status", { length: 50 }),
+	reclassGcId: integer("reclass_gc_id").references(() => incumbentGuidanceCounselors.id, { onDelete: "set null" }),
+	reclassAt: timestamp("reclass_at", { withTimezone: true, mode: 'string' }),
 	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow(),
 	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow(),
 },
 (table) => {
 	return {
-		noscaItemNoIdx: index("idx_nosca_items_item_no").on(table.plantillaItemNumber),
-		noscaSerialIdx: index("idx_nosca_items_serial").on(table.serialNo),
-		noscaStatusIdx: index("idx_nosca_items_status").on(table.assignmentStatus),
-		noscaAssignedIdx: index("idx_nosca_items_assigned").on(table.assignedToIncumbentId),
+		newItemNoIdx: index("idx_reclass_item_no_new_item").on(table.newItemNo),
+		statusIdx: index("idx_reclass_item_no_status").on(table.newItemNoStatus),
+		reclassGcIdx: index("idx_reclass_item_no_gc_id").on(table.reclassGcId),
+		divisionIdx: index("idx_reclass_item_no_division").on(table.division),
+		schoolIdIdx: index("idx_reclass_item_no_school_id").on(table.schoolId),
+	}
+});
+
+export const reeclassItemNo = reclassItemNo;
+export const reclassNewItemNo = reclassItemNo;
+export const reclassificationNoscaItems = reclassItemNo;
+
+export const reclassDocuments = pgTable("reclass_documents", {
+	id: serial("id").primaryKey().notNull(),
+	fileUrl: text("file_url"),
+	fileName: varchar("file_name", { length: 255 }),
+	remarks: text("remarks"),
+	status: varchar("status", { length: 50 }),
+	reclassApplicationId: integer("reclass_application_id"),
+	plantillaItemNumber: varchar("plantilla_item_number", { length: 255 }),
+	documentTitle: varchar("document_title", { length: 255 }),
+	uploadedAt: timestamp("uploaded_at", { withTimezone: true, mode: 'string' }).defaultNow(),
+	isTest: boolean("is_test").default(false),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow(),
+},
+(table) => {
+	return {
+		reclassDocsStatusIdx: index("idx_reclass_documents_status").on(table.status),
+		reclassDocsItemIdx: index("idx_reclass_documents_item_no").on(table.plantillaItemNumber),
 	}
 });

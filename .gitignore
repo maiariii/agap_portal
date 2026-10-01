@@ -28,6 +28,7 @@ yarn-error.log*
 # Editor & System files
 .vscode/
 .idea/
+*.code-workspace
 .DS_Store
 Thumbs.db
 

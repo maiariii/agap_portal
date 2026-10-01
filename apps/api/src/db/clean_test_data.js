@@ -5,7 +5,7 @@ async function clean() {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    await client.query('DELETE FROM notifications');
+    // await client.query('DELETE FROM notifications'); // table dropped
     await client.query('DELETE FROM qual_evals');
     await client.query('DELETE FROM application_history');
     await client.query('DELETE FROM applications');

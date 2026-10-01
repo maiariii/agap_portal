@@ -42,37 +42,37 @@ export async function importInventoryCSV() {
 
   try {
     // 1. Ensure table and columns exist
-    console.log('[CSV Import] Ensuring schema columns exist on incumbent_guidance_counselors...');
+    console.log('[CSV Import] Ensuring schema columns exist on reclass_gc...');
     await client.query(`
-      CREATE TABLE IF NOT EXISTS incumbent_guidance_counselors (
+      CREATE TABLE IF NOT EXISTS reclass_gc (
         id SERIAL PRIMARY KEY,
-        employee_id TEXT UNIQUE NOT NULL,
-        full_name VARCHAR(255) NOT NULL,
-        current_position VARCHAR(255) NOT NULL,
-        station_division VARCHAR(255) NOT NULL,
-        stage_of_reclassification VARCHAR(100) NOT NULL DEFAULT 'For Review',
-        target_position VARCHAR(100),
+        item_no VARCHAR(150),
+        current_position VARCHAR(255),
+        first_name VARCHAR(150),
+        last_name VARCHAR(150),
+        email VARCHAR(255),
+        region VARCHAR(255),
+        division VARCHAR(255),
+        school_id VARCHAR(50),
+        school_name VARCHAR(255),
+        qs_status VARCHAR(100),
+        stage_of_reclassification VARCHAR(100) DEFAULT 'For Review',
+        reclass_position VARCHAR(255),
+        new_item_no VARCHAR(150),
+        is_test BOOLEAN DEFAULT false,
+        reupload BOOLEAN DEFAULT false,
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
 
-      ALTER TABLE incumbent_guidance_counselors
-        ADD COLUMN IF NOT EXISTS region VARCHAR(255),
-        ADD COLUMN IF NOT EXISTS division VARCHAR(255),
-        ADD COLUMN IF NOT EXISTS uacs_oper_dsc TEXT,
-        ADD COLUMN IF NOT EXISTS org_cd VARCHAR(100),
-        ADD COLUMN IF NOT EXISTS plantilla_item_number VARCHAR(150),
-        ADD COLUMN IF NOT EXISTS salary_grade VARCHAR(50),
-        ADD COLUMN IF NOT EXISTS target_position VARCHAR(100),
-        ADD COLUMN IF NOT EXISTS remarks TEXT;
-
-      CREATE INDEX IF NOT EXISTS idx_incumbent_item_no ON incumbent_guidance_counselors(plantilla_item_number);
-      CREATE INDEX IF NOT EXISTS idx_incumbent_region ON incumbent_guidance_counselors(region);
-      CREATE INDEX IF NOT EXISTS idx_incumbent_division ON incumbent_guidance_counselors(division);
+      CREATE INDEX IF NOT EXISTS idx_reclass_gc_item_no ON reclass_gc(item_no);
+      CREATE INDEX IF NOT EXISTS idx_reclass_gc_region ON reclass_gc(region);
+      CREATE INDEX IF NOT EXISTS idx_reclass_gc_division ON reclass_gc(division);
+      CREATE INDEX IF NOT EXISTS idx_reclass_gc_school_id ON reclass_gc(school_id);
     `);
 
     // Remove dummy sample records if any
-    await client.query("DELETE FROM incumbent_guidance_counselors WHERE employee_id LIKE 'EMP-GC-%'");
+    await client.query("DELETE FROM reclass_gc WHERE employee_id LIKE 'EMP-GC-%'");
 
     // 2. Read and parse CSV
     const fileStream = fs.createReadStream(csvPath);
@@ -134,67 +134,66 @@ export async function importInventoryCSV() {
           stage_of_reclassification = 'Abolition';
         }
 
+        let first_name = null;
+        let last_name = null;
+        if (rawName && rawName.includes(',')) {
+          const parts = rawName.split(',');
+          last_name = parts[0]?.trim() || null;
+          first_name = parts.slice(1).join(' ')?.trim() || null;
+        } else if (rawName) {
+          const parts = rawName.split(' ');
+          first_name = parts[0]?.trim() || null;
+          last_name = parts.slice(1).join(' ')?.trim() || null;
+        }
+
+        const school_name = uacs_oper_dsc || null;
+        const school_id = null;
+
         placeholders.push(
-          `($${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++})`
+          `($${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++}, $${pIdx++})`
         );
 
         values.push(
-          employee_id,
-          plantilla_item_number,
-          full_name,
+          plantilla_item_number || null,
           current_position,
-          salary_grade,
+          first_name,
+          last_name,
+          null, // email
           region,
           division,
-          uacs_oper_dsc,
-          station_division,
-          org_cd,
-          remarks,
+          school_id,
+          school_name,
+          'PENDING', // qs_status
           stage_of_reclassification,
-          target_position
+          target_position // reclass_position
         );
       }
 
       const query = `
-        INSERT INTO incumbent_guidance_counselors (
-          employee_id,
-          plantilla_item_number,
-          full_name,
+        INSERT INTO reclass_gc (
+          item_no,
           current_position,
-          salary_grade,
+          first_name,
+          last_name,
+          email,
           region,
           division,
-          uacs_oper_dsc,
-          station_division,
-          org_cd,
-          remarks,
+          school_id,
+          school_name,
+          qs_status,
           stage_of_reclassification,
-          target_position
+          reclass_position
         ) VALUES ${placeholders.join(', ')}
-        ON CONFLICT (employee_id) DO UPDATE SET
-          plantilla_item_number = EXCLUDED.plantilla_item_number,
-          full_name = EXCLUDED.full_name,
-          current_position = EXCLUDED.current_position,
-          salary_grade = EXCLUDED.salary_grade,
-          region = EXCLUDED.region,
-          division = EXCLUDED.division,
-          uacs_oper_dsc = EXCLUDED.uacs_oper_dsc,
-          station_division = EXCLUDED.station_division,
-          org_cd = EXCLUDED.org_cd,
-          remarks = EXCLUDED.remarks,
-          stage_of_reclassification = EXCLUDED.stage_of_reclassification,
-          target_position = EXCLUDED.target_position,
-          updated_at = NOW();
       `;
 
       await client.query(query, values);
       insertedCount += chunk.length;
     }
 
-    console.log(`[CSV Import] Successfully imported ${insertedCount} rows into incumbent_guidance_counselors!`);
+    console.log(`[CSV Import] Successfully imported ${insertedCount} rows into reclass_gc!`);
 
     // Verify final count
-    const countRes = await client.query('SELECT COUNT(*) as total, COUNT(DISTINCT plantilla_item_number) as unique_items FROM incumbent_guidance_counselors');
+    const countRes = await client.query('SELECT COUNT(*) as total, COUNT(DISTINCT plantilla_item_number) as unique_items FROM reclass_gc');
     console.log('[CSV Import] Database verification:', countRes.rows[0]);
 
     return countRes.rows[0];

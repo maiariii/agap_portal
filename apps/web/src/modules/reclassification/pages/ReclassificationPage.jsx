@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { apiFetch } from '../../../config/api.js';
 import { useToast } from '../../../middleware/ToastProvider.jsx';
 import { useAuth } from '../../../middleware/AuthProvider.jsx';
@@ -13,77 +13,145 @@ import NoscaItemTrackingTab from '../components/NoscaItemTrackingTab.jsx';
 const ALL_RECLASS_STAGES = [
   'For Review',
   'Endorsed to RO',
-  'Endorsed to DBM RO',
-  'Endorsed to SDO'
+  'Endorsed to DBM RO'
 ];
 const HRMO_RECLASS_STAGES = ['For Review', 'Endorsed to RO'];
-const RO_RECLASS_STAGES = ['Endorsed to DBM RO', 'Endorsed to SDO'];
+const RO_RECLASS_STAGES = ['Endorsed to DBM RO'];
 const APPROVED_POST_ACTION_STAGES = ['Approved'];
 const RECLASS_POSITIONS_OPTIONS = ['School Counselor I', 'School Counselor II', 'School Counselor III', 'School Counselor IV'];
 const NOSCA_POSITION_OPTIONS = [
-  'School Counselor Associate I',
   'School Counselor I',
   'School Counselor II',
   'School Counselor III',
-  'School Counselor IV',
-  'Guidance Counselor I',
-  'Guidance Coordinator III'
+  'School Counselor IV'
 ];
 
 const DEFAULT_REQUIRED_DOCUMENTS = [
   // Required requirements (5 items - unlock QS Evaluation)
-  { id: 'loi', label: 'Letter of intent addressed to the Head of Office or highest human resource officer', required: true },
-  { id: 'pds', label: 'Duly accomplished Personal Data Sheet (PDS, CS Form No. 212, Revised 2017) and Work Experience Sheet, if applicable', required: true },
-  { id: 'eligibility', label: 'Photocopy of Certificate of Eligibility/Report of Rating, if applicable', required: true },
-  { id: 'tor', label: 'Photocopy of scholastic/academic records such as Transcript of Records (TOR) and Diploma, including graduate and post-graduate units/degrees, if available', required: true },
-  { id: 'cav', label: 'Checklist of Requirements and Omnibus Sworn Statement on the CAV of documents submitted and Data Privacy Consent Form', required: true },
+  { id: 'loi', key: 'letter_of_intent', shortTitle: 'Letter of Intent', label: 'Letter of intent addressed to the Head of Office or highest human resource officer', required: true },
+  { id: 'pds', key: 'pds', shortTitle: 'Personal Data Sheet (PDS)', label: 'Duly accomplished Personal Data Sheet (PDS, CS Form No. 212, Revised 2017) and Work Experience Sheet, if applicable', required: true },
+  { id: 'eligibility', key: 'eligibility', shortTitle: 'Certificate of Eligibility', label: 'Photocopy of Certificate of Eligibility/Report of Rating, if applicable', required: true },
+  { id: 'tor', key: 'tor', shortTitle: 'Transcript of Records (TOR)', label: 'Photocopy of scholastic/academic records such as Transcript of Records (TOR) and Diploma, including graduate and post-graduate units/degrees, if available', required: true },
+  { id: 'cav', key: 'sworn_declaration', shortTitle: 'CAV & Omnibus Sworn Statement', label: 'Checklist of Requirements and Omnibus Sworn Statement on the CAV of documents submitted and Data Privacy Consent Form', required: true },
 
   // Other requirements (6 items - total 11 items)
-  { id: 'prc', label: 'Photocopy of valid and updated PRC License/ID, if applicable', required: false },
-  { id: 'training', label: 'Photocopy of Certificate/s of Training, if applicable', required: false },
-  { id: 'employment', label: 'Photocopy of Certificate of Employment, Contract of Service, or duly signed Service Record, whichever is/are applicable', required: false },
-  { id: 'appointment', label: 'Photocopy of latest appointment, if applicable', required: false },
-  { id: 'performance', label: 'Photocopy of the Performance Rating in the last rating period(s) covering one (1) year performance prior to the deadline of submission, if applicable', required: false },
-  { id: 'other', label: 'Other documents as may be required for comparative assessment (e.g. MOVs, or Performance Rating from relevant work experience)', required: false }
+  { id: 'prc', key: 'prc', shortTitle: 'Updated PRC License/ID', label: 'Photocopy of valid and updated PRC License/ID, if applicable', required: false },
+  { id: 'training', key: 'training_certificates', shortTitle: 'Training Certificates', label: 'Photocopy of Certificate/s of Training, if applicable', required: false },
+  { id: 'employment', key: 'work_experience', shortTitle: 'Work Experience / Service Record', label: 'Photocopy of Certificate of Employment, Contract of Service, or duly signed Service Record, whichever is/are applicable', required: false },
+  { id: 'appointment', key: 'service_record', shortTitle: 'Latest Appointment', label: 'Photocopy of latest appointment, if applicable', required: false },
+  { id: 'performance', key: 'performance_rating', shortTitle: 'Performance Rating (IPCRF)', label: 'Photocopy of the Performance Rating in the last rating period(s) covering one (1) year performance prior to the deadline of submission, if applicable', required: false },
+  { id: 'other', key: 'diploma', shortTitle: 'Other MOVs / Credentials', label: 'Other documents as may be required for comparative assessment (e.g. MOVs, or Performance Rating from relevant work experience)', required: false }
 ];
 
 const POSITION_QS_STANDARDS = {
   'School Counselor Associate I': {
+    title: 'School Counselor Associate I',
+    salaryGrade: 11,
     education: "Bachelor's degree in Guidance and Counseling or related Social Sciences (Psychology, Sociology)",
     experience: "None required (or 1 year of relevant guidance experience)",
     training: "None required (or 4 hours of relevant training)",
     eligibility: "Career Service (Professional) / RA 1080 / None required as per CSC MC"
   },
   'School Counselor I': {
-    education: "Bachelor's degree in Counseling or Master's units in Guidance and Counseling",
-    experience: "1 year of relevant experience in counseling / guidance services",
-    training: "4 hours of relevant training in counseling, psychological first aid, or guidance",
-    eligibility: "RA 1080 (Registered Guidance Counselor) or PBET / LET with Guidance specialization"
+    title: 'School Counselor I',
+    salaryGrade: 16,
+    education: "Master's degree in Guidance and Counseling; or Master's degree in Psychology",
+    experience: "None required",
+    training: "None required",
+    eligibility: "RA 1080, as amended (Guidance Counselor or Psychologist)*"
   },
   'School Counselor II': {
-    education: "Master's degree in Guidance and Counseling or allied field",
-    experience: "2 years of relevant professional guidance and counseling experience",
-    training: "8 hours of relevant training in counseling or mental health facilitation",
-    eligibility: "RA 1080 (Registered Guidance Counselor - RGC)"
+    title: 'School Counselor II',
+    salaryGrade: 18,
+    education: "Master's degree in Guidance and Counseling; or Master's degree in Psychology",
+    experience: "1 year of relevant experience involving the delivery of guidance and counseling services and career development programs, and/or implementation of mental health and well-being programs in schools or other related settings",
+    training: "8 hours of relevant training on the delivery of counseling and guidance services, and career development programs, or implementation of mental health and well-being programs in schools or other settings",
+    eligibility: "RA 1080, as amended (Guidance Counselor or Psychologist)*"
   },
   'School Counselor III': {
-    education: "Master's degree in Guidance and Counseling",
-    experience: "3 years of relevant professional guidance and counseling experience",
-    training: "16 hours of relevant training in clinical supervision or counseling management",
-    eligibility: "RA 1080 (Registered Guidance Counselor - RGC)"
+    title: 'School Counselor III',
+    salaryGrade: 20,
+    education: "Master's degree in Guidance and Counseling; or Master's degree in Psychology",
+    experience: "2 years of relevant experience involving the delivery of guidance and counseling services and career development programs, and/or implementation of mental health and well-being programs in schools or other related settings",
+    training: "16 hours of relevant training on the delivery of counseling and guidance services, and career development programs, or implementation of mental health and well-being programs in schools or other related settings",
+    eligibility: "RA 1080, as amended (Guidance Counselor or Psychologist)*"
   },
   'School Counselor IV': {
-    education: "Master's degree in Guidance and Counseling with doctoral units",
-    experience: "4 years of relevant professional guidance and counseling experience",
-    training: "24 hours of relevant advanced training in guidance and administrative leadership",
-    eligibility: "RA 1080 (Registered Guidance Counselor - RGC)"
+    title: 'School Counselor IV',
+    salaryGrade: 22,
+    education: "Master's degree in Guidance and Counseling; or Master's degree in Psychology",
+    experience: "3 years of relevant experience involving the delivery of guidance and counseling services and career development programs, and/or implementation of mental health and well-being programs in schools or other related settings",
+    training: "24 hours of relevant training on the delivery of counseling and guidance services, and career development programs, or implementation of mental health and well-being programs in schools or other related settings",
+    eligibility: "RA 1080, as amended (Guidance Counselor or Psychologist)*"
   },
   'Guidance Coordinator III': {
+    title: 'Guidance Coordinator III',
+    salaryGrade: 16,
     education: "Master's degree in Guidance and Counseling",
     experience: "3 years of relevant experience in coordinating guidance services",
     training: "16 hours of relevant training",
     eligibility: "RA 1080 (Registered Guidance Counselor) / PBET / LET"
   }
+};
+
+// Add uppercase aliases for robust matching
+POSITION_QS_STANDARDS['SCHOOL COUNSELOR ASSOCIATE I'] = POSITION_QS_STANDARDS['School Counselor Associate I'];
+POSITION_QS_STANDARDS['SCHOOL COUNSELOR I'] = POSITION_QS_STANDARDS['School Counselor I'];
+POSITION_QS_STANDARDS['SCHOOL COUNSELOR II'] = POSITION_QS_STANDARDS['School Counselor II'];
+POSITION_QS_STANDARDS['SCHOOL COUNSELOR III'] = POSITION_QS_STANDARDS['School Counselor III'];
+POSITION_QS_STANDARDS['SCHOOL COUNSELOR IV'] = POSITION_QS_STANDARDS['School Counselor IV'];
+POSITION_QS_STANDARDS['GUIDANCE COORDINATOR III'] = POSITION_QS_STANDARDS['Guidance Coordinator III'];
+
+const getPositionQsStandards = (posName) => {
+  if (!posName) return POSITION_QS_STANDARDS['School Counselor I'];
+  if (POSITION_QS_STANDARDS[posName]) return POSITION_QS_STANDARDS[posName];
+
+  const clean = String(posName).trim().toUpperCase();
+
+  // Direct case-insensitive lookup
+  for (const [key, val] of Object.entries(POSITION_QS_STANDARDS)) {
+    if (key.toUpperCase() === clean) return val;
+  }
+
+  // Handle Roman numerals & abbreviations
+  if (clean.includes('COUNSELOR IV') || clean.includes('COUNSELOR 4') || clean === 'SC IV' || clean === 'SC 4' || clean.includes('SCHOOL COUNSELOR IV')) {
+    return POSITION_QS_STANDARDS['School Counselor IV'];
+  }
+  if (clean.includes('COUNSELOR III') || clean.includes('COUNSELOR 3') || clean === 'SC III' || clean === 'SC 3' || clean.includes('SCHOOL COUNSELOR III')) {
+    return POSITION_QS_STANDARDS['School Counselor III'];
+  }
+  if (clean.includes('COUNSELOR II') || clean.includes('COUNSELOR 2') || clean === 'SC II' || clean === 'SC 2' || clean.includes('SCHOOL COUNSELOR II')) {
+    return POSITION_QS_STANDARDS['School Counselor II'];
+  }
+  if (clean.includes('ASSOCIATE')) {
+    return POSITION_QS_STANDARDS['School Counselor Associate I'];
+  }
+  if (clean.includes('COUNSELOR I') || clean.includes('COUNSELOR 1') || clean === 'SC I' || clean === 'SC 1' || clean.includes('SCHOOL COUNSELOR I') || clean === 'SCHOOL COUNSELOR') {
+    return POSITION_QS_STANDARDS['School Counselor I'];
+  }
+  if (clean.includes('COORDINATOR')) {
+    return POSITION_QS_STANDARDS['Guidance Coordinator III'];
+  }
+
+  return POSITION_QS_STANDARDS['School Counselor I'];
+};
+
+const extractIncumbentName = (row) => {
+  if (!row) return '#N/A';
+  // 1. Check if first_name and last_name exist (from standard CSV template)
+  const f = (row['first_name'] || row['First Name'] || row['firstname'] || row['FIRST NAME'] || row['fname'] || row['FName'] || '').trim();
+  const l = (row['last_name'] || row['Last Name'] || row['lastname'] || row['LAST NAME'] || row['lname'] || row['LName'] || '').trim();
+  if (f && l) return `${f} ${l}`;
+  if (f || l) return (f || l);
+
+  // 2. Check direct incumbent or full name column (from DepEd legacy CSV)
+  const direct = (row['INCUMBENT'] || row['Incumbent'] || row['incumbent'] || 
+                  row['FULL NAME'] || row['Full Name'] || row['full_name'] || 
+                  row['NAME'] || row['Name'] || row['name'] || '').trim();
+  if (direct) return direct;
+
+  // 3. Fallback
+  return Object.values(row)[7] || '#N/A';
 };
 
 export default function ReclassificationPage({ onBack }) {
@@ -98,12 +166,28 @@ export default function ReclassificationPage({ onBack }) {
     (String(user?.role || '').toLowerCase().includes('regional') && user?.role !== 'admin') ||
     String(user?.position || '').toLowerCase().trim() === 'regional office';
 
-  // HR Officer (SDO/HRMO) manages NOSCA upload & item allocation; Regional Office is view-only
-  const canManageNosca = Boolean(
-    (!isRegionalOffice) || 
+  // Uploading and scanning NOSCA is restricted to Division HRMO (and Admins)
+  const canUploadNosca = Boolean(
+    !isRegionalOffice || 
     user?.role === 'admin' || 
     user?.role === 'superadmin'
   );
+
+  // Assigning Plantilla Item Numbers & Appointments is restricted to Division HRMO (and Admins)
+  const canAssignItemNo = Boolean(
+    !isRegionalOffice || 
+    user?.role === 'admin' || 
+    user?.role === 'superadmin'
+  );
+
+  // Endorsing to DBM RO is restricted to Regional Office (and Admins)
+  const canEndorseToDbm = Boolean(
+    isRegionalOffice || 
+    user?.role === 'admin' || 
+    user?.role === 'superadmin'
+  );
+
+  const canManageNosca = canUploadNosca;
 
   // Regional Office NOSCA Scanner & Modal state
   const [showNoscaModal, setShowNoscaModal] = useState(false);
@@ -129,7 +213,7 @@ export default function ReclassificationPage({ onBack }) {
   const [showSchoolDropdown, setShowSchoolDropdown] = useState(false);
   const schoolSearchContainerRef = React.useRef(null);
   const [manualNoscaSerial, setManualNoscaSerial] = useState('');
-  const [manualNoscaPosition, setManualNoscaPosition] = useState('School Counselor Associate I');
+  const [manualNoscaPosition, setManualNoscaPosition] = useState('School Counselor I');
   const [manualNoscaDivision, setManualNoscaDivision] = useState('');
   const [manuallyAddedNoscaItems, setManuallyAddedNoscaItems] = useState(new Set());
   const [showQuickAddInline, setShowQuickAddInline] = useState(false);
@@ -149,7 +233,6 @@ export default function ReclassificationPage({ onBack }) {
   const [incumbentPositionFilter, setIncumbentPositionFilter] = useState('');
   const [incumbentRegionFilter, setIncumbentRegionFilter] = useState('');
   const [updatingStageId, setUpdatingStageId] = useState(null);
-  const [updatingDbmStatusId, setUpdatingDbmStatusId] = useState(null);
   const [updatingPosition, setUpdatingPosition] = useState(false);
   const [updatingPositionId, setUpdatingPositionId] = useState(null);
   const [noscaItems, setNoscaItems] = useState([]);
@@ -178,12 +261,51 @@ export default function ReclassificationPage({ onBack }) {
   const [pageSizeSdo, setPageSizeSdo] = useState(10);
   const sdoNoscaFileInputRef = React.useRef(null);
 
+  // Station Mismatch Error Popup Modal state
+  const [stationMismatchModal, setStationMismatchModal] = useState({
+    open: false,
+    fileName: '',
+    expectedRegion: '',
+    expectedDivision: '',
+    mismatches: [],
+    totalRows: 0,
+    mismatchCount: 0
+  });
+
+  // Ingested CSV Success Popup Modal state
+  const [ingestionSuccessModal, setIngestionSuccessModal] = useState({
+    open: false,
+    fileName: '',
+    insertedOrUpdated: 0,
+    totalInDatabase: 0,
+    metrics: null,
+    addedItems: [],
+    message: ''
+  });
+
   // Modal assessment decisions state
   const [modalTargetPosition, setModalTargetPosition] = useState('');
   const [modalStage, setModalStage] = useState('For Review');
   const [savingModalChanges, setSavingModalChanges] = useState(false);
   const [showIncumbentDocsModal, setShowIncumbentDocsModal] = useState(false);
   const [selectedVaultDocKey, setSelectedVaultDocKey] = useState('pds');
+  const docVaultRef = useRef(null);
+
+  // Confirmation Modal state for Endorsed to DBM RO
+  const [confirmEndorseModal, setConfirmEndorseModal] = useState({
+    open: false,
+    counselor: null,
+    isBulk: false
+  });
+  const [endorsingToDbm, setEndorsingToDbm] = useState(false);
+
+  // Confirmation Modal state for Revert Endorsement (RO side)
+  const [confirmRevertModal, setConfirmRevertModal] = useState({
+    open: false,
+    counselor: null,
+    targetStage: 'For Review'
+  });
+  const [revertingEndorsement, setRevertingEndorsement] = useState(false);
 
   // Document Checklist & QS Evaluation state
   const [docChecklist, setDocChecklist] = useState([]);
@@ -196,94 +318,11 @@ export default function ReclassificationPage({ onBack }) {
   const [evaluatorRemarks, setEvaluatorRemarks] = useState('');
   const [evaluatorName, setEvaluatorName] = useState('');
 
-  // Automated Profile-to-QS Evaluation (Runs automatically in background from candidate profile)
-  const computeAutoQs = (candidate, targetPositionName) => {
-    if (!candidate) return { education: null, experience: null, training: null, eligibility: null };
-    const targetPos = targetPositionName || candidate.target_position || candidate.reclass_position || 'School Counselor I';
-    const eduStr = String(candidate.education || candidate.assessment?.education || '').toLowerCase();
-    const expVal = Number(candidate.years_experience ?? candidate.assessment?.years_experience ?? 0);
-    const trnVal = Number(candidate.hours_of_training ?? candidate.assessment?.hours_of_training ?? 0);
-    const eligStr = String(candidate.eligibility || candidate.assessment?.eligibility || '').toLowerCase();
-
-    // Education evaluation
-    let eduMeets = false;
-    if (targetPos.includes('Associate') || targetPos === 'School Counselor I') {
-      eduMeets = eduStr.length > 3;
-    } else {
-      eduMeets = eduStr.includes('master') || eduStr.includes('ms') || eduStr.includes('ma') || eduStr.includes('phd') || eduStr.includes('doctor') || eduStr.includes('post');
-    }
-
-    // Experience evaluation
-    let reqYears = 0;
-    if (targetPos.includes('Associate I') || targetPos === 'School Counselor I') reqYears = 0;
-    else if (targetPos.includes('Associate II') || targetPos === 'School Counselor II') reqYears = 1;
-    else if (targetPos.includes('Associate III') || targetPos === 'School Counselor III') reqYears = 2;
-    else if (targetPos.includes('Associate IV') || targetPos === 'School Counselor IV') reqYears = 3;
-    else if (targetPos.includes('Coordinator')) reqYears = 3;
-    else reqYears = 1;
-    const expMeets = expVal >= reqYears;
-
-    // Training evaluation
-    let reqHours = 0;
-    if (targetPos.includes('Associate I') || targetPos === 'School Counselor I') reqHours = 0;
-    else if (targetPos.includes('Associate II') || targetPos === 'School Counselor II') reqHours = 4;
-    else if (targetPos.includes('Associate III') || targetPos === 'School Counselor III') reqHours = 8;
-    else if (targetPos.includes('Associate IV') || targetPos === 'School Counselor IV') reqHours = 16;
-    else if (targetPos.includes('Coordinator')) reqHours = 16;
-    else reqHours = 4;
-    const trnMeets = trnVal >= reqHours;
-
-    // Eligibility evaluation
-    let eligMeets = false;
-    if (targetPos.includes('Associate')) {
-      eligMeets = eligStr.includes('prof') || eligStr.includes('2nd') || eligStr.includes('csc') || eligStr.includes('career') || eligStr.includes('let') || eligStr.includes('pbet') || eligStr.includes('1080') || eligStr.includes('rgc') || eligStr.length > 0;
-    } else {
-      eligMeets = eligStr.includes('1080') || eligStr.includes('rgc') || eligStr.includes('guidance counselor') || eligStr.includes('licensed');
-    }
-
-    return {
-      education: eduMeets ? 'Meets' : 'Does Not Meet',
-      experience: expMeets ? 'Meets' : 'Does Not Meet',
-      training: trnMeets ? 'Meets' : 'Does Not Meet',
-      eligibility: eligMeets ? 'Meets' : 'Does Not Meet'
-    };
-  };
-
-  // Determine Indicative Position based on candidate qualifications
-  const determineIndicativePosition = (candidate) => {
-    if (!candidate) return 'School Counselor I';
-    const eduStr = String(candidate.education || candidate.assessment?.education || '').toLowerCase();
-    const expVal = Number(candidate.years_experience ?? candidate.assessment?.years_experience ?? 0);
-    const trnVal = Number(candidate.hours_of_training ?? candidate.assessment?.hours_of_training ?? 0);
-    const eligStr = String(candidate.eligibility || candidate.assessment?.eligibility || '').toLowerCase();
-    const targetPos = String(candidate.target_position || candidate.reclass_position || '');
-
-    const isRGC = eligStr.includes('1080') || eligStr.includes('rgc') || eligStr.includes('guidance counselor') || eligStr.includes('licensed');
-    const hasMasters = eduStr.includes('master') || eduStr.includes('ms') || eduStr.includes('ma') || eduStr.includes('phd') || eduStr.includes('doctor') || eduStr.includes('post');
-
-    if (isRGC) {
-      if (targetPos.includes('Coordinator') && hasMasters && expVal >= 3 && trnVal >= 16) {
-        return 'Guidance Coordinator III';
-      }
-      if (hasMasters) {
-        if (expVal >= 3 && trnVal >= 16) return 'School Counselor IV';
-        if (expVal >= 2 && trnVal >= 8) return 'School Counselor III';
-        if (expVal >= 1 && trnVal >= 4) return 'School Counselor II';
-      }
-      return 'School Counselor I';
-    } else {
-      // School Counselor Associate Pathway
-      if (expVal >= 3 && trnVal >= 16) return 'School Counselor Associate IV';
-      if (expVal >= 2 && trnVal >= 8) return 'School Counselor Associate III';
-      if (expVal >= 1 && trnVal >= 4) return 'School Counselor Associate II';
-      return 'School Counselor Associate I';
-    }
-  };
-
   // Sync modal state when an incumbent is opened
   useEffect(() => {
     if (selectedIncumbent) {
-      const initialPos = selectedIncumbent.actual_position || selectedIncumbent.reclass_position || selectedIncumbent.target_position || determineIndicativePosition(selectedIncumbent) || '';
+      setSelectedVaultDocKey('pds');
+      const initialPos = selectedIncumbent.actual_position || selectedIncumbent.reclass_position || selectedIncumbent.target_position || 'School Counselor I';
       setModalTargetPosition(initialPos);
       setModalStage(selectedIncumbent.stage_of_reclassification || 'For Review');
 
@@ -298,13 +337,34 @@ export default function ReclassificationPage({ onBack }) {
 
       const initialChecklist = DEFAULT_REQUIRED_DOCUMENTS.map(def => {
         if (savedDocs) {
-          const match = savedDocs.find(d => (d.id || d.key) === def.id || (def.id === 'training' && (d.id === 'training_cert' || d.id === 'seminar_cert')));
+          const match = savedDocs.find(d => {
+            const dTitle = String(d.document_title || d.shortTitle || d.label || d.name || '').toLowerCase().trim();
+            const defTitle = String(def.shortTitle || def.label || '').toLowerCase().trim();
+            const dId = String(d.id || d.key || '').toLowerCase().trim();
+            const defId = String(def.id || def.key || '').toLowerCase().trim();
+            return (
+              (dId && (dId === defId || dId === String(def.key).toLowerCase())) ||
+              (dTitle && defTitle && (dTitle === defTitle || dTitle.includes(defTitle) || defTitle.includes(dTitle))) ||
+              (def.id === 'training' && (dTitle.includes('train') || dTitle.includes('cert') || dTitle.includes('seminar') || dId === 'training_cert' || dId === 'seminar_cert')) ||
+              (def.id === 'employment' && (dTitle.includes('service') || dTitle.includes('employ') || dTitle.includes('work experience'))) ||
+              (def.id === 'appointment' && dTitle.includes('appoint')) ||
+              (def.id === 'performance' && (dTitle.includes('ipcrf') || dTitle.includes('perform'))) ||
+              (def.id === 'loi' && (dTitle.includes('loi') || dTitle.includes('intent'))) ||
+              (def.id === 'pds' && dTitle.includes('pds')) ||
+              (def.id === 'tor' && (dTitle.includes('tor') || dTitle.includes('transcript'))) ||
+              (def.id === 'cav' && (dTitle.includes('cav') || dTitle.includes('omnibus') || dTitle.includes('sworn'))) ||
+              (def.id === 'prc' && dTitle.includes('prc'))
+            );
+          });
           if (match) {
-            const isDone = Boolean(match.submitted ?? match.verified ?? match.checked);
+            const isRevision = match.status === 'for_revision' || Boolean(match.for_revision);
+            const isDone = !isRevision && Boolean(match.submitted ?? match.verified ?? match.checked ?? match.status === 'approved');
             return {
               ...def,
+              status: isRevision ? 'for_revision' : (isDone ? 'approved' : null),
               submitted: isDone,
-              verified: isDone
+              verified: isDone,
+              remarks: match.remarks || ''
             };
           }
         }
@@ -326,27 +386,33 @@ export default function ReclassificationPage({ onBack }) {
 
         return {
           ...def,
+          status: hasAttachment ? 'approved' : null,
           submitted: hasAttachment,
-          verified: hasAttachment
+          verified: hasAttachment,
+          remarks: ''
         };
       });
       setDocChecklist(initialChecklist);
 
-      // Initialize QS Evaluation (Preserve saved evaluation or evaluate automatically in background from profile)
-      const autoComputed = computeAutoQs(selectedIncumbent, initialPos);
+      // Initialize QS Evaluation (Preserve saved evaluation from database, otherwise default to unselected for manual evaluator assessment)
       if (
         selectedIncumbent.qs_evaluation &&
         typeof selectedIncumbent.qs_evaluation === 'object' &&
         (selectedIncumbent.qs_evaluation.education || selectedIncumbent.qs_evaluation.experience || selectedIncumbent.qs_evaluation.training || selectedIncumbent.qs_evaluation.eligibility)
       ) {
         setQsEvaluation({
-          education: selectedIncumbent.qs_evaluation.education || autoComputed.education,
-          experience: selectedIncumbent.qs_evaluation.experience || autoComputed.experience,
-          training: selectedIncumbent.qs_evaluation.training || autoComputed.training,
-          eligibility: selectedIncumbent.qs_evaluation.eligibility || autoComputed.eligibility
+          education: selectedIncumbent.qs_evaluation.education || null,
+          experience: selectedIncumbent.qs_evaluation.experience || null,
+          training: selectedIncumbent.qs_evaluation.training || null,
+          eligibility: selectedIncumbent.qs_evaluation.eligibility || null
         });
       } else {
-        setQsEvaluation(autoComputed);
+        setQsEvaluation({
+          education: null,
+          experience: null,
+          training: null,
+          eligibility: null
+        });
       }
 
       setEvaluatorRemarks(selectedIncumbent.evaluator_remarks || '');
@@ -355,16 +421,77 @@ export default function ReclassificationPage({ onBack }) {
     }
   }, [selectedIncumbent, currentUser]);
 
-  // Helper callbacks for Document Checklist
+  // Helper callbacks for Document Checklist & Document Vault
+  const handleSetDocStatus = (docId, newStatus) => {
+    if (isRegionalOffice) return;
+    let nextStatus = null;
+    let targetDoc = null;
+    setDocChecklist(prev =>
+      prev.map(item => {
+        if (item.id === docId) {
+          nextStatus = item.status === newStatus ? null : newStatus;
+          const isApproved = nextStatus === 'approved';
+          targetDoc = {
+            ...item,
+            status: nextStatus,
+            submitted: isApproved,
+            verified: isApproved
+          };
+          return targetDoc;
+        }
+        return item;
+      })
+    );
+
+    // Persist to reclass_documents in real-time
+    if (selectedIncumbent?.id) {
+      apiFetch(`/api/reclassification/incumbents/${selectedIncumbent.id}/documents/status`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          document_title: targetDoc?.shortTitle || targetDoc?.label || targetDoc?.title || docId,
+          status: nextStatus,
+          remarks: targetDoc?.remarks || null
+        })
+      }).catch(err => console.warn('[Reclass] Error persisting document status to reclass_documents:', err));
+    }
+  };
+
+  const handleSetDocRemarks = (docId, remarks) => {
+    if (isRegionalOffice) return;
+    let targetDoc = null;
+    setDocChecklist(prev =>
+      prev.map(item => {
+        if (item.id === docId) {
+          targetDoc = { ...item, remarks };
+          return targetDoc;
+        }
+        return item;
+      })
+    );
+
+    // Persist to reclass_documents in real-time
+    if (selectedIncumbent?.id) {
+      apiFetch(`/api/reclassification/incumbents/${selectedIncumbent.id}/documents/status`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          document_title: targetDoc?.shortTitle || targetDoc?.label || targetDoc?.title || docId,
+          status: targetDoc?.status || null,
+          remarks: remarks
+        })
+      }).catch(err => console.warn('[Reclass] Error persisting document remarks to reclass_documents:', err));
+    }
+  };
+
   const handleToggleDocCheck = (docId) => {
     if (isRegionalOffice) return;
     setDocChecklist(prev =>
       prev.map(item => {
         if (item.id === docId) {
-          const isCurrentlyDone = Boolean(item.submitted && item.verified);
+          const isCurrentlyDone = Boolean(item.submitted && item.verified && item.status === 'approved');
           const nextVal = !isCurrentlyDone;
           return {
             ...item,
+            status: nextVal ? 'approved' : null,
             submitted: nextVal,
             verified: nextVal
           };
@@ -378,14 +505,27 @@ export default function ReclassificationPage({ onBack }) {
   const handleToggleDocVerified = handleToggleDocCheck;
 
   const handleMarkAllDocsComplete = () => {
+    if (isRegionalOffice) return;
     setDocChecklist(prev =>
-      prev.map(item => ({ ...item, submitted: true, verified: true }))
+      prev.map(item => ({
+        ...item,
+        status: 'approved',
+        submitted: true,
+        verified: true
+      }))
     );
   };
 
   const handleResetAllDocs = () => {
+    if (isRegionalOffice) return;
     setDocChecklist(prev =>
-      prev.map(item => ({ ...item, submitted: false, verified: false }))
+      prev.map(item => ({
+        ...item,
+        status: null,
+        submitted: false,
+        verified: false,
+        remarks: ''
+      }))
     );
   };
 
@@ -396,13 +536,7 @@ export default function ReclassificationPage({ onBack }) {
     }));
   };
 
-  // Automated Profile-to-QS Evaluation Helper
-  const handleAutoEvaluateQs = (posOverride) => {
-    if (!selectedIncumbent) return;
-    const targetPos = posOverride || modalTargetPosition || selectedIncumbent.target_position || selectedIncumbent.reclass_position || 'School Counselor I';
-    const computed = computeAutoQs(selectedIncumbent, targetPos);
-    setQsEvaluation(computed);
-  };
+
 
   // Modals state
 
@@ -434,82 +568,18 @@ export default function ReclassificationPage({ onBack }) {
         setIncumbents(data);
       }
     } catch (err) {
-      console.warn('[Reclass] Error loading incumbents from API, using fallback data:', err);
-      setIncumbents([
-        {
-          id: 1,
-          employee_id: 'EMP-GC-001',
-          full_name: 'Elena R. Bautista',
-          current_position: 'Guidance Counselor I',
-          station_division: 'SDO Quezon City',
-          stage_of_reclassification: 'For Review',
-          reclass_position: null,
-          assessment: {
-            education: 'Master of Arts in Education (Guidance & Counseling) - UP Diliman (36 units completed)',
-            years_experience: 4.5,
-            hours_of_training: 88.0,
-            eligibility: 'RA 1080 (Registered Guidance Counselor) / CSC Professional',
-            documents: [
-              { key: 'pds', label: 'Personal Data Sheet (CS Form 212)', url: 'https://raw.githubusercontent.com/mozilla/pdf.js/ba2edeae/web/compressed.tracemonkey-pldi-09.pdf' },
-              { key: 'tor', label: 'Transcript of Records (Masteral Units)', url: 'https://raw.githubusercontent.com/mozilla/pdf.js/ba2edeae/web/compressed.tracemonkey-pldi-09.pdf' },
-              { key: 'training_certificates', label: 'National Counseling Convention Certificate', url: 'https://raw.githubusercontent.com/mozilla/pdf.js/ba2edeae/web/compressed.tracemonkey-pldi-09.pdf' },
-              { key: 'eligibility', label: 'PRC Guidance Counselor Board License Card', url: 'https://raw.githubusercontent.com/mozilla/pdf.js/ba2edeae/web/compressed.tracemonkey-pldi-09.pdf' }
-            ]
-          }
-        },
-        {
-          id: 2,
-          employee_id: 'EMP-GC-002',
-          full_name: 'Marco V. Villanueva',
-          current_position: 'Guidance Counselor II',
-          station_division: 'SDO Manila',
-          stage_of_reclassification: 'Endorsed',
-          reclass_position: 'School Counselor II',
-          assessment: {
-            education: 'Master of Arts in Guidance and Counseling (Graduated) - PNU Manila',
-            years_experience: 8.0,
-            hours_of_training: 140.0,
-            eligibility: 'RA 1080 (Registered Guidance Counselor)',
-            documents: [
-              { key: 'pds', label: 'Personal Data Sheet (CS Form 212)', url: 'https://raw.githubusercontent.com/mozilla/pdf.js/ba2edeae/web/compressed.tracemonkey-pldi-09.pdf' },
-              { key: 'tor', label: 'Masteral Degree TOR & Diploma', url: 'https://raw.githubusercontent.com/mozilla/pdf.js/ba2edeae/web/compressed.tracemonkey-pldi-09.pdf' },
-              { key: 'training_certificates', label: 'DepEd SDO Advanced Counseling Workshop', url: 'https://raw.githubusercontent.com/mozilla/pdf.js/ba2edeae/web/compressed.tracemonkey-pldi-09.pdf' },
-              { key: 'eligibility', label: 'PRC Board Certificate & ID Card', url: 'https://raw.githubusercontent.com/mozilla/pdf.js/ba2edeae/web/compressed.tracemonkey-pldi-09.pdf' }
-            ]
-          }
-        },
-        {
-          id: 3,
-          employee_id: 'EMP-GC-003',
-          full_name: 'Corazon D. Mendoza',
-          current_position: 'Guidance Counselor III',
-          station_division: 'SDO Pasig City',
-          stage_of_reclassification: 'Approved',
-          reclass_position: 'School Counselor III',
-          assessment: {
-            education: 'Doctor of Philosophy in Counseling Psychology (CAR) - DLSU; MA Guidance & Counseling',
-            years_experience: 12.5,
-            hours_of_training: 210.0,
-            eligibility: 'RA 1080 (Registered Guidance Counselor) & Career Executive Eligibility',
-            documents: [
-              { key: 'pds', label: 'Updated Personal Data Sheet (CS Form 212)', url: 'https://raw.githubusercontent.com/mozilla/pdf.js/ba2edeae/web/compressed.tracemonkey-pldi-09.pdf' },
-              { key: 'tor', label: 'Doctorate Coursework & Masteral Transcript of Records', url: 'https://raw.githubusercontent.com/mozilla/pdf.js/ba2edeae/web/compressed.tracemonkey-pldi-09.pdf' },
-              { key: 'training_certificates', label: 'National Mental Health & Crisis Intervention Training', url: 'https://raw.githubusercontent.com/mozilla/pdf.js/ba2edeae/web/compressed.tracemonkey-pldi-09.pdf' },
-              { key: 'eligibility', label: 'PRC License & Verification Certificate', url: 'https://raw.githubusercontent.com/mozilla/pdf.js/ba2edeae/web/compressed.tracemonkey-pldi-09.pdf' }
-            ]
-          }
-        }
-      ]);
+      console.error('[Reclass] Error loading incumbents from API:', err);
+      setIncumbents([]);
     } finally {
       setLoadingIncumbents(false);
     }
   };
 
-  // Load Available NOSCA Plantilla Items from dedicated table
+  // Load Available and Assigned NOSCA Plantilla Items from dedicated table
   const fetchNoscaItems = async () => {
     setLoadingNoscaItems(true);
     try {
-      const data = await apiFetch('/api/reclassification/nosca-items?status=AVAILABLE');
+      const data = await apiFetch('/api/reclassification/nosca-items');
       if (Array.isArray(data)) {
         setNoscaItems(data);
       }
@@ -537,10 +607,10 @@ export default function ReclassificationPage({ onBack }) {
 
   // Direct NOSCA upload and automatic matching for Step 4
   const handleDirectNoscaUpload = async (file) => {
-    if (!canManageNosca) {
+    if (!canUploadNosca) {
       setToast({
         title: 'Access Restricted',
-        message: 'Uploading NOSCA documents is restricted to the HR Officer and unavailable on Regional Office accounts.',
+        message: 'Uploading NOSCA documents is restricted to Regional Office and Administrator accounts.',
         type: 'error'
       });
       return;
@@ -597,12 +667,12 @@ export default function ReclassificationPage({ onBack }) {
     reader.readAsDataURL(file);
   };
 
-  // Manually link or edit NEW Item No. on an SDO endorsee
+  // Manually link or edit NEW Item No. on an SDO endorsee (Division HRMO)
   const handleSaveSdoItem = async () => {
-    if (!canManageNosca) {
+    if (!canAssignItemNo) {
       setToast({
         title: 'Access Restricted',
-        message: 'Adding or editing item numbers is restricted to the HR Officer and unavailable on Regional Office accounts.',
+        message: 'Assigning plantilla item numbers and appointments is restricted to Division HRMO accounts.',
         type: 'error'
       });
       return;
@@ -775,93 +845,15 @@ export default function ReclassificationPage({ onBack }) {
     return list;
   }, [scannedNoscaResult, noscaItems]);
 
-  // Update incumbent counselor DBM status ('With DBM Request' or 'With DBM NOSCA')
-  const handleUpdateIncumbentDbmStatus = async (incumbentId, newStatus, assignedItemNo = null, e = null) => {
-    if (e) e.stopPropagation();
-    const previousIncumbents = [...incumbents];
-    const formattedStatus = (newStatus === '' || newStatus === 'None') ? null : newStatus;
-    const isNosca = formattedStatus === 'With DBM NOSCA';
-    const cleanItem = (typeof assignedItemNo === 'string' && assignedItemNo.trim()) ? assignedItemNo.trim() : null;
-
-    // Optimistic UI update
-    setIncumbents(prev =>
-      prev.map(item => {
-        if (item.id === incumbentId) {
-          return {
-            ...item,
-            dbm_status: formattedStatus,
-            ...(isNosca ? { stage_of_reclassification: 'Approved' } : {}),
-            ...(cleanItem ? { plantilla_item_number: cleanItem } : {})
-          };
-        }
-        return item;
-      })
-    );
-    if (selectedIncumbent && selectedIncumbent.id === incumbentId) {
-      setSelectedIncumbent(prev => ({
-        ...prev,
-        dbm_status: formattedStatus,
-        ...(isNosca ? { stage_of_reclassification: 'Approved' } : {}),
-        ...(cleanItem ? { plantilla_item_number: cleanItem } : {})
-      }));
-    }
-
-    setUpdatingDbmStatusId(incumbentId);
-    try {
-      const payload = { dbm_status: formattedStatus };
-      if (cleanItem) {
-        payload.plantilla_item_number = cleanItem;
-      }
-      const updated = await apiFetch(`/api/reclassification/incumbents/${incumbentId}/dbm-status`, {
-        method: 'PUT',
-        body: JSON.stringify(payload)
-      });
-      if (updated && updated.stage_of_reclassification) {
-        setIncumbents(prev =>
-          prev.map(item => item.id === incumbentId ? { ...item, ...updated } : item)
-        );
-      }
-      fetchNoscaItems();
-      setToast({
-        type: 'success',
-        message: isNosca
-          ? `DBM status set to "With DBM NOSCA"${cleanItem ? ` (Item: ${cleanItem})` : ''} and stage updated to "Approved"!`
-          : (formattedStatus ? `DBM status set to "${formattedStatus}"` : 'DBM status reset')
-      });
-    } catch (err) {
-      console.error('[Reclass] Error updating DBM status:', err);
-      setIncumbents(previousIncumbents);
-      if (selectedIncumbent && selectedIncumbent.id === incumbentId) {
-        const orig = previousIncumbents.find(i => i.id === incumbentId);
-        if (orig) setSelectedIncumbent(orig);
-      }
-      setToast({
-        type: 'error',
-        message: err.message || 'Failed to update DBM status'
-      });
-    } finally {
-      setUpdatingDbmStatusId(null);
-    }
-  };
-
-  // Open item assignment modal if With DBM NOSCA is selected
-  const handleDbmStatusSelectChange = (counselor, newStatus, e) => {
-    if (e) e.stopPropagation();
-    if (newStatus === 'With DBM NOSCA') {
-      const currentItem = (counselor.plantilla_item_number || '').trim();
-      const isItemNA = !currentItem || currentItem.toUpperCase() === '#N/A' || currentItem.toUpperCase() === 'N/A';
-      setNoscaItemAssignModal({ open: true, personnel: counselor });
-      setSelectedNoscaItemNo(isItemNA ? '' : currentItem);
-      setCustomPlantillaNo(isItemNA ? '' : currentItem);
-      setIsCustomItemNo(isItemNA || availableNoscaItemOptions.length === 0);
-      setItemSearchTerm('');
-    } else {
-      handleUpdateIncumbentDbmStatus(counselor.id, newStatus, null, e);
-    }
-  };
-
   // Confirm NOSCA Item Assignment
   const handleConfirmNoscaItemAssignment = async () => {
+    if (!canAssignItemNo) {
+      setToast({
+        type: 'error',
+        message: 'Assigning plantilla item numbers and appointments is restricted to Division HRMO accounts.'
+      });
+      return;
+    }
     if (!noscaItemAssignModal.personnel) return;
     const counselor = noscaItemAssignModal.personnel;
     const finalItem = isCustomItemNo ? customPlantillaNo.trim() : selectedNoscaItemNo.trim();
@@ -876,9 +868,29 @@ export default function ReclassificationPage({ onBack }) {
 
     setAssigningItemLoading(true);
     try {
-      await handleUpdateIncumbentDbmStatus(counselor.id, 'With DBM NOSCA', finalItem);
-      setNoscaItemAssignModal({ open: false, personnel: null });
-      fetchNoscaItems();
+      const res = await apiFetch(`/api/reclassification/incumbents/${counselor.id}/nosca-item`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          newItemNumber: finalItem
+        })
+      });
+      if (res && res.success) {
+        setToast({
+          type: 'success',
+          message: `Assigned NOSCA Item No. ${finalItem} to ${counselor.full_name}!`
+        });
+        setNoscaItemAssignModal({ open: false, personnel: null });
+        fetchIncumbents();
+        fetchNoscaItems();
+      } else {
+        throw new Error(res?.error || 'Failed to assign NOSCA item');
+      }
+    } catch (err) {
+      console.error('[Reclass] Error assigning NOSCA item:', err);
+      setToast({
+        type: 'error',
+        message: err.message || 'Failed to assign NOSCA item'
+      });
     } finally {
       setAssigningItemLoading(false);
     }
@@ -1041,6 +1053,121 @@ export default function ReclassificationPage({ onBack }) {
     }
   };
 
+  // Confirm and persist Endorsed to DBM RO
+  const handleConfirmEndorseToDbm = async () => {
+    if (endorsingToDbm) return;
+    if (!canEndorseToDbm) {
+      setToast({
+        type: 'error',
+        message: 'Endorsing candidates to DBM Regional Office is restricted to Regional Office accounts.'
+      });
+      return;
+    }
+    setEndorsingToDbm(true);
+    try {
+      if (confirmEndorseModal.isBulk) {
+        const candidatesToUpdate = incumbents.filter(i => {
+          const s = String(i.stage_of_reclassification || '').trim().toLowerCase();
+          return s === 'endorsed to ro' || s === 'endorsed';
+        });
+
+        if (candidatesToUpdate.length === 0) {
+          setToast({ type: 'warning', message: 'No candidates currently at "Endorsed to RO" stage to endorse.' });
+          setConfirmEndorseModal({ open: false, counselor: null, isBulk: false });
+          return;
+        }
+
+        await Promise.all(
+          candidatesToUpdate.map(c =>
+            apiFetch(`/api/reclassification/incumbents/${c.id}/stage`, {
+              method: 'PUT',
+              body: JSON.stringify({ stage_of_reclassification: 'Endorsed to DBM RO' })
+            })
+          )
+        );
+
+        setIncumbents(prev =>
+          prev.map(item => {
+            const s = String(item.stage_of_reclassification || '').trim().toLowerCase();
+            if (s === 'endorsed to ro' || s === 'endorsed') {
+              return { ...item, stage_of_reclassification: 'Endorsed to DBM RO' };
+            }
+            return item;
+          })
+        );
+
+        setToast({
+          type: 'success',
+          message: `Successfully endorsed ${candidatesToUpdate.length} candidates to DBM RO! Stage updated.`
+        });
+      } else if (confirmEndorseModal.counselor) {
+        const targetId = confirmEndorseModal.counselor.id;
+        await apiFetch(`/api/reclassification/incumbents/${targetId}/stage`, {
+          method: 'PUT',
+          body: JSON.stringify({ stage_of_reclassification: 'Endorsed to DBM RO' })
+        });
+
+        setIncumbents(prev =>
+          prev.map(item =>
+            item.id === targetId ? { ...item, stage_of_reclassification: 'Endorsed to DBM RO' } : item
+          )
+        );
+
+        if (selectedIncumbent?.id === targetId) {
+          setSelectedIncumbent(prev => ({ ...prev, stage_of_reclassification: 'Endorsed to DBM RO' }));
+          setModalStage('Endorsed to DBM RO');
+        }
+
+        setToast({
+          type: 'success',
+          message: `Successfully endorsed ${confirmEndorseModal.counselor.full_name} to DBM RO! Stage updated.`
+        });
+      }
+      setConfirmEndorseModal({ open: false, counselor: null, isBulk: false });
+    } catch (err) {
+      console.error('[Reclass] Error endorsing to DBM RO:', err);
+      setToast({ type: 'error', message: err.message || 'Failed to endorse candidate to DBM RO' });
+    } finally {
+      setEndorsingToDbm(false);
+    }
+  };
+
+  // Revert endorsement handler for Regional Office
+  const handleConfirmRevertEndorsement = async () => {
+    if (!confirmRevertModal.counselor) return;
+    setRevertingEndorsement(true);
+    const targetId = confirmRevertModal.counselor.id;
+    const targetStage = confirmRevertModal.targetStage || 'For Review';
+    try {
+      await apiFetch(`/api/reclassification/incumbents/${targetId}/stage`, {
+        method: 'PUT',
+        body: JSON.stringify({ stage_of_reclassification: targetStage })
+      });
+
+      setIncumbents(prev =>
+        prev.map(item =>
+          item.id === targetId ? { ...item, stage_of_reclassification: targetStage } : item
+        )
+      );
+
+      if (selectedIncumbent?.id === targetId) {
+        setSelectedIncumbent(prev => ({ ...prev, stage_of_reclassification: targetStage }));
+        setModalStage(targetStage);
+      }
+
+      setToast({
+        type: 'success',
+        message: `Successfully reverted endorsement for ${confirmRevertModal.counselor.full_name || 'candidate'} to "${targetStage}"!`
+      });
+      setConfirmRevertModal({ open: false, counselor: null, targetStage: 'For Review' });
+    } catch (err) {
+      console.error('[Reclass] Error reverting endorsement:', err);
+      setToast({ type: 'error', message: err.message || 'Failed to revert endorsement' });
+    } finally {
+      setRevertingEndorsement(false);
+    }
+  };
+
   // Distinct regions from imported dataset
   const distinctRegions = useMemo(() => {
     return Array.from(new Set(incumbents.map(i => i.region).filter(Boolean))).sort();
@@ -1058,13 +1185,16 @@ export default function ReclassificationPage({ onBack }) {
         inc.current_position?.toLowerCase().includes(q) ||
         inc.station_division?.toLowerCase().includes(q) ||
         inc.division?.toLowerCase().includes(q) ||
+        inc.school_id?.toLowerCase().includes(q) ||
+        inc.school_name?.toLowerCase().includes(q) ||
         inc.region?.toLowerCase().includes(q) ||
         inc.uacs_oper_dsc?.toLowerCase().includes(q) ||
         inc.remarks?.toLowerCase().includes(q) ||
         (inc.target_position || inc.reclass_position)?.toLowerCase().includes(q) ||
         (inc.salary_grade && `sg ${inc.salary_grade}`.includes(q));
 
-      const matchStage = !incumbentStageFilter || inc.stage_of_reclassification === incumbentStageFilter;
+      const matchStage = !incumbentStageFilter || 
+        String(inc.stage_of_reclassification || '').trim().toLowerCase() === incumbentStageFilter.trim().toLowerCase();
       const matchRegion = !incumbentRegionFilter || inc.region === incumbentRegionFilter;
       const matchPosition = !incumbentPositionFilter || (
         incumbentPositionFilter === 'UNASSIGNED'
@@ -1078,21 +1208,20 @@ export default function ReclassificationPage({ onBack }) {
 
   // KPI Metrics for Incumbents
   const incumbentMetrics = useMemo(() => {
+    const norm = (s) => String(s || '').trim().toLowerCase();
     const total = incumbents.length;
-    const forReview = incumbents.filter((i) => i.stage_of_reclassification === 'For Review').length;
-    const endorsedToRO = incumbents.filter((i) => i.stage_of_reclassification === 'Endorsed to RO' || i.stage_of_reclassification === 'Endorsed').length;
-    const endorsedToDbm = incumbents.filter((i) => i.stage_of_reclassification === 'Endorsed to DBM RO').length;
-    const endorsedToSdo = incumbents.filter((i) => i.stage_of_reclassification === 'Endorsed to SDO').length;
-    const approved = incumbents.filter((i) => i.stage_of_reclassification === 'Approved').length;
-    const denied = incumbents.filter((i) => i.stage_of_reclassification === 'Denied').length;
-    const vacant = incumbents.filter((i) => i.stage_of_reclassification === 'Unfilled / Vacant' || i.full_name === '#N/A').length;
+    const forReview = incumbents.filter((i) => ['for review', 'for_review', 'pending', ''].includes(norm(i.stage_of_reclassification))).length;
+    const endorsedToRO = incumbents.filter((i) => ['endorsed to ro', 'endorsed', 'endorsed_to_ro'].includes(norm(i.stage_of_reclassification))).length;
+    const endorsedToDbm = incumbents.filter((i) => ['endorsed to dbm ro', 'endorsed to dbm'].includes(norm(i.stage_of_reclassification))).length;
+    const approved = incumbents.filter((i) => norm(i.stage_of_reclassification) === 'approved').length;
+    const denied = incumbents.filter((i) => ['denied', 'ineligible'].includes(norm(i.stage_of_reclassification))).length;
+    const vacant = incumbents.filter((i) => norm(i.stage_of_reclassification) === 'unfilled / vacant' || norm(i.full_name) === '#n/a').length;
     return {
       total,
       forReview,
       endorsedToRO,
       endorsedToDbm,
-      endorsedToSdo,
-      endorsed: endorsedToRO + endorsedToDbm + endorsedToSdo,
+      endorsed: endorsedToRO + endorsedToDbm,
       approved,
       denied,
       vacant
@@ -1107,20 +1236,26 @@ export default function ReclassificationPage({ onBack }) {
 
   // Step completion flags
   const isStep1Done = incumbents.length > 0 || currentStep > 1;
-  const isStep2Done = currentStep > 2 || incumbents.some(i => 
-    i.stage_of_reclassification === 'Endorsed to RO' || 
-    i.stage_of_reclassification === 'Endorsed to DBM RO' ||
-    i.stage_of_reclassification === 'Endorsed to SDO' ||
-    i.stage_of_reclassification === 'Endorsed' || 
-    i.stage_of_reclassification === 'Approved' || 
-    ((i.target_position || i.reclass_position) && (i.target_position || i.reclass_position) !== '#N/A')
-  );
-  const isStep3Done = currentStep > 3 || incumbents.some(i => i.stage_of_reclassification === 'Endorsed to SDO' || i.stage_of_reclassification === 'Approved');
-  const isStep4Done = incumbents.some(i => i.stage_of_reclassification === 'Endorsed to SDO' && i.new_item_number);
+  const isStep2Done = currentStep > 2 || incumbents.some(i => {
+    const s = String(i.stage_of_reclassification || '').trim().toLowerCase();
+    return ['endorsed to ro', 'endorsed to dbm ro', 'endorsed', 'approved'].includes(s) || 
+      ((i.target_position || i.reclass_position) && (i.target_position || i.reclass_position) !== '#N/A');
+  });
+  const isStep3Done = currentStep > 3 || incumbents.some(i => {
+    const s = String(i.stage_of_reclassification || '').trim().toLowerCase();
+    return s === 'endorsed to dbm ro' || s === 'approved';
+  });
+  const isStep4Done = incumbents.some(i => {
+    const s = String(i.stage_of_reclassification || '').trim().toLowerCase();
+    return ['endorsed to dbm ro', 'approved'].includes(s) && i.new_item_number;
+  });
 
-  // Personnel with stage "Endorsed to SDO"
+  // Personnel tracked in Tab 4 (Candidates at Endorsed to DBM RO & Approved with item)
   const sdoEndorsees = useMemo(() => {
-    return incumbents.filter(i => (i.stage_of_reclassification || '').trim() === 'Endorsed to SDO');
+    return incumbents.filter(i => {
+      const s = String(i.stage_of_reclassification || '').trim().toLowerCase();
+      return ['endorsed to dbm ro', 'endorsed to dbm', 'approved'].includes(s);
+    });
   }, [incumbents]);
 
   const sdoMetrics = useMemo(() => {
@@ -1153,9 +1288,11 @@ export default function ReclassificationPage({ onBack }) {
         const oldItem = (i.plantilla_item_number || i.employee_id || '').toLowerCase();
         const newItem = (i.new_item_number || '').toLowerCase();
         const station = (i.station_division || i.division || '').toLowerCase();
+        const schoolId = (i.school_id || '').toLowerCase();
+        const schoolName = (i.school_name || '').toLowerCase();
         const pos = (i.actual_position || i.reclass_position || i.target_position || i.current_position || '').toLowerCase();
         const serial = (i.nosca_serial_no || '').toLowerCase();
-        if (!name.includes(q) && !oldItem.includes(q) && !newItem.includes(q) && !station.includes(q) && !pos.includes(q) && !serial.includes(q)) {
+        if (!name.includes(q) && !oldItem.includes(q) && !newItem.includes(q) && !station.includes(q) && !schoolId.includes(q) && !schoolName.includes(q) && !pos.includes(q) && !serial.includes(q)) {
           return false;
         }
       }
@@ -1178,6 +1315,10 @@ export default function ReclassificationPage({ onBack }) {
           setShowIncumbentDocsModal(false);
           return;
         }
+        if (stationMismatchModal.open) {
+          setStationMismatchModal(prev => ({ ...prev, open: false }));
+          return;
+        }
         if (showAssessmentModal) setShowAssessmentModal(false);
         if (showCsvModal) setShowCsvModal(false);
         if (noscaItemAssignModal.open) setNoscaItemAssignModal({ open: false, personnel: null });
@@ -1185,61 +1326,58 @@ export default function ReclassificationPage({ onBack }) {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [showAssessmentModal, showCsvModal, noscaItemAssignModal, showIncumbentDocsModal]);
+  }, [showAssessmentModal, showCsvModal, noscaItemAssignModal, showIncumbentDocsModal, stationMismatchModal.open]);
 
-  const getStageBadge = (stage) => {
+  const getStageBadge = (rawStage) => {
+    const stage = String(rawStage || '').trim().toLowerCase();
     switch (stage) {
-      case 'Approved':
+      case 'approved':
         return {
           bg: isDark ? 'rgba(6, 95, 70, 0.25)' : '#ECFDF5',
           text: isDark ? '#34d399' : '#065F46',
           border: isDark ? 'rgba(16, 185, 129, 0.4)' : '#A7F3D0',
           icon: ''
         };
-      case 'Endorsed to RO':
-      case 'Endorsed':
+      case 'endorsed to ro':
+      case 'endorsed':
         return {
           bg: isDark ? 'rgba(30, 58, 138, 0.35)' : '#EFF6FF',
           text: isDark ? '#93c5fd' : '#1E40AF',
           border: isDark ? 'rgba(59, 130, 246, 0.4)' : '#BFDBFE',
           icon: ''
         };
-      case 'Endorsed to DBM RO':
+      case 'endorsed to dbm ro':
+      case 'endorsed to dbm':
         return {
           bg: isDark ? 'rgba(99, 102, 241, 0.25)' : '#EEF2FF',
           text: isDark ? '#a5b4fc' : '#4338CA',
           border: isDark ? 'rgba(99, 102, 241, 0.4)' : '#C7D2FE',
           icon: ''
         };
-      case 'Endorsed to SDO':
-        return {
-          bg: isDark ? 'rgba(14, 165, 233, 0.25)' : '#F0F9FF',
-          text: isDark ? '#7dd3fc' : '#0369A1',
-          border: isDark ? 'rgba(14, 165, 233, 0.4)' : '#BAE6FD',
-          icon: ''
-        };
-      case 'Denied':
+      case 'denied':
+      case 'ineligible':
         return {
           bg: isDark ? 'rgba(239, 68, 68, 0.2)' : '#FEF2F2',
           text: isDark ? '#f87171' : '#991B1B',
           border: isDark ? 'rgba(239, 68, 68, 0.4)' : '#FECACA',
           icon: ''
         };
-      case 'Unfilled / Vacant':
+      case 'unfilled / vacant':
+      case 'vacant':
         return {
           bg: isDark ? 'rgba(71, 85, 105, 0.25)' : '#F1F5F9',
           text: isDark ? '#94a3b8' : '#475569',
           border: isDark ? 'rgba(100, 116, 139, 0.4)' : '#CBD5E1',
           icon: ''
         };
-      case 'Abolition':
+      case 'abolition':
         return {
           bg: isDark ? 'rgba(153, 27, 27, 0.25)' : '#FEF2F2',
           text: isDark ? '#fca5a5' : '#991B1B',
           border: isDark ? 'rgba(239, 68, 68, 0.4)' : '#F87171',
           icon: ''
         };
-      case 'For Review':
+      case 'for review':
       default:
         return {
           bg: isDark ? 'rgba(180, 83, 9, 0.25)' : '#FFFBEB',
@@ -1454,11 +1592,12 @@ export default function ReclassificationPage({ onBack }) {
 
     const itemNo = tokens[0] || cleanItem;
     const cat = targetCat || manualNoscaCategory || 'ELEMENTARY';
+    const isJhs = cat === 'JHS';
     const serial = (customSerial !== undefined ? customSerial : manualNoscaSerial).trim() || (scannedNoscaResult?.serial_no || 'MANUAL-NOSCA');
-    const div = (customDiv !== undefined ? customDiv : manualNoscaDivision).trim() || (scannedNoscaResult?.division || (divisionFilter && divisionFilter !== 'ALL' ? divisionFilter : 'Regional Scope'));
-    const schoolId = (customSchoolId !== undefined ? customSchoolId : manualNoscaSchoolId) || scannedNoscaResult?.school_id || '';
-    const schoolName = (customSchoolName !== undefined ? customSchoolName : manualNoscaSchoolName) || scannedNoscaResult?.school_name || scannedNoscaResult?.schoolName || '';
-    const pos = (customPosition !== undefined ? customPosition : manualNoscaPosition) || (scannedNoscaResult?.position || 'School Counselor Associate I');
+    const div = (customDiv !== undefined ? customDiv : manualNoscaDivision).trim() || (scannedNoscaResult?.division || (sdoDivisionFilter && sdoDivisionFilter !== 'ALL' ? sdoDivisionFilter : 'Regional Scope'));
+    const schoolId = isJhs ? ((customSchoolId !== undefined ? customSchoolId : manualNoscaSchoolId) || scannedNoscaResult?.school_id || '') : '';
+    const schoolName = isJhs ? ((customSchoolName !== undefined ? customSchoolName : manualNoscaSchoolName) || scannedNoscaResult?.school_name || scannedNoscaResult?.schoolName || '') : '';
+    const pos = (customPosition !== undefined ? customPosition : manualNoscaPosition) || (scannedNoscaResult?.position || 'School Counselor I');
 
     // Track manually added items for visual badges
     setManuallyAddedNoscaItems(prev => {
@@ -1503,9 +1642,9 @@ export default function ReclassificationPage({ onBack }) {
         ...prev,
         serial_no: prev.serial_no || serial,
         division: prev.division || div,
-        school_id: schoolId || prev.school_id,
-        school_name: schoolName || prev.school_name || prev.schoolName,
-        schoolName: schoolName || prev.schoolName || prev.school_name,
+        school_id: isJhs ? (schoolId || prev.school_id) : prev.school_id,
+        school_name: isJhs ? (schoolName || prev.school_name || prev.schoolName) : (prev.school_name || prev.schoolName),
+        schoolName: isJhs ? (schoolName || prev.schoolName || prev.school_name) : (prev.schoolName || prev.school_name),
         position: pos || prev.position,
         items: merged,
         count: merged.length,
@@ -1546,7 +1685,7 @@ export default function ReclassificationPage({ onBack }) {
           division: scannedNoscaResult.division,
           schoolId: scannedNoscaResult.school_id || manualNoscaSchoolId || null,
           schoolName: scannedNoscaResult.school_name || scannedNoscaResult.schoolName || manualNoscaSchoolName || null,
-          position: scannedNoscaResult.position || manualNoscaPosition || 'School Counselor Associate I',
+          position: scannedNoscaResult.position || manualNoscaPosition || 'School Counselor I',
           items: selectedNoscaItems,
           categoryBreakdown: scannedNoscaResult.category_breakdown
         })
@@ -1641,7 +1780,7 @@ export default function ReclassificationPage({ onBack }) {
     return { headers, rows: previewRows, totalCount: Math.max(0, lines.length - 1) };
   };
 
-  // Handle file selection from dropzone or input
+  // Handle file selection from dropzone or input with Station Mismatch validation
   const handleSelectCsvFile = (selectedFile) => {
     if (!selectedFile) return;
     if (!selectedFile.name.toLowerCase().endsWith('.csv')) {
@@ -1649,19 +1788,176 @@ export default function ReclassificationPage({ onBack }) {
       return;
     }
 
-    setCsvFile(selectedFile);
-    setCsvFileName(selectedFile.name);
-    setUploadStats(null);
-
     const reader = new FileReader();
     reader.onload = (e) => {
       const content = e.target?.result;
-      if (typeof content === 'string') {
-        setCsvContent(content);
-        const { rows, totalCount } = parseCsvPreview(content);
-        setCsvPreviewRows(rows);
-        setCsvTotalRowsCount(totalCount);
+      if (typeof content !== 'string') return;
+
+      const storedUserRaw = localStorage.getItem('agap_user');
+      let storedUser = null;
+      try { storedUser = storedUserRaw ? JSON.parse(storedUserRaw) : null; } catch(err) {}
+
+      const rawUserRegion = (user?.region || storedUser?.region || '').trim();
+      const rawUserDivision = (user?.division || storedUser?.division || '').trim();
+
+      // Parse CSV lines
+      const lines = content.split(/\r?\n/).filter(l => l.trim().length > 0);
+      if (lines.length <= 1) {
+        setToast({ message: 'The provided CSV file has no data rows.', type: 'warning' });
+        return;
       }
+
+      const parseLine = (line) => {
+        const res = [];
+        let cur = '';
+        let inQuotes = false;
+        for (let i = 0; i < line.length; i++) {
+          const c = line[i];
+          if (c === '"') {
+            if (inQuotes && line[i + 1] === '"') {
+              cur += '"';
+              i++;
+            } else {
+              inQuotes = !inQuotes;
+            }
+          } else if (c === ',' && !inQuotes) {
+            res.push(cur.trim());
+            cur = '';
+          } else {
+            cur += c;
+          }
+        }
+        res.push(cur.trim());
+        return res;
+      };
+
+      const headers = parseLine(lines[0]);
+      const normHeaders = headers.map(h => h.toLowerCase().replace(/[^a-z0-9]/g, ''));
+
+      const regionIdx = normHeaders.findIndex(h => h.includes('region'));
+      const divisionIdx = normHeaders.findIndex(h => h.includes('division'));
+      const itemNoIdx = normHeaders.findIndex(h => h.includes('item'));
+      const nameIdx = normHeaders.findIndex(h => h.includes('name') || h.includes('first') || h.includes('incumbent'));
+
+      const normalizeStation = (str) => {
+        if (!str) return '';
+        return String(str)
+          .toUpperCase()
+          .replace(/DIVISION\s+OF\s+/gi, '')
+          .replace(/CITY\s+OF\s+/gi, '')
+          .replace(/SDO\s+/gi, '')
+          .replace(/[^A-Z0-9]/g, '')
+          .trim();
+      };
+
+      const normUserDiv = normalizeStation(rawUserDivision);
+      const normUserReg = normalizeStation(rawUserRegion);
+
+      const isMatch = (rowVal, normUser) => {
+        if (!normUser) return true; // No restriction
+        if (!rowVal || !rowVal.trim()) return false;
+        const normRow = normalizeStation(rowVal);
+        if (normRow === normUser) return true;
+        if (normRow.includes(normUser) || normUser.includes(normRow)) return true;
+        // Aliases for NCR
+        if ((normUser === 'NCR' || normUser.includes('NCR')) && (normRow.includes('NCR') || normRow.includes('NATIONALCAPITAL'))) return true;
+        if ((normUser.includes('IVA') || normUser.includes('CALABARZON')) && (normRow.includes('IVA') || normRow.includes('CALABARZON'))) return true;
+        return false;
+      };
+
+      const mismatches = [];
+      const dataRows = lines.slice(1);
+      const seenItemNosMap = new Map();
+
+      dataRows.forEach((line, idx) => {
+        const cols = parseLine(line);
+        // Skip completely empty lines
+        if (!cols.some(c => c && c.trim().length > 0)) return;
+
+        const rowReg = regionIdx !== -1 ? cols[regionIdx] : '';
+        const rowDiv = divisionIdx !== -1 ? cols[divisionIdx] : '';
+        const rawItem = (itemNoIdx !== -1 && cols[itemNoIdx]) ? cols[itemNoIdx].trim() : '';
+
+        // 1. Check for Repeated Item No (item_no must not repeat)
+        if (rawItem && rawItem !== '#N/A' && rawItem.toUpperCase() !== 'VACANT') {
+          const upperItem = rawItem.toUpperCase();
+          if (seenItemNosMap.has(upperItem)) {
+            const firstLine = seenItemNosMap.get(upperItem);
+            mismatches.push({
+              rowNumber: idx + 2,
+              itemNo: rawItem,
+              name: (nameIdx !== -1 && cols[nameIdx]) ? cols[nameIdx] : '—',
+              foundRegion: rowReg || '—',
+              foundDivision: rowDiv || '—',
+              mismatchType: `Repeated Item No (Duplicate of Line ${firstLine})`
+            });
+          } else {
+            seenItemNosMap.set(upperItem, idx + 2);
+          }
+        }
+
+        // 2. Check for Station Mismatch
+        if (rawUserDivision || rawUserRegion) {
+          const regMatches = isMatch(rowReg, normUserReg);
+          const divMatches = isMatch(rowDiv, normUserDiv);
+
+          if (!regMatches || !divMatches) {
+            mismatches.push({
+              rowNumber: idx + 2, // 1-based index (header is line 1)
+              itemNo: rawItem || `Row #${idx + 2}`,
+              name: (nameIdx !== -1 && cols[nameIdx]) ? cols[nameIdx] : '—',
+              foundRegion: rowReg || 'MISSING',
+              foundDivision: rowDiv || 'MISSING',
+              mismatchType: !divMatches && !regMatches ? 'Region & Division' : (!divMatches ? 'Division' : 'Region')
+            });
+          }
+        }
+      });
+
+      if (mismatches.length > 0) {
+        const hasDups = mismatches.some(m => m.mismatchType?.includes('Repeated'));
+        const hasStation = mismatches.some(m => !m.mismatchType?.includes('Repeated'));
+
+        // Open Validation Error Popup Modal
+        setStationMismatchModal({
+          open: true,
+          fileName: selectedFile.name,
+          expectedRegion: rawUserRegion || 'Assigned Region',
+          expectedDivision: rawUserDivision || 'Assigned Division',
+          mismatches,
+          totalRows: dataRows.length,
+          mismatchCount: mismatches.length,
+          hasDuplicateItems: hasDups,
+          hasStationMismatch: hasStation
+        });
+
+        // Reset file state so dropzone is immediately ready for redrag/redrop
+        setCsvFile(null);
+        setCsvFileName('');
+        setCsvContent('');
+        setCsvPreviewRows([]);
+        setCsvTotalRowsCount(0);
+        const fileInput = document.getElementById('step1-reclass-csv-input');
+        if (fileInput) fileInput.value = '';
+
+        setToast({
+          message: hasDups 
+            ? `Validation failed: ${mismatches.length} issue(s) detected (duplicate item numbers or station mismatches).`
+            : `Station mismatch: ${mismatches.length} record(s) do not match your assigned division.`,
+          type: 'error'
+        });
+        return;
+      }
+
+      // If all rows match, load into preview
+      setCsvFile(selectedFile);
+      setCsvFileName(selectedFile.name);
+      setUploadStats(null);
+      setCsvContent(content);
+      const { rows, totalCount } = parseCsvPreview(content);
+      setCsvPreviewRows(rows);
+      setCsvTotalRowsCount(totalCount);
+      setToast({ message: `CSV validated: ${totalCount} records match your station.`, type: 'success' });
     };
     reader.readAsText(selectedFile);
   };
@@ -1669,10 +1965,28 @@ export default function ReclassificationPage({ onBack }) {
   // Handle Download CSV Template
   const handleDownloadCsvTemplate = () => {
     try {
-      const token = localStorage.getItem('deped_token') || sessionStorage.getItem('deped_token');
-      const downloadUrl = `/api/reclassification/template-csv${token ? `?token=${encodeURIComponent(token)}` : ''}`;
-      window.open(downloadUrl, '_blank');
-      setToast({ message: 'Downloading Reclassification CSV template...', type: 'info' });
+      const token = localStorage.getItem('agap_token') || localStorage.getItem('deped_token') || sessionStorage.getItem('agap_token') || '';
+      
+      const storedUserRaw = localStorage.getItem('agap_user');
+      let storedUser = null;
+      try { storedUser = storedUserRaw ? JSON.parse(storedUserRaw) : null; } catch(e) {}
+
+      const userRegion = (user?.region || storedUser?.region || '').trim();
+      const userDivision = (user?.division || storedUser?.division || '').trim();
+
+      const queryParams = new URLSearchParams();
+      if (token) queryParams.append('token', token);
+      if (userRegion) queryParams.append('region', userRegion);
+      if (userDivision) queryParams.append('division', userDivision);
+
+      const downloadUrl = `/api/reclassification/template-csv?${queryParams.toString()}`;
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.setAttribute('download', 'DepEd GC Reclassification Template.csv');
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setToast({ message: 'Downloading DepEd GC Reclassification Template...', type: 'info' });
     } catch (err) {
       console.error('Error downloading template:', err);
       setToast({ message: 'Failed to download template', type: 'error' });
@@ -1703,8 +2017,98 @@ export default function ReclassificationPage({ onBack }) {
 
       setUploadProgress(100);
       setUploadStats(res);
+
+      // Extract all added items from the uploaded CSV rows
+      const lines = (csvContent || '').split(/\r?\n/).filter(l => l.trim().length > 0);
+      let itemsList = [];
+      if (lines.length > 1) {
+        const parseLine = (line) => {
+          const result = [];
+          let cur = '';
+          let inQuotes = false;
+          for (let i = 0; i < line.length; i++) {
+            const c = line[i];
+            if (c === '"') {
+              if (inQuotes && line[i + 1] === '"') {
+                cur += '"';
+                i++;
+              } else {
+                inQuotes = !inQuotes;
+              }
+            } else if (c === ',' && !inQuotes) {
+              result.push(cur.trim());
+              cur = '';
+            } else {
+              cur += c;
+            }
+          }
+          result.push(cur.trim());
+          return result;
+        };
+
+        const headers = parseLine(lines[0]);
+        const normHeaders = headers.map(h => h.toLowerCase().replace(/[^a-z0-9]/g, ''));
+        const itemIdx = normHeaders.findIndex(h => h.includes('item'));
+        const fNameIdx = normHeaders.findIndex(h => h === 'firstname' || h === 'fname' || (h.includes('first') && !h.includes('school')));
+        const lNameIdx = normHeaders.findIndex(h => h === 'lastname' || h === 'lname' || h.includes('surname') || (h.includes('last') && !h.includes('school')));
+        const directNameIdx = normHeaders.findIndex(h => (h.includes('incumbent') || h.includes('fullname') || h === 'name') && !h.includes('school') && !h.includes('first') && !h.includes('last'));
+        const posIdx = normHeaders.findIndex(h => h.includes('currentposition') || (h.includes('position') && !h.includes('target') && !h.includes('reclass')));
+        const targetIdx = normHeaders.findIndex(h => h.includes('reclassposition') || h.includes('targetpos') || h.includes('reclass') || h.includes('target'));
+        const schoolIdx = normHeaders.findIndex(h => h.includes('schoolname') || (h.includes('school') && !h.includes('id')));
+        const divIdx = normHeaders.findIndex(h => h.includes('division'));
+
+        itemsList = lines.slice(1).map((line, idx) => {
+          const cols = parseLine(line);
+          if (!cols.some(c => c && c.trim())) return null;
+
+          let fullName = '';
+          const f = fNameIdx !== -1 && cols[fNameIdx] ? cols[fNameIdx].trim() : '';
+          const l = lNameIdx !== -1 && cols[lNameIdx] ? cols[lNameIdx].trim() : '';
+          if (f && l) {
+            fullName = `${f} ${l}`.trim();
+          } else if (f || l) {
+            fullName = (f || l).trim();
+          } else if (directNameIdx !== -1 && cols[directNameIdx]) {
+            fullName = cols[directNameIdx].trim();
+          }
+
+          if (!fullName) fullName = '—';
+
+          return {
+            rowNumber: idx + 1,
+            itemNo: itemIdx !== -1 && cols[itemIdx] ? cols[itemIdx].trim() : `Item #${idx + 1}`,
+            name: fullName,
+            currentPosition: posIdx !== -1 && cols[posIdx] ? cols[posIdx].trim() : '—',
+            targetPosition: targetIdx !== -1 && cols[targetIdx] ? cols[targetIdx].trim() : 'For Review',
+            schoolName: schoolIdx !== -1 && cols[schoolIdx] ? cols[schoolIdx].trim() : '',
+            division: divIdx !== -1 && cols[divIdx] ? cols[divIdx].trim() : ''
+          };
+        }).filter(Boolean);
+      }
+
+      // Open Ingestion Success Popup Modal with full added items list
+      setIngestionSuccessModal({
+        open: true,
+        fileName: csvFileName || 'DepEd GC Reclassification Inventory.csv',
+        insertedOrUpdated: res.insertedOrUpdated || csvTotalRowsCount || itemsList.length || 0,
+        totalInDatabase: res.totalInDatabase || 0,
+        metrics: res.metrics || null,
+        addedItems: itemsList,
+        message: res.message || 'All items have been added successfully!'
+      });
+
+      // Reset file and preview state so the file preview no longer persists after ingestion
+      setCsvFile(null);
+      setCsvFileName('');
+      setCsvContent('');
+      setCsvPreviewRows([]);
+      setCsvTotalRowsCount(0);
+      const fileInput = document.getElementById('step1-reclass-csv-input');
+      if (fileInput) fileInput.value = '';
+
       setToast({
-        message: res.message || `Successfully ingested ${res.insertedOrUpdated || 0} records!`,
+        title: 'Ingestion Completed',
+        message: res.message || `All ${res.insertedOrUpdated || itemsList.length || 0} items added successfully!`,
         type: 'success'
       });
 
@@ -2086,7 +2490,7 @@ export default function ReclassificationPage({ onBack }) {
                 ? (isDark ? '0 0 14px rgba(59, 130, 246, 0.25)' : '0 2px 8px rgba(37, 99, 235, 0.15)')
                 : 'none',
               transform: currentStep === 2 ? 'translateY(-1px)' : 'translateY(0)',
-              opacity: currentStep >= 2 ? 1 : 0.55,
+              opacity: 1,
               flex: '1 1 0',
               minWidth: 0,
               userSelect: 'none'
@@ -2308,8 +2712,8 @@ export default function ReclassificationPage({ onBack }) {
               style={{
                 height: '100%',
                 width: currentStep >= 4 ? '100%' : '0%',
-                background: 'linear-gradient(90deg, #2563eb, #10b981)',
-                boxShadow: currentStep >= 4 ? '0 0 6px rgba(16, 185, 129, 0.45)' : 'none',
+                background: 'linear-gradient(90deg, #2563eb, #3b82f6)',
+                boxShadow: currentStep >= 4 ? '0 0 6px rgba(59, 130, 246, 0.45)' : 'none',
                 borderRadius: '999px'
               }}
             />
@@ -2327,13 +2731,13 @@ export default function ReclassificationPage({ onBack }) {
               padding: '6px 10px',
               borderRadius: '10px',
               backgroundColor: currentStep === 4
-                ? (isDark ? 'rgba(16, 185, 129, 0.2)' : '#ecfdf5')
+                ? (isDark ? 'rgba(37, 99, 235, 0.2)' : '#eff6ff')
                 : (currentStep > 4 ? (isDark ? 'rgba(30, 41, 59, 0.4)' : '#f8fafc') : 'transparent'),
               border: currentStep === 4
-                ? (isDark ? '1.5px solid rgba(16, 185, 129, 0.6)' : '1.5px solid #6ee7b7')
-                : (currentStep > 4 ? (isDark ? '1px solid rgba(16, 185, 129, 0.35)' : '1px solid #a7f3d0') : (isDark ? '1px solid rgba(51, 65, 85, 0.5)' : '1px solid var(--line)')),
+                ? (isDark ? '1.5px solid rgba(59, 130, 246, 0.6)' : '1.5px solid #93c5fd')
+                : (currentStep > 4 ? (isDark ? '1px solid rgba(59, 130, 246, 0.35)' : '1px solid #bfdbfe') : (isDark ? '1px solid rgba(51, 65, 85, 0.5)' : '1px solid var(--line)')),
               boxShadow: currentStep === 4
-                ? (isDark ? '0 0 14px rgba(16, 185, 129, 0.25)' : '0 2px 8px rgba(16, 185, 129, 0.15)')
+                ? (isDark ? '0 0 14px rgba(59, 130, 246, 0.25)' : '0 2px 8px rgba(37, 99, 235, 0.15)')
                 : 'none',
               transform: currentStep === 4 ? 'translateY(-1px)' : 'translateY(0)',
               opacity: 1,
@@ -2349,7 +2753,7 @@ export default function ReclassificationPage({ onBack }) {
                 height: '28px',
                 borderRadius: '8px',
                 backgroundColor: currentStep === 4
-                  ? '#10b981'
+                  ? '#2563eb'
                   : (isDark ? 'rgba(51, 65, 85, 0.7)' : '#e2e8f0'),
                 backgroundImage: 'linear-gradient(135deg, rgba(255, 255, 255, 0.18) 0%, rgba(0, 0, 0, 0.08) 100%)',
                 color: currentStep === 4 ? '#ffffff' : (isDark ? '#94a3b8' : '#64748b'),
@@ -2359,7 +2763,7 @@ export default function ReclassificationPage({ onBack }) {
                 fontWeight: 800,
                 fontSize: '12px',
                 boxShadow: currentStep === 4
-                  ? (isDark ? '0 0 12px rgba(16, 185, 129, 0.5), 0 0 0 2.5px rgba(16, 185, 129, 0.25)' : '0 3px 10px rgba(16, 185, 129, 0.35), 0 0 0 2.5px rgba(16, 185, 129, 0.25)')
+                  ? (isDark ? '0 0 12px rgba(59, 130, 246, 0.5), 0 0 0 2.5px rgba(59, 130, 246, 0.25)' : '0 3px 10px rgba(37, 99, 235, 0.35), 0 0 0 2.5px rgba(59, 130, 246, 0.25)')
                   : 'none',
                 transform: currentStep === 4 ? 'scale(1.05)' : 'scale(1)',
                 flexShrink: 0
@@ -2373,7 +2777,7 @@ export default function ReclassificationPage({ onBack }) {
                 style={{
                   fontSize: '12px',
                   fontWeight: 800,
-                  color: currentStep === 4 ? (isDark ? '#34d399' : '#059669') : (isDark ? '#94a3b8' : '#64748b'),
+                  color: currentStep === 4 ? (isDark ? '#60a5fa' : '#1d4ed8') : (isDark ? '#94a3b8' : '#64748b'),
                   lineHeight: 1.2,
                   display: 'flex',
                   alignItems: 'center',
@@ -2403,7 +2807,7 @@ export default function ReclassificationPage({ onBack }) {
                 className="reclass-stepper-text"
                 style={{
                   fontSize: '10px',
-                  color: currentStep === 4 ? (isDark ? '#a7f3d0' : '#059669') : 'var(--muted)',
+                  color: currentStep === 4 ? (isDark ? '#93c5fd' : '#2563eb') : 'var(--muted)',
                   fontWeight: 500,
                   marginTop: '1px',
                   whiteSpace: 'nowrap',
@@ -2420,124 +2824,6 @@ export default function ReclassificationPage({ onBack }) {
         {/* STEP 1 VIEW: INVENTORY & CSV INGESTION */}
         {currentStep === 1 && (
           <div className="reclass-step-content-anim" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            {/* Status Banner for Master Inventory */}
-            {isStep1Done ? (
-              <div style={{
-                padding: '16px 20px',
-                borderRadius: '12px',
-                background: isDark ? 'rgba(16, 185, 129, 0.15)' : '#ecfdf5',
-                border: isDark ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #a7f3d0',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: '16px',
-                flexWrap: 'wrap'
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <div style={{
-                    width: '32px',
-                    height: '32px',
-                    borderRadius: '8px',
-                    background: '#10b981',
-                    color: '#ffffff',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontWeight: 800
-                  }}>
-                    ✓
-                  </div>
-                  <div>
-                    <div style={{ fontSize: '13.5px', fontWeight: 800, color: isDark ? '#6ee7b7' : '#065f46' }}>
-                      Master Plantilla Inventory Active: {incumbents.length.toLocaleString()} Records Loaded
-                    </div>
-                    <div style={{ fontSize: '12px', color: isDark ? '#a7f3d0' : '#047857' }}>
-                      {incumbentMetrics.forReview} For Review • {incumbentMetrics.endorsed} Endorsed • {incumbentMetrics.approved} Approved • {incumbentMetrics.vacant} Vacant/Unfilled • {incumbentMetrics.abolition || 0} Abolitions
-                    </div>
-                  </div>
-                </div>
-
-                {!isRegionalOffice && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <button
-                      type="button"
-                      onClick={() => handleExecuteCsvIngestion(true)}
-                      disabled={isUploadingCsv}
-                      style={{
-                        background: isDark ? 'rgba(30, 41, 59, 0.8)' : '#ffffff',
-                        border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid #cbd5e1',
-                        padding: '7px 14px',
-                        borderRadius: '8px',
-                        fontSize: '12px',
-                        fontWeight: 700,
-                        color: isDark ? '#f8fafc' : '#0f172a',
-                        cursor: isUploadingCsv ? 'not-allowed' : 'pointer'
-                      }}
-                    >
-                      {isUploadingCsv ? 'Syncing...' : 'Re-sync Master Inventory'}
-                    </button>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div style={{
-                padding: '16px 20px',
-                borderRadius: '12px',
-                background: isDark ? 'rgba(37, 99, 235, 0.15)' : '#eff6ff',
-                border: isDark ? '1px solid rgba(59, 130, 246, 0.4)' : '1px solid #bfdbfe',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: '16px',
-                flexWrap: 'wrap'
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <div style={{
-                    width: '32px',
-                    height: '32px',
-                    borderRadius: '8px',
-                    background: '#2563eb',
-                    color: '#ffffff',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontWeight: 800
-                  }}>
-                    ⚡
-                  </div>
-                  <div>
-                    <div style={{ fontSize: '13.5px', fontWeight: 800, color: isDark ? '#93c5fa' : '#1e40af' }}>
-                      Official Nationwide Master Inventory Available
-                    </div>
-                    <div style={{ fontSize: '12px', color: isDark ? '#cbd5e1' : '#3b82f6' }}>
-                      5,600+ DepEd guidance counselor plantilla positions ready to sync into database
-                    </div>
-                  </div>
-                </div>
-
-                {!isRegionalOffice && (
-                  <button
-                    type="button"
-                    onClick={() => handleExecuteCsvIngestion(true)}
-                    disabled={isUploadingCsv}
-                    style={{
-                      background: '#2563eb',
-                      border: 'none',
-                      padding: '8px 18px',
-                      borderRadius: '8px',
-                      fontSize: '12.5px',
-                      fontWeight: 750,
-                      color: '#ffffff',
-                      cursor: isUploadingCsv ? 'not-allowed' : 'pointer',
-                      boxShadow: '0 2px 10px rgba(37, 99, 235, 0.25)'
-                    }}
-                  >
-                    {isUploadingCsv ? 'Syncing Records...' : 'Sync Master Inventory Now'}
-                  </button>
-                )}
-              </div>
-            )}
-
             {/* Custom CSV Upload & Dropzone Card */}
             <div style={{
               background: isDark ? 'rgba(15, 23, 42, 0.75)' : '#ffffff',
@@ -2712,16 +2998,19 @@ export default function ReclassificationPage({ onBack }) {
                           <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569' }}>Incumbent</th>
                           <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569' }}>Current Position</th>
                           <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569' }}>Division</th>
-                          <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569' }}>Target Reclass</th>
+                          <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569' }}>School</th>
+                          <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569' }}>Reclassification Position</th>
                         </tr>
                       </thead>
                       <tbody>
                         {csvPreviewRows.map((row, idx) => {
-                          const itemNo = row['PLANTILLA ITEM NUMBER'] || row['Plantilla Item Number'] || Object.values(row)[4] || '—';
-                          const name = row['INCUMBENT'] || row['Incumbent'] || Object.values(row)[7] || '#N/A';
-                          const pos = row['POSITION TITLE'] || row['Position Title'] || Object.values(row)[5] || '—';
-                          const division = row['DIVISION'] || row['Division'] || Object.values(row)[1] || '—';
-                          const target = row['RECLASS POSITION'] || row['Reclass Position'] || Object.values(row)[8] || 'For Review';
+                          const itemNo = row['PLANTILLA ITEM NUMBER'] || row['Plantilla Item Number'] || row['item_no'] || Object.values(row)[4] || '—';
+                          const name = extractIncumbentName(row);
+                          const pos = row['POSITION TITLE'] || row['Position Title'] || row['current_position'] || Object.values(row)[5] || '—';
+                          const division = row['DIVISION'] || row['Division'] || row['division'] || Object.values(row)[1] || '—';
+                          const schoolId = row['SCHOOL ID'] || row['School ID'] || row['school_id'] || row['schoolid'] || '—';
+                          const schoolName = row['SCHOOL NAME'] || row['School Name'] || row['school_name'] || row['UACS_OPER_DSC'] || '—';
+                          const target = row['RECLASS POSITION'] || row['Reclass Position'] || row['reclass_position'] || Object.values(row)[8] || 'For Review';
 
                           return (
                             <tr key={idx} style={{ borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.4)' : '1px solid #f1f5f9' }}>
@@ -2731,6 +3020,25 @@ export default function ReclassificationPage({ onBack }) {
                               </td>
                               <td style={{ padding: '8px 12px', color: isDark ? '#94a3b8' : '#64748b' }}>{pos}</td>
                               <td style={{ padding: '8px 12px', color: isDark ? '#94a3b8' : '#64748b' }}>{division}</td>
+                              <td style={{ padding: '8px 12px' }}>
+                                <div style={{ fontWeight: 650, color: isDark ? '#cbd5e1' : '#334155' }}>{schoolName}</div>
+                                {schoolId !== '—' && (
+                                  <span style={{
+                                    fontSize: '10.5px',
+                                    fontWeight: 750,
+                                    fontFamily: 'monospace',
+                                    color: isDark ? '#38bdf8' : '#0369a1',
+                                    background: isDark ? 'rgba(14, 165, 233, 0.15)' : '#e0f2fe',
+                                    border: isDark ? '1px solid rgba(14, 165, 233, 0.3)' : '1px solid #bae6fd',
+                                    padding: '1.5px 6px',
+                                    borderRadius: '4px',
+                                    display: 'inline-block',
+                                    marginTop: '2px'
+                                  }}>
+                                    {schoolId}
+                                  </span>
+                                )}
+                              </td>
                               <td style={{ padding: '8px 12px' }}>
                                 <span style={{
                                   padding: '2px 8px',
@@ -2775,61 +3083,348 @@ export default function ReclassificationPage({ onBack }) {
               {/* Ingestion Report Banner */}
               {uploadStats && (
                 <div style={{
-                  padding: '16px 20px',
-                  borderRadius: '12px',
-                  background: isDark ? 'rgba(16, 185, 129, 0.15)' : '#ecfdf5',
-                  border: isDark ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #a7f3d0',
+                  padding: '20px 22px',
+                  borderRadius: '16px',
+                  background: isDark
+                    ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.12) 0%, rgba(15, 23, 42, 0.8) 100%)'
+                    : 'linear-gradient(135deg, #f0fdf4 0%, #ffffff 100%)',
+                  border: isDark ? '1px solid rgba(16, 185, 129, 0.35)' : '1px solid #bbf7d0',
+                  boxShadow: isDark
+                    ? '0 8px 32px -8px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.05)'
+                    : '0 8px 30px -6px rgba(16, 185, 129, 0.1), 0 2px 6px -1px rgba(0, 0, 0, 0.03)',
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: '10px'
+                  gap: '16px',
+                  backdropFilter: 'blur(10px)'
                 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: isDark ? '#6ee7b7' : '#065f46', fontWeight: 750, fontSize: '14px' }}>
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
-                        <polyline points="22 4 12 14.01 9 11.01" />
-                      </svg>
-                      {uploadStats.message}
+                  {/* Banner Header Row */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '14px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0, flex: '1 1 auto' }}>
+                      <div style={{
+                        width: '38px',
+                        height: '38px',
+                        borderRadius: '10px',
+                        background: isDark ? 'rgba(16, 185, 129, 0.25)' : '#dcfce7',
+                        color: isDark ? '#34d399' : '#059669',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                        boxShadow: isDark ? '0 0 16px rgba(16, 185, 129, 0.2)' : 'none'
+                      }}>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                          <polyline points="22 4 12 14.01 9 11.01" />
+                        </svg>
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span style={{
+                            fontSize: '11px',
+                            fontWeight: 800,
+                            letterSpacing: '0.05em',
+                            textTransform: 'uppercase',
+                            padding: '2px 8px',
+                            borderRadius: '999px',
+                            background: isDark ? 'rgba(16, 185, 129, 0.25)' : '#d1fae5',
+                            color: isDark ? '#6ee7b7' : '#047857'
+                          }}>
+                            Ingestion Successful
+                          </span>
+                        </div>
+                        <div style={{
+                          fontSize: '14px',
+                          fontWeight: 650,
+                          color: isDark ? '#f1f5f9' : '#0f172a',
+                          lineHeight: 1.4
+                        }}>
+                          {uploadStats.message}
+                        </div>
+                      </div>
                     </div>
 
                     <button
                       type="button"
                       onClick={() => setCurrentStep(2)}
                       style={{
-                        background: '#10b981',
+                        background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
                         color: '#ffffff',
                         border: 'none',
-                        padding: '8px 16px',
-                        borderRadius: '8px',
-                        fontSize: '12.5px',
+                        padding: '10px 20px',
+                        borderRadius: '10px',
+                        fontSize: '13px',
                         fontWeight: 750,
-                        cursor: 'pointer'
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        boxShadow: '0 4px 14px rgba(16, 185, 129, 0.35)',
+                        transition: 'all 0.2s ease',
+                        flexShrink: 0
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.transform = 'translateY(-1px)';
+                        e.currentTarget.style.boxShadow = '0 6px 18px rgba(16, 185, 129, 0.45)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.transform = 'translateY(0)';
+                        e.currentTarget.style.boxShadow = '0 4px 14px rgba(16, 185, 129, 0.35)';
                       }}
                     >
-                      Open Step 2: Assessment Workbench →
+                      <span>Open Step 2: Assessment Workbench</span>
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <line x1="5" y1="12" x2="19" y2="12" />
+                        <polyline points="12 5 19 12 12 19" />
+                      </svg>
                     </button>
                   </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '8px' }}>
-                    <div style={{ padding: '8px 12px', borderRadius: '8px', background: isDark ? 'rgba(15, 23, 42, 0.5)' : '#ffffff', border: isDark ? '1px solid rgba(51, 65, 85, 0.5)' : '1px solid #e2e8f0' }}>
-                      <div style={{ fontSize: '10.5px', color: isDark ? '#94a3b8' : '#64748b', textTransform: 'uppercase', fontWeight: 700 }}>Total in Database</div>
-                      <div style={{ fontSize: '16px', fontWeight: 800, color: isDark ? '#f8fafc' : '#0f172a' }}>{uploadStats.totalInDatabase || uploadStats.insertedOrUpdated}</div>
+                  {/* Upgraded Modern KPI Grid */}
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                    gap: '12px'
+                  }}>
+                    {/* Card 1: Total Incumbents */}
+                    <div style={{
+                      padding: '14px 16px',
+                      borderRadius: '12px',
+                      background: isDark ? 'rgba(15, 23, 42, 0.7)' : '#ffffff',
+                      border: isDark ? '1px solid rgba(59, 130, 246, 0.3)' : '1px solid #e2e8f0',
+                      borderLeft: '4px solid #3b82f6',
+                      boxShadow: isDark ? '0 4px 14px rgba(0, 0, 0, 0.25)' : '0 2px 8px rgba(0, 0, 0, 0.04)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '8px'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span style={{
+                          fontSize: '11px',
+                          color: isDark ? '#94a3b8' : '#64748b',
+                          textTransform: 'uppercase',
+                          fontWeight: 750,
+                          letterSpacing: '0.04em'
+                        }}>
+                          Total Incumbents
+                        </span>
+                        <div style={{
+                          width: '26px',
+                          height: '26px',
+                          borderRadius: '6px',
+                          background: isDark ? 'rgba(59, 130, 246, 0.2)' : '#eff6ff',
+                          color: '#3b82f6',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center'
+                        }}>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                            <circle cx="9" cy="7" r="4" />
+                            <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                            <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                          </svg>
+                        </div>
+                      </div>
+                      <div style={{
+                        fontSize: '24px',
+                        fontWeight: 800,
+                        color: isDark ? '#f8fafc' : '#0f172a',
+                        lineHeight: 1
+                      }}>
+                        {uploadStats.totalInDatabase || uploadStats.insertedOrUpdated}
+                      </div>
+                      <div style={{
+                        fontSize: '11.5px',
+                        fontWeight: 600,
+                        color: isDark ? '#60a5fa' : '#2563eb',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px'
+                      }}>
+                        <span>Active in Database</span>
+                      </div>
                     </div>
+
+                    {/* Card 2: For Review */}
                     {uploadStats.metrics && (
-                      <>
-                        <div style={{ padding: '8px 12px', borderRadius: '8px', background: isDark ? 'rgba(15, 23, 42, 0.5)' : '#ffffff', border: isDark ? '1px solid rgba(51, 65, 85, 0.5)' : '1px solid #e2e8f0' }}>
-                          <div style={{ fontSize: '10.5px', color: isDark ? '#94a3b8' : '#64748b', textTransform: 'uppercase', fontWeight: 700 }}>For Review</div>
-                          <div style={{ fontSize: '16px', fontWeight: 800, color: '#f59e0b' }}>{uploadStats.metrics.forReview}</div>
+                      <div style={{
+                        padding: '14px 16px',
+                        borderRadius: '12px',
+                        background: isDark ? 'rgba(15, 23, 42, 0.7)' : '#ffffff',
+                        border: isDark ? '1px solid rgba(245, 158, 11, 0.3)' : '1px solid #e2e8f0',
+                        borderLeft: '4px solid #f59e0b',
+                        boxShadow: isDark ? '0 4px 14px rgba(0, 0, 0, 0.25)' : '0 2px 8px rgba(0, 0, 0, 0.04)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '8px'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <span style={{
+                            fontSize: '11px',
+                            color: isDark ? '#94a3b8' : '#64748b',
+                            textTransform: 'uppercase',
+                            fontWeight: 750,
+                            letterSpacing: '0.04em'
+                          }}>
+                            For Review
+                          </span>
+                          <div style={{
+                            width: '26px',
+                            height: '26px',
+                            borderRadius: '6px',
+                            background: isDark ? 'rgba(245, 158, 11, 0.2)' : '#fffbeb',
+                            color: '#f59e0b',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                          }}>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                              <circle cx="12" cy="12" r="10" />
+                              <polyline points="12 6 12 12 16 14" />
+                            </svg>
+                          </div>
                         </div>
-                        <div style={{ padding: '8px 12px', borderRadius: '8px', background: isDark ? 'rgba(15, 23, 42, 0.5)' : '#ffffff', border: isDark ? '1px solid rgba(51, 65, 85, 0.5)' : '1px solid #e2e8f0' }}>
-                          <div style={{ fontSize: '10.5px', color: isDark ? '#94a3b8' : '#64748b', textTransform: 'uppercase', fontWeight: 700 }}>Vacant / Unfilled</div>
-                          <div style={{ fontSize: '16px', fontWeight: 800, color: '#64748b' }}>{uploadStats.metrics.vacant}</div>
+                        <div style={{
+                          fontSize: '24px',
+                          fontWeight: 800,
+                          color: '#f59e0b',
+                          lineHeight: 1
+                        }}>
+                          {uploadStats.metrics.forReview}
                         </div>
-                        <div style={{ padding: '8px 12px', borderRadius: '8px', background: isDark ? 'rgba(15, 23, 42, 0.5)' : '#ffffff', border: isDark ? '1px solid rgba(51, 65, 85, 0.5)' : '1px solid #e2e8f0' }}>
-                          <div style={{ fontSize: '10.5px', color: isDark ? '#94a3b8' : '#64748b', textTransform: 'uppercase', fontWeight: 700 }}>Abolition</div>
-                          <div style={{ fontSize: '16px', fontWeight: 800, color: '#ef4444' }}>{uploadStats.metrics.abolition}</div>
+                        <div style={{
+                          fontSize: '11.5px',
+                          fontWeight: 600,
+                          color: isDark ? '#fbbf24' : '#d97706',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '4px'
+                        }}>
+                          <span>Ready for QS Eval (Step 2)</span>
                         </div>
-                      </>
+                      </div>
+                    )}
+
+                    {/* Card 3: Vacant / Unfilled */}
+                    {uploadStats.metrics && (
+                      <div style={{
+                        padding: '14px 16px',
+                        borderRadius: '12px',
+                        background: isDark ? 'rgba(15, 23, 42, 0.7)' : '#ffffff',
+                        border: isDark ? '1px solid rgba(100, 116, 139, 0.3)' : '1px solid #e2e8f0',
+                        borderLeft: '4px solid #64748b',
+                        boxShadow: isDark ? '0 4px 14px rgba(0, 0, 0, 0.25)' : '0 2px 8px rgba(0, 0, 0, 0.04)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '8px'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <span style={{
+                            fontSize: '11px',
+                            color: isDark ? '#94a3b8' : '#64748b',
+                            textTransform: 'uppercase',
+                            fontWeight: 750,
+                            letterSpacing: '0.04em'
+                          }}>
+                            Vacant / Unfilled
+                          </span>
+                          <div style={{
+                            width: '26px',
+                            height: '26px',
+                            borderRadius: '6px',
+                            background: isDark ? 'rgba(100, 116, 139, 0.2)' : '#f1f5f9',
+                            color: '#64748b',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                          }}>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                              <circle cx="8.5" cy="7" r="4" />
+                              <line x1="18" y1="8" x2="23" y2="13" />
+                              <line x1="23" y1="8" x2="18" y2="13" />
+                            </svg>
+                          </div>
+                        </div>
+                        <div style={{
+                          fontSize: '24px',
+                          fontWeight: 800,
+                          color: isDark ? '#94a3b8' : '#64748b',
+                          lineHeight: 1
+                        }}>
+                          {uploadStats.metrics.vacant}
+                        </div>
+                        <div style={{
+                          fontSize: '11.5px',
+                          fontWeight: 600,
+                          color: isDark ? '#94a3b8' : '#64748b',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '4px'
+                        }}>
+                          <span>Unassigned Items</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Card 4: Abolition */}
+                    {uploadStats.metrics && (
+                      <div style={{
+                        padding: '14px 16px',
+                        borderRadius: '12px',
+                        background: isDark ? 'rgba(15, 23, 42, 0.7)' : '#ffffff',
+                        border: isDark ? '1px solid rgba(239, 68, 68, 0.3)' : '1px solid #e2e8f0',
+                        borderLeft: '4px solid #ef4444',
+                        boxShadow: isDark ? '0 4px 14px rgba(0, 0, 0, 0.25)' : '0 2px 8px rgba(0, 0, 0, 0.04)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '8px'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <span style={{
+                            fontSize: '11px',
+                            color: isDark ? '#94a3b8' : '#64748b',
+                            textTransform: 'uppercase',
+                            fontWeight: 750,
+                            letterSpacing: '0.04em'
+                          }}>
+                            Abolition
+                          </span>
+                          <div style={{
+                            width: '26px',
+                            height: '26px',
+                            borderRadius: '6px',
+                            background: isDark ? 'rgba(239, 68, 68, 0.2)' : '#fef2f2',
+                            color: '#ef4444',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                          }}>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="3 6 5 6 21 6" />
+                              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                            </svg>
+                          </div>
+                        </div>
+                        <div style={{
+                          fontSize: '24px',
+                          fontWeight: 800,
+                          color: '#ef4444',
+                          lineHeight: 1
+                        }}>
+                          {uploadStats.metrics.abolition}
+                        </div>
+                        <div style={{
+                          fontSize: '11.5px',
+                          fontWeight: 600,
+                          color: isDark ? '#f87171' : '#dc2626',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '4px'
+                        }}>
+                          <span>Marked for Phaseout</span>
+                        </div>
+                      </div>
                     )}
                   </div>
                 </div>
@@ -2941,15 +3536,13 @@ export default function ReclassificationPage({ onBack }) {
             borderLeft: isDark ? '4px solid #3b82f6' : '4px solid #2563eb'
           }}>
             <div style={{ fontSize: '12px', fontWeight: 700, color: isDark ? '#60a5fa' : '#1d4ed8', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-              {isRegionalOffice ? 'Endorsed (RO / DBM / SDO)' : 'Endorsed to RO'}
+              Endorsed to RO
             </div>
             <div style={{ fontSize: '30px', fontWeight: 850, color: isDark ? '#93c5fd' : '#1e40af', margin: '6px 0 2px' }}>
-              {isRegionalOffice ? incumbentMetrics.endorsed : incumbentMetrics.endorsedToRO}
+              {incumbentMetrics.endorsedToRO}
             </div>
             <div style={{ fontSize: '12px', color: isDark ? '#60a5fa' : '#2563eb' }}>
-              {isRegionalOffice 
-                ? `RO: ${incumbentMetrics.endorsedToRO} • DBM: ${incumbentMetrics.endorsedToDbm} • SDO: ${incumbentMetrics.endorsedToSdo}` 
-                : 'Endorsed to Regional Office'}
+              Endorsed to Regional Office
             </div>
           </div>
 
@@ -3166,7 +3759,7 @@ export default function ReclassificationPage({ onBack }) {
                   WebkitAppearance: 'none'
                 }}
               >
-                <option value="" style={{ background: 'var(--card)', color: 'var(--text)' }}>All Target Positions</option>
+                <option value="" style={{ background: 'var(--card)', color: 'var(--text)' }}>All Actual Reclassification Positions</option>
                 <option value="UNASSIGNED" style={{ background: 'var(--card)', color: 'var(--text)' }}>Unassigned Only</option>
                 {RECLASS_POSITIONS_OPTIONS.map(pos => (
                   <option key={pos} value={pos} style={{ background: 'var(--card)', color: 'var(--text)' }}>{pos}</option>
@@ -3316,8 +3909,8 @@ export default function ReclassificationPage({ onBack }) {
                   <th style={{ padding: '14px 16px', width: '50px', whiteSpace: 'nowrap', textAlign: 'left' }}>No.</th>
                   <th style={{ padding: '14px 18px', minWidth: '240px', whiteSpace: 'nowrap', textAlign: 'left' }}>Plantilla Item & Incumbent</th>
                   <th style={{ padding: '14px 18px', minWidth: '170px', whiteSpace: 'nowrap', textAlign: 'left' }}>Current Position & SG</th>
-                  <th style={{ padding: '14px 18px', minWidth: '220px', whiteSpace: 'nowrap', textAlign: 'left' }}>Station / School & Org Code</th>
                   <th style={{ padding: '14px 18px', minWidth: '180px', whiteSpace: 'nowrap', textAlign: 'left' }}>Division & Region</th>
+                  <th style={{ padding: '14px 18px', minWidth: '240px', whiteSpace: 'nowrap', textAlign: 'left' }}>School</th>
                   <th style={{ padding: '14px 18px', minWidth: '170px', whiteSpace: 'nowrap', textAlign: 'left' }}>Stage of Reclassification</th>
                   <th style={{ padding: '14px 18px', minWidth: '220px', whiteSpace: 'nowrap', textAlign: 'left' }}>Actual Reclassification Position</th>
                   <th style={{ padding: '14px 18px', minWidth: '210px', whiteSpace: 'nowrap', textAlign: 'left' }}>Credentials Overview</th>
@@ -3360,8 +3953,8 @@ export default function ReclassificationPage({ onBack }) {
                           {rowNum}
                         </td>
                         <td style={{ padding: '14px 18px', verticalAlign: 'middle' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                            {inc.full_name === '#N/A' ? (
+                          {inc.full_name === '#N/A' && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
                               <span style={{
                                 fontSize: '10px',
                                 fontWeight: 800,
@@ -3375,22 +3968,8 @@ export default function ReclassificationPage({ onBack }) {
                               }}>
                                 Unfilled / Vacant
                               </span>
-                            ) : (
-                              <span style={{
-                                fontSize: '10px',
-                                fontWeight: 800,
-                                padding: '2px 7px',
-                                borderRadius: '5px',
-                                background: isDark ? 'rgba(16, 185, 129, 0.2)' : '#dcfce7',
-                                color: isDark ? '#6ee7b7' : '#166534',
-                                border: isDark ? '1px solid rgba(16, 185, 129, 0.35)' : '1px solid #bbf7d0',
-                                letterSpacing: '0.04em',
-                                textTransform: 'uppercase'
-                              }}>
-                                Filled
-                              </span>
-                            )}
-                          </div>
+                            </div>
+                          )}
                           <div style={{ fontWeight: 750, color: inc.full_name === '#N/A' ? 'var(--muted)' : 'var(--text)', fontSize: '13.5px' }}>
                             {inc.full_name === '#N/A' ? 'Unassigned Plantilla' : inc.full_name}
                           </div>
@@ -3434,12 +4013,37 @@ export default function ReclassificationPage({ onBack }) {
                             </span>
                           )}
                         </td>
+                        {/* Division & Region */}
                         <td style={{ padding: '14px 18px', verticalAlign: 'middle' }}>
-                          <div style={{ fontWeight: 700, color: 'var(--text)', fontSize: '13px' }}>
-                            {inc.uacs_oper_dsc || inc.station_division || '—'}
+                          <div style={{ fontWeight: 650, color: 'var(--text)', fontSize: '12.5px' }}>
+                            {inc.division || inc.station_division || '—'}
                           </div>
-                          {inc.org_cd && (
-                            <div style={{ marginTop: '4px' }}>
+                          <div style={{ fontSize: '11.5px', color: 'var(--text-secondary, #94a3b8)', marginTop: '2px' }}>
+                            {inc.region || '—'}
+                          </div>
+                        </td>
+                        {/* Combined School (Name & ID) */}
+                        <td style={{ padding: '14px 18px', verticalAlign: 'middle' }}>
+                          <div style={{ fontWeight: 700, color: 'var(--text)', fontSize: '13px', lineHeight: '1.35' }}>
+                            {inc.school_name || inc.uacs_oper_dsc || inc.station_division || '—'}
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px', flexWrap: 'wrap' }}>
+                            {inc.school_id ? (
+                              <span style={{
+                                fontSize: '11px',
+                                fontWeight: 750,
+                                fontFamily: 'monospace',
+                                color: isDark ? '#38bdf8' : '#0369a1',
+                                background: isDark ? 'rgba(14, 165, 233, 0.15)' : '#e0f2fe',
+                                border: isDark ? '1px solid rgba(14, 165, 233, 0.3)' : '1px solid #bae6fd',
+                                padding: '2px 7px',
+                                borderRadius: '5px',
+                                display: 'inline-block'
+                              }}>
+                                {inc.school_id}
+                              </span>
+                            ) : null}
+                            {inc.org_cd && (
                               <span style={{
                                 fontSize: '10.5px',
                                 fontWeight: 750,
@@ -3453,15 +4057,7 @@ export default function ReclassificationPage({ onBack }) {
                               }}>
                                 ORG CD: {inc.org_cd}
                               </span>
-                            </div>
-                          )}
-                        </td>
-                        <td style={{ padding: '14px 18px', verticalAlign: 'middle' }}>
-                          <div style={{ fontWeight: 650, color: 'var(--text)', fontSize: '12.5px' }}>
-                            {inc.division || inc.station_division || '—'}
-                          </div>
-                          <div style={{ fontSize: '11.5px', color: 'var(--text-secondary, #94a3b8)', marginTop: '2px' }}>
-                            {inc.region || '—'}
+                            )}
                           </div>
                         </td>
                         <td style={{ padding: '14px 18px', verticalAlign: 'middle' }}>
@@ -3757,57 +4353,6 @@ export default function ReclassificationPage({ onBack }) {
             boxShadow: isDark ? '0 8px 32px rgba(0, 0, 0, 0.3)' : '0 4px 12px rgba(0, 0, 0, 0.03)'
           }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '10px', flexWrap: 'wrap', marginBottom: '18px' }}>
-              {canManageNosca && (
-                <>
-                  <input
-                    ref={noscaFileInputRef}
-                    type="file"
-                    accept=".pdf,application/pdf"
-                    style={{ display: 'none' }}
-                    onChange={handleNoscaFileChange}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowNoscaModal(true)}
-                    disabled={scanningNosca}
-                    style={{
-                      background: 'linear-gradient(135deg, #4f46e5 0%, #6366f1 100%)',
-                      border: 'none',
-                      padding: '10px 20px',
-                      borderRadius: '10px',
-                      fontSize: '13px',
-                      color: '#ffffff',
-                      cursor: scanningNosca ? 'not-allowed' : 'pointer',
-                      fontWeight: 750,
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '8px',
-                      boxShadow: '0 4px 14px rgba(99, 102, 241, 0.35)',
-                      transition: 'all 0.15s ease',
-                      opacity: scanningNosca ? 0.75 : 1
-                    }}
-                    title="Upload official DBM NOSCA PDF and review allocations"
-                  >
-                    {scanningNosca ? (
-                      <>
-                        <div style={{ width: '14px', height: '14px', border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
-                        <span>Scanning NOSCA...</span>
-                      </>
-                    ) : (
-                      <>
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                          <polyline points="14 2 14 8 20 8" />
-                          <line x1="12" y1="18" x2="12" y2="12" />
-                          <line x1="9" y1="15" x2="15" y2="15" />
-                        </svg>
-                        <span>{scannedNoscaResult ? `Manage NOSCA (${selectedNoscaItems.length}/${scannedNoscaResult.count || 0})` : 'Upload & Scan NOSCA'}</span>
-                      </>
-                    )}
-                  </button>
-                </>
-              )}
-
               <button
                 type="button"
                 onClick={handleExportDBM}
@@ -3914,13 +4459,52 @@ export default function ReclassificationPage({ onBack }) {
             padding: '24px 28px',
             boxShadow: isDark ? '0 8px 32px rgba(0, 0, 0, 0.3)' : '0 4px 12px rgba(0, 0, 0, 0.03)'
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
-              <h3 style={{ fontSize: '16px', fontWeight: 800, margin: 0, color: isDark ? '#f8fafc' : '#0f172a' }}>
-                Endorsed & Approved Counselors for DBM Transmittal
-              </h3>
-              <span style={{ fontSize: '12px', color: isDark ? '#94a3b8' : '#64748b', fontWeight: 600 }}>
-                {incumbents.filter(i => ['Endorsed to RO', 'Endorsed to DBM RO', 'Endorsed to SDO', 'Endorsed', 'Approved'].includes(i.stage_of_reclassification)).length} candidates
-              </span>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
+              <div>
+                <h3 style={{ fontSize: '16px', fontWeight: 800, margin: 0, color: isDark ? '#f8fafc' : '#0f172a' }}>
+                  Endorsed & Approved Counselors for DBM Transmittal
+                </h3>
+                <span style={{ fontSize: '12px', color: isDark ? '#94a3b8' : '#64748b', fontWeight: 600 }}>
+                  {incumbents.filter(i => {
+                    const s = String(i.stage_of_reclassification || '').trim().toLowerCase();
+                    return ['endorsed to ro', 'endorsed to dbm ro', 'endorsed', 'approved'].includes(s);
+                  }).length} candidates
+                </span>
+              </div>
+              {canEndorseToDbm && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmEndorseModal({ open: true, counselor: null, isBulk: true })}
+                      style={{
+                        padding: '8px 14px',
+                        borderRadius: '8px',
+                        background: 'linear-gradient(135deg, #4338ca 0%, #6366f1 100%)',
+                        border: 'none',
+                        color: '#ffffff',
+                        fontSize: '12px',
+                        fontWeight: 750,
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        boxShadow: '0 4px 12px rgba(99, 102, 241, 0.35)',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M22 2L11 13" />
+                        <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                      </svg>
+                      <span>Endorse All to DBM RO ({incumbents.filter(i => {
+                        const s = String(i.stage_of_reclassification || '').trim().toLowerCase();
+                        return s === 'endorsed to ro' || s === 'endorsed';
+                      }).length})</span>
+                    </button>
+
+                    
+                  </div>
+                )}
             </div>
 
             <div style={{
@@ -3928,83 +4512,226 @@ export default function ReclassificationPage({ onBack }) {
               border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid #e2e8f0',
               borderRadius: '12px'
             }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px' }}>
+              <table style={{ width: '100%', minWidth: '1350px', tableLayout: 'auto', borderCollapse: 'collapse', fontSize: '12.5px' }}>
                 <thead>
                   <tr style={{ background: isDark ? 'rgba(30, 41, 59, 0.8)' : '#f8fafc', borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid #e2e8f0' }}>
-                    <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569' }}>Plantilla Item No</th>
-                    <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569' }}>Incumbent Name</th>
-                    <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569' }}>Current Position</th>
-                    <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569' }}>Target Position</th>
-                    <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569' }}>Division</th>
-                    <th style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569' }}>Stage</th>
+                    <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569', minWidth: '220px', whiteSpace: 'nowrap' }}>Plantilla Item & Current Position</th>
+                    <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569', minWidth: '180px', whiteSpace: 'nowrap' }}>Incumbent Name</th>
+                    <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569', minWidth: '240px', whiteSpace: 'nowrap' }}>Actual Reclassification Position</th>
+                    <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569', minWidth: '150px', whiteSpace: 'nowrap' }}>Division</th>
+                    <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569', minWidth: '200px', whiteSpace: 'nowrap' }}>School</th>
+                    <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569', minWidth: '180px', whiteSpace: 'nowrap' }}>Stage</th>
+                    {canEndorseToDbm && (
+                      <th style={{ padding: '12px 16px', textAlign: 'center', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569', minWidth: '180px', whiteSpace: 'nowrap' }}>Action</th>
+                    )}
                   </tr>
                 </thead>
                 <tbody>
                   {incumbents
-                    .filter(i => ['Endorsed to RO', 'Endorsed to DBM RO', 'Endorsed to SDO', 'Endorsed', 'Approved'].includes(i.stage_of_reclassification))
+                    .filter(i => {
+                      const s = String(i.stage_of_reclassification || '').trim().toLowerCase();
+                      return ['endorsed to ro', 'endorsed to dbm ro', 'endorsed', 'approved'].includes(s);
+                    })
                     .slice(0, 15)
                     .map((counselor, idx) => {
                       const badge = getStageBadge(counselor.stage_of_reclassification);
                       return (
                         <tr key={counselor.id || idx} style={{ borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.4)' : '1px solid #f1f5f9' }}>
-                          <td style={{ padding: '10px 14px' }}>
+                          <td style={{ padding: '12px 16px', whiteSpace: 'nowrap' }}>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
-                              <span style={{ fontWeight: 750, color: isDark ? '#f8fafc' : '#0f172a', fontFamily: 'monospace', fontSize: '12.5px' }}>
-                                {counselor.plantilla_item_number || counselor.employee_id}
-                              </span>
-                              {counselor.dbm_status === 'With DBM NOSCA' && (
-                                <span style={{
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: '4px',
-                                  width: 'fit-content',
-                                  padding: '2px 7px',
-                                  borderRadius: '4px',
-                                  fontSize: '10px',
-                                  fontWeight: 800,
-                                  background: isDark ? 'rgba(16, 185, 129, 0.2)' : '#dcfce7',
-                                  color: isDark ? '#6ee7b7' : '#059669',
-                                  border: isDark ? '1px solid rgba(16, 185, 129, 0.35)' : '1px solid #bbf7d0'
-                                }}>
-                                  ✓ NOSCA Assigned
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <span style={{ fontWeight: 750, color: isDark ? '#f8fafc' : '#0f172a', fontFamily: 'monospace', fontSize: '12.5px' }}>
+                                  {counselor.plantilla_item_number || counselor.employee_id}
                                 </span>
-                              )}
+                                {(counselor.nosca_serial_no || counselor.new_item_number) && (
+                                  <span style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                    width: 'fit-content',
+                                    padding: '2px 7px',
+                                    borderRadius: '4px',
+                                    fontSize: '10px',
+                                    fontWeight: 800,
+                                    background: isDark ? 'rgba(16, 185, 129, 0.2)' : '#dcfce7',
+                                    color: isDark ? '#6ee7b7' : '#059669',
+                                    border: isDark ? '1px solid rgba(16, 185, 129, 0.35)' : '1px solid #bbf7d0',
+                                    whiteSpace: 'nowrap'
+                                  }}>
+                                    ✓ NOSCA Assigned
+                                  </span>
+                                )}
+                              </div>
+                              <div style={{ fontSize: '11.5px', color: isDark ? '#94a3b8' : '#64748b', fontWeight: 650 }}>
+                                {counselor.current_position || '—'}
+                              </div>
                             </div>
                           </td>
-                          <td style={{ padding: '10px 14px', color: isDark ? '#cbd5e1' : '#334155', fontWeight: 700 }}>{counselor.full_name}</td>
-                          <td style={{ padding: '10px 14px', color: isDark ? '#94a3b8' : '#64748b' }}>{counselor.current_position}</td>
-                          <td style={{ padding: '10px 14px' }}>
+                          <td style={{ padding: '12px 16px', color: isDark ? '#cbd5e1' : '#334155', fontWeight: 700, whiteSpace: 'nowrap' }}>{counselor.full_name}</td>
+                          <td style={{ padding: '12px 16px', whiteSpace: 'nowrap' }}>
                             <span style={{
-                              padding: '3px 9px',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              padding: '4px 10px',
                               borderRadius: '6px',
                               fontSize: '11px',
-                              fontWeight: 700,
+                              fontWeight: 750,
                               background: isDark ? 'rgba(59, 130, 246, 0.2)' : '#eff6ff',
-                              color: isDark ? '#93c5fd' : '#1d4ed8'
+                              color: isDark ? '#93c5fd' : '#1d4ed8',
+                              whiteSpace: 'nowrap'
                             }}>
-                              {counselor.target_position || counselor.reclass_position || 'School Counselor'}
+                              {counselor.actual_position || counselor.target_position || counselor.reclass_position || 'School Counselor'}
                             </span>
                           </td>
-                          <td style={{ padding: '10px 14px', color: isDark ? '#94a3b8' : '#64748b' }}>{counselor.division || counselor.station_division}</td>
-                          <td style={{ padding: '10px 14px' }}>
+                          <td style={{ padding: '12px 16px', color: isDark ? '#94a3b8' : '#64748b', whiteSpace: 'nowrap' }}>{counselor.division || counselor.station_division || '—'}</td>
+                          <td style={{ padding: '12px 16px', whiteSpace: 'nowrap' }}>
+                            <div style={{ fontWeight: 650, color: isDark ? '#cbd5e1' : '#334155' }}>
+                              {counselor.school_name || counselor.station_division || '—'}
+                            </div>
+                            {counselor.school_id && counselor.school_id !== '—' && (
+                              <span style={{
+                                fontSize: '10px',
+                                fontWeight: 750,
+                                fontFamily: 'monospace',
+                                color: isDark ? '#38bdf8' : '#0369a1',
+                                background: isDark ? 'rgba(14, 165, 233, 0.15)' : '#e0f2fe',
+                                border: isDark ? '1px solid rgba(14, 165, 233, 0.3)' : '1px solid #bae6fd',
+                                padding: '1.5px 5px',
+                                borderRadius: '4px',
+                                display: 'inline-block',
+                                marginTop: '2px',
+                                whiteSpace: 'nowrap'
+                              }}>
+                                {counselor.school_id}
+                              </span>
+                            )}
+                          </td>
+                          <td style={{ padding: '12px 16px', whiteSpace: 'nowrap' }}>
                             <span style={{
-                              padding: '3px 9px',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              padding: '4px 10px',
                               borderRadius: '999px',
                               fontSize: '11px',
-                              fontWeight: 700,
+                              fontWeight: 750,
                               background: badge.bg,
                               color: badge.text,
-                              border: `1px solid ${badge.border}`
+                              border: `1px solid ${badge.border}`,
+                              whiteSpace: 'nowrap',
+                              letterSpacing: '0.01em'
                             }}>
                               {badge.icon ? `${badge.icon} ` : ''}{counselor.stage_of_reclassification}
                             </span>
                           </td>
+                          {canEndorseToDbm && (
+                            <td style={{ padding: '12px 16px', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                              {['endorsed to ro', 'endorsed'].includes(String(counselor.stage_of_reclassification || '').trim().toLowerCase()) ? (
+                                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setConfirmEndorseModal({ open: true, counselor, isBulk: false });
+                                    }}
+                                    style={{
+                                      padding: '6px 12px',
+                                      borderRadius: '8px',
+                                      background: 'linear-gradient(135deg, #4338ca 0%, #6366f1 100%)',
+                                      border: 'none',
+                                      color: '#ffffff',
+                                      fontSize: '11px',
+                                      fontWeight: 750,
+                                      cursor: 'pointer',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '5px',
+                                      boxShadow: '0 2px 8px rgba(99, 102, 241, 0.3)',
+                                      whiteSpace: 'nowrap',
+                                      transition: 'all 0.15s ease'
+                                    }}
+                                    title="Endorse this candidate to DBM Regional Office"
+                                  >
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                      <path d="M22 2L11 13" />
+                                      <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                                    </svg>
+                                    <span>Endorse to DBM RO</span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setConfirmRevertModal({ open: true, counselor, targetStage: 'For Review' });
+                                    }}
+                                    style={{
+                                      padding: '6px 11px',
+                                      borderRadius: '8px',
+                                      background: isDark ? 'rgba(239, 68, 68, 0.15)' : '#fee2e2',
+                                      border: isDark ? '1px solid rgba(239, 68, 68, 0.35)' : '1px solid #fecaca',
+                                      color: isDark ? '#fca5a5' : '#b91c1c',
+                                      fontSize: '11px',
+                                      fontWeight: 750,
+                                      cursor: 'pointer',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '4px',
+                                      whiteSpace: 'nowrap',
+                                      transition: 'all 0.15s ease'
+                                    }}
+                                    title="Revert endorsement back to SDO (For Review)"
+                                  >
+                                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                      <polyline points="1 4 1 10 7 10" />
+                                      <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+                                    </svg>
+                                    <span>Revert Endorsement</span>
+                                  </button>
+                                </div>
+                              ) : ['endorsed to dbm ro', 'endorsed to dbm'].includes(String(counselor.stage_of_reclassification || '').trim().toLowerCase()) ? (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setConfirmRevertModal({ open: true, counselor, targetStage: 'Endorsed to RO' });
+                                  }}
+                                  style={{
+                                    padding: '6px 11px',
+                                    borderRadius: '8px',
+                                    background: isDark ? 'rgba(239, 68, 68, 0.15)' : '#fee2e2',
+                                    border: isDark ? '1px solid rgba(239, 68, 68, 0.35)' : '1px solid #fecaca',
+                                    color: isDark ? '#fca5a5' : '#b91c1c',
+                                    fontSize: '11px',
+                                    fontWeight: 750,
+                                    cursor: 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                    whiteSpace: 'nowrap',
+                                    transition: 'all 0.15s ease'
+                                  }}
+                                  title="Revert DBM transmission back to Regional Review (Endorsed to RO)"
+                                >
+                                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                    <polyline points="1 4 1 10 7 10" />
+                                    <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+                                  </svg>
+                                  <span>Revert Endorsement</span>
+                                </button>
+                              ) : (
+                                <span style={{ fontSize: '12px', color: isDark ? '#94a3b8' : '#64748b' }}>—</span>
+                              )}
+                            </td>
+                          )}
                         </tr>
                       );
                     })}
-                  {incumbents.filter(i => ['Endorsed to RO', 'Endorsed to DBM RO', 'Endorsed to SDO', 'Endorsed', 'Approved'].includes(i.stage_of_reclassification)).length === 0 && (
+                  {incumbents.filter(i => {
+                    const s = String(i.stage_of_reclassification || '').trim().toLowerCase();
+                    return ['endorsed to ro', 'endorsed to dbm ro', 'endorsed', 'approved'].includes(s);
+                  }).length === 0 && (
                     <tr>
-                      <td colSpan={6} style={{ padding: '24px', textAlign: 'center', color: isDark ? '#94a3b8' : '#64748b' }}>
+                      <td colSpan={canEndorseToDbm ? 7 : 6} style={{ padding: '24px', textAlign: 'center', color: isDark ? '#94a3b8' : '#64748b' }}>
                         No counselors have been marked as Endorsed or Approved yet. Move candidates to Endorsed/Approved in Step 2.
                       </td>
                     </tr>
@@ -4099,7 +4826,13 @@ export default function ReclassificationPage({ onBack }) {
           onSetFullScreenDoc={setFullScreenDoc}
           onBackToStep3={() => setCurrentStep(3)}
           isRegionalOffice={isRegionalOffice}
-          canManageNosca={canManageNosca}
+          canManageNosca={canUploadNosca}
+          canUploadNosca={canUploadNosca}
+          canAssignItemNo={canAssignItemNo}
+          onOpenNoscaScanModal={() => setShowNoscaModal(true)}
+          scanningNosca={scanningNosca}
+          scannedNoscaResult={scannedNoscaResult}
+          selectedNoscaItemsCount={selectedNoscaItems.length}
           isDark={isDark}
         />
       )}
@@ -4533,31 +5266,6 @@ export default function ReclassificationPage({ onBack }) {
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
                 <button
                   type="button"
-                  onClick={() => setShowIncumbentDocsModal(true)}
-                  style={{
-                    padding: '8px 16px',
-                    borderRadius: '8px',
-                    border: isDark ? '1px solid rgba(56, 189, 248, 0.45)' : '1px solid #0284c7',
-                    background: isDark ? 'rgba(2, 132, 199, 0.2)' : '#eff6ff',
-                    color: isDark ? '#38bdf8' : '#0284c7',
-                    fontSize: '12.5px',
-                    fontWeight: 750,
-                    cursor: 'pointer',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '7px',
-                    boxShadow: '0 1px 3px rgba(2, 132, 199, 0.12)',
-                    transition: 'all 0.15s ease'
-                  }}
-                  onMouseOver={e => e.currentTarget.style.background = isDark ? 'rgba(2, 132, 199, 0.35)' : '#dbeafe'}
-                  onMouseOut={e => e.currentTarget.style.background = isDark ? 'rgba(2, 132, 199, 0.2)' : '#eff6ff'}
-                >
-                  <span style={{ fontSize: '15px' }}>📁</span>
-                  View Submitted Documents
-                </button>
-
-                <button
-                  type="button"
                   onClick={() => setShowAssessmentModal(false)}
                   title="Close Assessment (Esc)"
                   aria-label="Close Assessment Modal"
@@ -4656,8 +5364,13 @@ export default function ReclassificationPage({ onBack }) {
 
                   <div style={{ background: isDark ? 'rgba(15, 23, 42, 0.65)' : 'var(--card-solid, #ffffff)', padding: '10px 12px', borderRadius: '10px', border: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid var(--line)' }}>
                     <div style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-secondary, #94a3b8)', textTransform: 'uppercase' }}>Station / School</div>
-                    <div style={{ fontWeight: 750, color: 'var(--text)', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={selectedIncumbent.uacs_oper_dsc || selectedIncumbent.station_division}>
-                      {selectedIncumbent.uacs_oper_dsc || selectedIncumbent.station_division || '—'}
+                    <div style={{ fontWeight: 750, color: 'var(--text)', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={selectedIncumbent.school_name || selectedIncumbent.uacs_oper_dsc || selectedIncumbent.station_division}>
+                      {selectedIncumbent.school_name || selectedIncumbent.uacs_oper_dsc || selectedIncumbent.station_division || '—'}
+                      {selectedIncumbent.school_id && (
+                        <span style={{ fontSize: '11px', color: '#0284c7', marginLeft: '6px', fontWeight: 800, fontFamily: 'monospace' }}>
+                          ({selectedIncumbent.school_id})
+                        </span>
+                      )}
                     </div>
                   </div>
 
@@ -4670,24 +5383,51 @@ export default function ReclassificationPage({ onBack }) {
                 </div>
               </div>
 
-              {/* Card 2: Documentary Screening & Requirements Checklist Section */}
+              {/* Card 2: Embedded Document Vault & Documentary Screening Section */}
               {(() => {
                 const requiredReqs = docChecklist.filter(d => d.required);
                 const otherReqs = docChecklist.filter(d => !d.required);
-                const missingRequiredDocs = requiredReqs.filter(d => !d.submitted || !d.verified);
+                const missingRequiredDocs = requiredReqs.filter(d => (!d.submitted || !d.verified || d.status !== 'approved') || d.status === 'for_revision');
                 const isDocComplete = missingRequiredDocs.length === 0;
-                const verifiedCount = docChecklist.filter(d => d.submitted && d.verified).length;
-                const requiredVerifiedCount = requiredReqs.filter(d => d.submitted && d.verified).length;
-                const otherVerifiedCount = otherReqs.filter(d => d.submitted && d.verified).length;
+                const approvedCount = docChecklist.filter(d => d.status === 'approved' || (d.submitted && d.verified && d.status !== 'for_revision')).length;
+                const requiredApprovedCount = requiredReqs.filter(d => d.status === 'approved' || (d.submitted && d.verified && d.status !== 'for_revision')).length;
+                const revisionCount = docChecklist.filter(d => d.status === 'for_revision').length;
+
+                const activeDoc = docChecklist.find(d => (d.key || d.id) === selectedVaultDocKey || d.id === selectedVaultDocKey) || docChecklist[0];
+
+                const attachedList = Array.isArray(selectedIncumbent?.assessment?.documents) && selectedIncumbent.assessment.documents.length > 0
+                  ? selectedIncumbent.assessment.documents
+                  : Array.isArray(selectedIncumbent?.documents) && selectedIncumbent.documents.length > 0
+                    ? selectedIncumbent.documents
+                    : [];
+
+                const directAttachment = attachedList.find(att => {
+                  const name = String(att.label || att.name || att.key || '').toLowerCase();
+                  const k = String(activeDoc?.key || activeDoc?.id || '').toLowerCase();
+                  const id = String(activeDoc?.id || '').toLowerCase();
+                  return name.includes(k) || name.includes(id);
+                });
+
+                const docUrl = directAttachment?.url ||
+                  (selectedIncumbent?.application_id
+                    ? `${import.meta.env.VITE_API_URL || window.location.origin}/api/applications/${selectedIncumbent.application_id}/documents/${activeDoc?.key || activeDoc?.id}/download?token=${localStorage.getItem('agap_token')}&dpi=98`
+                    : null);
+
+                const isActiveApproved = Boolean(activeDoc?.status === 'approved' || (activeDoc?.submitted && activeDoc?.verified && activeDoc?.status !== 'for_revision'));
+                const isActiveRevision = Boolean(activeDoc?.status === 'for_revision');
 
                 return (
-                  <div style={{
-                    background: isDark ? 'rgba(15, 23, 42, 0.6)' : 'var(--card-subtle)',
-                    borderRadius: '16px',
-                    border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid var(--line)',
-                    padding: '20px',
-                    boxShadow: isDark ? '0 8px 32px rgba(0, 0, 0, 0.2)' : '0 4px 12px rgba(0, 0, 0, 0.03)'
-                  }}>
+                  <div
+                    id="section-doc-vault"
+                    ref={docVaultRef}
+                    style={{
+                      background: isDark ? 'rgba(15, 23, 42, 0.65)' : 'var(--card-subtle)',
+                      borderRadius: '16px',
+                      border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid var(--line)',
+                      padding: '20px',
+                      boxShadow: isDark ? '0 8px 32px rgba(0, 0, 0, 0.2)' : '0 4px 12px rgba(0, 0, 0, 0.03)'
+                    }}
+                  >
                     {/* Header Controls */}
                     <div style={{
                       display: 'flex',
@@ -4703,16 +5443,19 @@ export default function ReclassificationPage({ onBack }) {
                           fontWeight: 800,
                           color: isDark ? '#38bdf8' : '#0284c7',
                           textTransform: 'uppercase',
-                          letterSpacing: '0.05em'
+                          letterSpacing: '0.05em',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px'
                         }}>
-                          1. Documentary Screening &amp; Requirements Checklist
+                          <span>📁</span> 1. Document Vault &amp; Requirements Screening
                         </div>
                         <div style={{ fontSize: '12px', color: 'var(--text-secondary, #94a3b8)', marginTop: '2px' }}>
-                          Tick submitted requirements. The mandatory requirements unlock the QS Evaluation automatically once completed.
+                          Select any credential to preview it in the vault. Mark items as <b>Approved</b> or <b>For Revision</b>. All mandatory requirements must be approved to unlock QS Evaluation.
                         </div>
                       </div>
 
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                         <span style={{
                           fontSize: '11.5px',
                           fontWeight: 800,
@@ -4728,8 +5471,22 @@ export default function ReclassificationPage({ onBack }) {
                             ? (isDark ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #a7f3d0')
                             : (isDark ? '1px solid rgba(245, 158, 11, 0.4)' : '1px solid #fde68a')
                         }}>
-                          {requiredVerifiedCount} of {requiredReqs.length} Mandatory ({verifiedCount} of {docChecklist.length} Total)
+                          {requiredApprovedCount} of {requiredReqs.length} Mandatory Approved ({approvedCount} of {docChecklist.length} Total)
                         </span>
+
+                        {revisionCount > 0 && (
+                          <span style={{
+                            fontSize: '11.5px',
+                            fontWeight: 800,
+                            padding: '3px 10px',
+                            borderRadius: '8px',
+                            background: isDark ? 'rgba(120, 53, 15, 0.4)' : '#fff7ed',
+                            color: isDark ? '#fdba74' : '#c2410c',
+                            border: isDark ? '1px solid rgba(249, 115, 22, 0.4)' : '1px solid #fed7aa'
+                          }}>
+                            ⚠ {revisionCount} For Revision
+                          </span>
+                        )}
 
                         {!isRegionalOffice && (
                           <>
@@ -4747,7 +5504,7 @@ export default function ReclassificationPage({ onBack }) {
                                 cursor: 'pointer'
                               }}
                             >
-                              ✓ Verify All
+                              ✓ Approve All
                             </button>
                             <button
                               type="button"
@@ -4788,7 +5545,7 @@ export default function ReclassificationPage({ onBack }) {
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                           <polyline points="20 6 9 17 4 12" />
                         </svg>
-                        All required documents are submitted and verified. Qualification Standards (QS) Evaluation is unlocked.
+                        All mandatory requirements are approved. Qualification Standards (QS) Evaluation is unlocked.
                       </div>
                     ) : (
                       <div style={{
@@ -4810,145 +5567,578 @@ export default function ReclassificationPage({ onBack }) {
                           <line x1="12" y1="16" x2="12.01" y2="16" />
                         </svg>
                         <div>
-                          <b>{requiredVerifiedCount} of {requiredReqs.length} Mandatory Requirements complete.</b> Tick all 5 mandatory requirements below to unlock Qualification Standards (QS) Evaluation.
+                          {revisionCount > 0 ? (
+                            <>
+                              <b>{revisionCount} document(s) marked for revision.</b> ({requiredApprovedCount} of {requiredReqs.length} Mandatory Approved). Resolve revision items and approve all mandatory requirements to unlock Qualification Standards (QS) Evaluation.
+                            </>
+                          ) : (
+                            <>
+                              <b>{requiredApprovedCount} of {requiredReqs.length} Mandatory Requirements approved.</b> Review and approve each required document below to unlock Qualification Standards (QS) Evaluation.
+                            </>
+                          )}
                         </div>
                       </div>
                     )}
 
-                    {/* Section A: Mandatory Requirements (Card Grid) */}
-                    <div style={{ marginBottom: '14px' }}>
+                    {/* Integrated 2-Column Document Vault Workbench */}
+                    <div style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'minmax(330px, 390px) 1fr',
+                      gap: '16px',
+                      alignItems: 'stretch',
+                      minHeight: '480px'
+                    }}>
+                      {/* Left: Document Checklist Selector */}
                       <div style={{
-                        display: 'grid',
-                        gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))',
-                        gap: '8px'
-                      }}>
-                        {requiredReqs.map(doc => {
-                          const isChecked = Boolean(doc.submitted && doc.verified);
-                          return (
-                            <label
-                              key={doc.id}
-                              style={{
-                                display: 'grid',
-                                gridTemplateColumns: '20px 1fr',
-                                gap: '10px',
-                                alignItems: 'start',
-                                padding: '12px 14px',
-                                borderRadius: '12px',
-                                border: isChecked
-                                  ? (isDark ? '1.5px solid #22c55e' : '1.5px solid #86efac')
-                                  : (isDark ? '1.5px solid rgba(51, 65, 85, 0.8)' : '1.5px solid #e2e8f0'),
-                                background: isChecked
-                                  ? (isDark ? 'rgba(22, 101, 52, 0.22)' : '#f0fdf4')
-                                  : (isDark ? 'rgba(30, 41, 59, 0.4)' : '#f8fcff'),
-                                cursor: isRegionalOffice ? 'not-allowed' : 'pointer',
-                                transition: 'all 0.15s ease',
-                                boxShadow: isChecked
-                                  ? (isDark ? '0 2px 8px rgba(34, 197, 94, 0.15)' : '0 1px 3px rgba(22, 163, 74, 0.08)')
-                                  : 'none'
-                              }}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={isChecked}
-                                onChange={() => handleToggleDocSubmitted(doc.id)}
-                                disabled={isRegionalOffice}
-                                style={{
-                                  width: '17px',
-                                  height: '17px',
-                                  marginTop: '2px',
-                                  accentColor: '#2563eb',
-                                  cursor: isRegionalOffice ? 'not-allowed' : 'pointer',
-                                  flexShrink: 0
-                                }}
-                              />
-                              <span style={{
-                                fontSize: '11px',
-                                fontWeight: 800,
-                                color: isChecked ? (isDark ? '#86efac' : '#1e293b') : (isDark ? '#94a3b8' : '#334155'),
-                                lineHeight: 1.35,
-                                letterSpacing: '0.02em',
-                                textTransform: 'uppercase'
-                              }}>
-                                <span style={{ color: isChecked ? '#16a34a' : '#ef4444', marginRight: '5px' }}>[REQUIRED]</span>
-                                {doc.label}
-                              </span>
-                            </label>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    {/* Section B: Other Requirements (Card Grid) */}
-                    <div>
-                      <div style={{
-                        fontSize: '12px',
-                        fontWeight: 800,
-                        color: isDark ? '#94a3b8' : '#64748b',
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.04em',
-                        marginBottom: '10px',
+                        border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid var(--line)',
+                        borderRadius: '12px',
+                        overflow: 'hidden',
+                        background: isDark ? 'rgba(15, 23, 42, 0.75)' : '#ffffff',
                         display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px'
+                        flexDirection: 'column'
                       }}>
-                        <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#94a3b8', display: 'inline-block' }} />
-                        OTHER REQUIREMENTS ({otherVerifiedCount} OF {otherReqs.length})
+                        <div style={{
+                          padding: '11px 14px',
+                          borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid #e2e8f0',
+                          background: isDark ? 'rgba(30, 41, 59, 0.6)' : '#f8fafc',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between'
+                        }}>
+                          <span style={{ fontSize: '11px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--text-secondary, #64748b)' }}>
+                            Requirements Checklist ({docChecklist.length})
+                          </span>
+                          <span style={{ fontSize: '10px', color: 'var(--text-secondary, #94a3b8)', fontWeight: 600 }}>
+                            Click to preview
+                          </span>
+                        </div>
+
+                        <div style={{
+                          overflowY: 'auto',
+                          maxHeight: '520px',
+                          display: 'flex',
+                          flexDirection: 'column'
+                        }}>
+                          {docChecklist.map((doc) => {
+                            const isSelected = (doc.key || doc.id) === (activeDoc?.key || activeDoc?.id);
+                            const isApproved = doc.status === 'approved' || (doc.submitted && doc.verified && doc.status !== 'for_revision');
+                            const isRevision = doc.status === 'for_revision';
+                            const hasAttachment = attachedList.some(att => {
+                              const name = String(att.label || att.name || att.key || '').toLowerCase();
+                              const k = String(doc.key || doc.id || '').toLowerCase();
+                              const id = String(doc.id || '').toLowerCase();
+                              return name.includes(k) || name.includes(id);
+                            });
+
+                            return (
+                              <div
+                                key={doc.id}
+                                onClick={() => setSelectedVaultDocKey(doc.key || doc.id)}
+                                style={{
+                                  padding: '10px 12px',
+                                  cursor: 'pointer',
+                                  background: isSelected
+                                    ? (isDark ? 'rgba(2, 132, 199, 0.22)' : '#eff6ff')
+                                    : (isDark ? 'transparent' : '#ffffff'),
+                                  borderLeft: isSelected ? '4px solid #0284c7' : '4px solid transparent',
+                                  borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.4)' : '1px solid #f1f5f9',
+                                  transition: 'all 0.12s ease',
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  gap: '7px'
+                                }}
+                              >
+                                {/* Item Header: Badge & Title */}
+                                <div>
+                                  <div style={{
+                                    fontSize: '12px',
+                                    fontWeight: isSelected ? 800 : (isApproved ? 750 : 650),
+                                    color: isSelected
+                                      ? (isDark ? '#38bdf8' : '#0284c7')
+                                      : (isApproved ? (isDark ? '#86efac' : '#1e293b') : (isRevision ? (isDark ? '#fca5a5' : '#b91c1c') : 'var(--text)')),
+                                    lineHeight: 1.35,
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '5px',
+                                    flexWrap: 'wrap'
+                                  }}>
+                                    {doc.required && (
+                                      <span
+                                        title="Mandatory requirement"
+                                        style={{
+                                          color: '#ef4444',
+                                          fontWeight: 800,
+                                          fontSize: '14px',
+                                          lineHeight: 1,
+                                          display: 'inline-block'
+                                        }}
+                                      >
+                                        *
+                                      </span>
+                                    )}
+                                    <span>{doc.shortTitle || doc.label}</span>
+                                  </div>
+
+                                  <div style={{
+                                    marginTop: '3px',
+                                    fontSize: '10.5px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '6px',
+                                    flexWrap: 'wrap'
+                                  }}>
+                                    {isApproved && (
+                                      <span style={{ color: '#16a34a', fontWeight: 750, display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
+                                        ✓ Approved
+                                      </span>
+                                    )}
+                                    {isRevision && (
+                                      <span style={{ color: '#d97706', fontWeight: 750, display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
+                                        ⚠ For Revision
+                                      </span>
+                                    )}
+                                    {hasAttachment ? (
+                                      <span style={{ color: isDark ? '#7dd3fc' : '#0284c7', fontWeight: 650 }}>
+                                        • File Attached
+                                      </span>
+                                    ) : (
+                                      <span style={{ color: isDark ? '#64748b' : '#94a3b8' }}>
+                                        {isApproved ? '• Physical copy verified' : '• No file attached'}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Evaluation Action Buttons: Approved vs For Revision */}
+                                {!isRegionalOffice && (
+                                  <div
+                                    onClick={(e) => e.stopPropagation()}
+                                    style={{
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '6px'
+                                    }}
+                                  >
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setSelectedVaultDocKey(doc.key || doc.id);
+                                        handleSetDocStatus(doc.id, 'approved');
+                                      }}
+                                      style={{
+                                        flex: 1,
+                                        padding: '5px 8px',
+                                        borderRadius: '6px',
+                                        fontSize: '11px',
+                                        fontWeight: 750,
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        gap: '4px',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.15s ease',
+                                        border: isApproved
+                                          ? (isDark ? '1px solid #10b981' : '1px solid #059669')
+                                          : (isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid #cbd5e1'),
+                                        background: isApproved
+                                          ? (isDark ? 'rgba(16, 185, 129, 0.25)' : '#ecfdf5')
+                                          : (isDark ? 'rgba(30, 41, 59, 0.5)' : '#f8fafc'),
+                                        color: isApproved
+                                          ? (isDark ? '#34d399' : '#047857')
+                                          : 'var(--text-secondary, #64748b)'
+                                      }}
+                                    >
+                                      <span>✓</span> Approved
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setSelectedVaultDocKey(doc.key || doc.id);
+                                        handleSetDocStatus(doc.id, 'for_revision');
+                                      }}
+                                      style={{
+                                        flex: 1,
+                                        padding: '5px 8px',
+                                        borderRadius: '6px',
+                                        fontSize: '11px',
+                                        fontWeight: 750,
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        gap: '4px',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.15s ease',
+                                        border: isRevision
+                                          ? (isDark ? '1px solid #f59e0b' : '1px solid #d97706')
+                                          : (isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid #cbd5e1'),
+                                        background: isRevision
+                                          ? (isDark ? 'rgba(245, 158, 11, 0.25)' : '#fffbeb')
+                                          : (isDark ? 'rgba(30, 41, 59, 0.5)' : '#f8fafc'),
+                                        color: isRevision
+                                          ? (isDark ? '#fbbf24' : '#b45309')
+                                          : 'var(--text-secondary, #64748b)'
+                                      }}
+                                    >
+                                      <span>⚠</span> For Revision
+                                    </button>
+                                  </div>
+                                )}
+
+                                {/* Remarks input when For Revision or if remarks exist */}
+                                {(isRevision || Boolean(doc.remarks)) && (
+                                  <div
+                                    onClick={(e) => e.stopPropagation()}
+                                    style={{
+                                      marginTop: '2px',
+                                      padding: '8px 10px',
+                                      borderRadius: '8px',
+                                      background: isDark ? 'rgba(120, 53, 15, 0.22)' : '#fffbeb',
+                                      border: isDark ? '1px solid rgba(245, 158, 11, 0.35)' : '1px solid #fde68a',
+                                      display: 'flex',
+                                      flexDirection: 'column',
+                                      gap: '6px'
+                                    }}
+                                  >
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                      <span style={{ fontSize: '10.5px', fontWeight: 800, color: isDark ? '#fbbf24' : '#b45309', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+                                        Revision Remarks:
+                                      </span>
+                                      {doc.remarks && !isRegionalOffice && (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleSetDocRemarks(doc.id, '')}
+                                          style={{
+                                            background: 'none',
+                                            border: 'none',
+                                            color: 'var(--text-secondary, #94a3b8)',
+                                            fontSize: '10px',
+                                            cursor: 'pointer',
+                                            padding: 0
+                                          }}
+                                        >
+                                          Clear
+                                        </button>
+                                      )}
+                                    </div>
+
+                                    <input
+                                      type="text"
+                                      placeholder="Add remarks (e.g. Missing signature, submit certified true copy)..."
+                                      value={doc.remarks || ''}
+                                      disabled={isRegionalOffice}
+                                      onChange={(e) => handleSetDocRemarks(doc.id, e.target.value)}
+                                      style={{
+                                        width: '100%',
+                                        padding: '5px 8px',
+                                        fontSize: '11px',
+                                        borderRadius: '5px',
+                                        border: isDark ? '1px solid rgba(245, 158, 11, 0.4)' : '1px solid #cbd5e1',
+                                        background: isDark ? 'rgba(15, 23, 42, 0.85)' : '#ffffff',
+                                        color: 'var(--text)',
+                                        outline: 'none',
+                                        boxSizing: 'border-box'
+                                      }}
+                                    />
+
+                                    {!isRegionalOffice && (
+                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                                        {[
+                                          'Missing signature',
+                                          'Illegible scan',
+                                          'Certified copy needed',
+                                          'Incomplete pages',
+                                          'Expired document'
+                                        ].map((preset) => (
+                                          <button
+                                            key={preset}
+                                            type="button"
+                                            onClick={() => {
+                                              const current = doc.remarks || '';
+                                              const next = current ? `${current}; ${preset}` : preset;
+                                              handleSetDocRemarks(doc.id, next);
+                                            }}
+                                            style={{
+                                              fontSize: '9.5px',
+                                              fontWeight: 650,
+                                              padding: '2px 6px',
+                                              borderRadius: '4px',
+                                              border: isDark ? '1px solid rgba(245, 158, 11, 0.3)' : '1px solid #fde68a',
+                                              background: isDark ? 'rgba(30, 41, 59, 0.6)' : '#fef3c7',
+                                              color: isDark ? '#fcd34d' : '#92400e',
+                                              cursor: 'pointer'
+                                            }}
+                                          >
+                                            + {preset}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
 
+                      {/* Right: Document Viewer Pane */}
                       <div style={{
-                        display: 'grid',
-                        gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))',
-                        gap: '8px'
+                        border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid var(--line)',
+                        borderRadius: '12px',
+                        overflow: 'hidden',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        background: isDark ? 'rgba(15, 23, 42, 0.9)' : '#ffffff'
                       }}>
-                        {otherReqs.map(doc => {
-                          const isChecked = Boolean(doc.submitted && doc.verified);
-                          return (
-                            <label
-                              key={doc.id}
+                        {/* Viewer Subheader */}
+                        <div style={{
+                          padding: '10px 16px',
+                          backgroundColor: isDark ? 'rgba(30, 41, 59, 0.65)' : '#f8fafc',
+                          borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid var(--line)',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          gap: '10px',
+                          flexWrap: 'wrap'
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                            <svg
+                              width="15"
+                              height="15"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2.5"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              style={{ color: isDark ? '#38bdf8' : '#0284c7', flexShrink: 0 }}
+                            >
+                              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                              <circle cx="12" cy="12" r="3" />
+                            </svg>
+                            <span style={{
+                              fontWeight: 800,
+                              fontSize: '13px',
+                              color: 'var(--text)',
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis'
+                            }}>
+                              Preview: {activeDoc?.shortTitle || activeDoc?.label}
+                            </span>
+                          </div>
+
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            {!isRegionalOffice && (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <button
+                                  type="button"
+                                  onClick={() => handleSetDocStatus(activeDoc?.id, 'approved')}
+                                  style={{
+                                    padding: '4px 10px',
+                                    fontSize: '11px',
+                                    fontWeight: 750,
+                                    borderRadius: '6px',
+                                    border: isActiveApproved
+                                      ? (isDark ? '1px solid #10b981' : '1px solid #059669')
+                                      : (isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid #cbd5e1'),
+                                    background: isActiveApproved
+                                      ? (isDark ? 'rgba(16, 185, 129, 0.25)' : '#ecfdf5')
+                                      : (isDark ? 'rgba(30, 41, 59, 0.5)' : '#ffffff'),
+                                    color: isActiveApproved
+                                      ? (isDark ? '#34d399' : '#047857')
+                                      : 'var(--text-secondary, #64748b)',
+                                    cursor: 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px'
+                                  }}
+                                >
+                                  ✓ Approved
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleSetDocStatus(activeDoc?.id, 'for_revision')}
+                                  style={{
+                                    padding: '4px 10px',
+                                    fontSize: '11px',
+                                    fontWeight: 750,
+                                    borderRadius: '6px',
+                                    border: isActiveRevision
+                                      ? (isDark ? '1px solid #f59e0b' : '1px solid #d97706')
+                                      : (isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid #cbd5e1'),
+                                    background: isActiveRevision
+                                      ? (isDark ? 'rgba(245, 158, 11, 0.25)' : '#fffbeb')
+                                      : (isDark ? 'rgba(30, 41, 59, 0.5)' : '#ffffff'),
+                                    color: isActiveRevision
+                                      ? (isDark ? '#fbbf24' : '#b45309')
+                                      : 'var(--text-secondary, #64748b)',
+                                    cursor: 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px'
+                                  }}
+                                >
+                                  ⚠ For Revision
+                                </button>
+                              </div>
+                            )}
+
+                            <button
+                              type="button"
+                              disabled={!docUrl}
+                              title={!docUrl ? "No digital file attached to view in full screen" : "Open document in full screen preview"}
+                              onClick={() => {
+                                if (docUrl && setFullScreenDoc) {
+                                  setFullScreenDoc({
+                                    open: true,
+                                    url: docUrl,
+                                    title: activeDoc?.shortTitle || activeDoc?.label
+                                  });
+                                }
+                              }}
                               style={{
-                                display: 'grid',
-                                gridTemplateColumns: '20px 1fr',
-                                gap: '10px',
-                                alignItems: 'start',
-                                padding: '11px 14px',
-                                borderRadius: '12px',
-                                border: isChecked
-                                  ? (isDark ? '1.5px solid #22c55e' : '1.5px solid #86efac')
-                                  : (isDark ? '1.5px solid rgba(51, 65, 85, 0.7)' : '1.5px solid #e2e8f0'),
-                                background: isChecked
-                                  ? (isDark ? 'rgba(22, 101, 52, 0.18)' : '#f0fdf4')
-                                  : (isDark ? 'rgba(30, 41, 59, 0.3)' : '#f8fcff'),
-                                cursor: isRegionalOffice ? 'not-allowed' : 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '5px',
+                                padding: '4px 10px',
+                                fontSize: '11px',
+                                fontWeight: 700,
+                                color: !docUrl ? (isDark ? '#64748b' : '#94a3b8') : 'var(--text)',
+                                backgroundColor: isDark ? 'rgba(30, 41, 59, 0.8)' : '#ffffff',
+                                border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid #cbd5e1',
+                                borderRadius: '6px',
+                                cursor: !docUrl ? 'not-allowed' : 'pointer',
+                                opacity: !docUrl ? 0.6 : 1,
                                 transition: 'all 0.15s ease'
                               }}
                             >
-                              <input
-                                type="checkbox"
-                                checked={isChecked}
-                                onChange={() => handleToggleDocSubmitted(doc.id)}
-                                disabled={isRegionalOffice}
-                                style={{
-                                  width: '16px',
-                                  height: '16px',
-                                  marginTop: '2px',
-                                  accentColor: '#2563eb',
-                                  cursor: isRegionalOffice ? 'not-allowed' : 'pointer',
-                                  flexShrink: 0
-                                }}
-                              />
-                              <span style={{
-                                fontSize: '11px',
-                                fontWeight: isChecked ? 800 : 700,
-                                color: isChecked ? (isDark ? '#86efac' : '#1e293b') : (isDark ? '#94a3b8' : '#475569'),
-                                lineHeight: 1.35,
-                                letterSpacing: '0.02em',
-                                textTransform: 'uppercase'
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
+                              </svg>
+                              Full Screen
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Revision remarks input bar inside Viewer pane if activeDoc is for revision */}
+                        {activeDoc && (activeDoc.status === 'for_revision' || Boolean(activeDoc.remarks)) && (
+                          <div style={{
+                            padding: '8px 16px',
+                            backgroundColor: isDark ? 'rgba(120, 53, 15, 0.25)' : '#fffbeb',
+                            borderBottom: isDark ? '1px solid rgba(245, 158, 11, 0.35)' : '1px solid #fde68a',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '10px',
+                            flexWrap: 'wrap'
+                          }}>
+                            <span style={{ fontSize: '11px', fontWeight: 800, color: isDark ? '#fbbf24' : '#b45309', whiteSpace: 'nowrap' }}>
+                              ⚠ Revision Remarks:
+                            </span>
+                            <input
+                              type="text"
+                              placeholder="Add revision remarks for this document..."
+                              value={activeDoc.remarks || ''}
+                              onChange={(e) => handleSetDocRemarks(activeDoc.id, e.target.value)}
+                              disabled={isRegionalOffice}
+                              style={{
+                                flex: 1,
+                                minWidth: '220px',
+                                padding: '5px 10px',
+                                fontSize: '11.5px',
+                                borderRadius: '6px',
+                                border: isDark ? '1px solid rgba(245, 158, 11, 0.4)' : '1px solid #cbd5e1',
+                                background: isDark ? 'rgba(15, 23, 42, 0.85)' : '#ffffff',
+                                color: 'var(--text)',
+                                outline: 'none'
+                              }}
+                            />
+                          </div>
+                        )}
+
+                        {/* Document Viewer Frame or Empty State */}
+                        <div style={{
+                          width: '100%',
+                          minHeight: '430px',
+                          flex: 1,
+                          position: 'relative',
+                          background: isDark ? '#0b1120' : '#f8fafc',
+                          overflow: 'hidden',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center'
+                        }}>
+                          {docUrl ? (
+                            <iframe
+                              src={docUrl}
+                              style={{
+                                width: '100%',
+                                height: '100%',
+                                minHeight: '430px',
+                                border: 'none',
+                                display: 'block'
+                              }}
+                              title={activeDoc?.shortTitle || 'Document Viewer'}
+                            />
+                          ) : (
+                            <div style={{
+                              padding: '36px 20px',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              alignItems: 'center',
+                              textAlign: 'center',
+                              maxWidth: '420px'
+                            }}>
+                              <div style={{
+                                width: '56px',
+                                height: '56px',
+                                borderRadius: '14px',
+                                background: isDark ? 'rgba(30, 41, 59, 0.7)' : '#e2e8f0',
+                                border: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid #cbd5e1',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                marginBottom: '14px',
+                                fontSize: '26px'
                               }}>
-                                {doc.label}
-                              </span>
-                            </label>
-                          );
-                        })}
+                                📄
+                              </div>
+                              <h4 style={{
+                                margin: '0 0 6px 0',
+                                fontSize: '15px',
+                                fontWeight: 800,
+                                color: isDark ? '#f8fafc' : '#0f172a'
+                              }}>
+                                No Document Attached
+                              </h4>
+                              <p style={{
+                                margin: 0,
+                                fontSize: '12px',
+                                lineHeight: '1.5',
+                                color: isDark ? '#94a3b8' : '#64748b'
+                              }}>
+                                There is currently no electronic copy uploaded for <strong>{activeDoc?.shortTitle || activeDoc?.label}</strong> for this candidate.
+                              </p>
+                              <div style={{
+                                marginTop: '14px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                padding: '4px 10px',
+                                borderRadius: '20px',
+                                fontSize: '11px',
+                                fontWeight: 700,
+                                background: isDark ? 'rgba(234, 179, 8, 0.12)' : '#fef9c3',
+                                border: isDark ? '1px solid rgba(234, 179, 8, 0.28)' : '1px solid #fde047',
+                                color: isDark ? '#facc15' : '#854d0e'
+                              }}>
+                                <span style={{ fontSize: '10px' }}>⏳</span> Pending Candidate Submission / Attachment
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -4957,10 +6147,11 @@ export default function ReclassificationPage({ onBack }) {
 
               {/* Card 3: Position-Specific Qualification Standards (QS) Evaluation Section */}
               {(() => {
-                const missingRequiredDocs = docChecklist.filter(d => d.required && (!d.submitted || !d.verified));
+                const missingRequiredDocs = docChecklist.filter(d => d.required && ((!d.submitted || !d.verified || d.status !== 'approved') || d.status === 'for_revision'));
                 const isDocComplete = missingRequiredDocs.length === 0;
                 const effectiveTargetPos = modalTargetPosition || selectedIncumbent.target_position || selectedIncumbent.reclass_position || 'School Counselor I';
-                const standards = POSITION_QS_STANDARDS[effectiveTargetPos] || POSITION_QS_STANDARDS['School Counselor I'];
+                const standards = getPositionQsStandards(effectiveTargetPos);
+                const displayTargetPos = standards?.title || effectiveTargetPos;
                 const overallResult = getCalculatedQsStatus(qsEvaluation);
 
                 const criteriaRows = [
@@ -5029,7 +6220,7 @@ export default function ReclassificationPage({ onBack }) {
                           2. Position-Specific Qualification Standards (QS) Evaluation
                         </div>
                         <div style={{ fontSize: '12px', color: 'var(--text-secondary, #94a3b8)', marginTop: '2px' }}>
-                          CSC &amp; DepEd QS benchmarks for: <b style={{ color: 'var(--text)' }}>{effectiveTargetPos}</b>
+                          CSC &amp; DepEd QS benchmarks for: <b style={{ color: 'var(--text)' }}>{displayTargetPos}</b> {standards?.salaryGrade ? <span style={{ fontSize: '11px', fontWeight: 800, padding: '1px 7px', borderRadius: '4px', background: isDark ? 'rgba(56, 189, 248, 0.2)' : '#e0f2fe', color: isDark ? '#38bdf8' : '#0284c7', marginLeft: '6px' }}>SG {standards.salaryGrade}</span> : null}
                         </div>
                       </div>
 
@@ -5078,7 +6269,7 @@ export default function ReclassificationPage({ onBack }) {
                           borderRadius: '12px',
                           border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid var(--line)',
                           background: isDark ? 'rgba(15, 23, 42, 0.5)' : 'var(--card-solid, #ffffff)',
-                          marginBottom: '16px'
+                          marginBottom: '12px'
                         }}>
                           <table style={{ width: '100%', minWidth: '780px', borderCollapse: 'collapse', fontSize: '12.5px' }}>
                             <thead>
@@ -5090,9 +6281,9 @@ export default function ReclassificationPage({ onBack }) {
                                 textTransform: 'uppercase',
                                 letterSpacing: '0.04em'
                               }}>
-                                <th style={{ padding: '10px 14px', width: '130px', minWidth: '130px', textAlign: 'left', whiteSpace: 'nowrap' }}>Standard Criterion</th>
-                                <th style={{ padding: '10px 14px', textAlign: 'left', minWidth: '220px' }}>Target QS Requirement ({effectiveTargetPos})</th>
-                                <th style={{ padding: '10px 14px', textAlign: 'left', minWidth: '220px' }}>Personnel Record / Credential</th>
+                                <th style={{ padding: '10px 14px', width: '150px', minWidth: '150px', textAlign: 'left', whiteSpace: 'nowrap', borderRight: isDark ? '1px solid rgba(51, 65, 85, 0.4)' : '1px solid var(--line)' }}>Standard Criterion</th>
+                                <th style={{ padding: '10px 14px', textAlign: 'left', minWidth: '240px', borderRight: isDark ? '1px solid rgba(51, 65, 85, 0.4)' : '1px solid var(--line)' }}>Target QS Requirement ({displayTargetPos})</th>
+                                <th style={{ padding: '10px 14px', textAlign: 'left', minWidth: '220px', borderRight: isDark ? '1px solid rgba(51, 65, 85, 0.4)' : '1px solid var(--line)' }}>Personnel Record / Credential</th>
                                 <th style={{ padding: '10px 14px', textAlign: 'center', width: '230px', minWidth: '230px', whiteSpace: 'nowrap' }}>Evaluation</th>
                               </tr>
                             </thead>
@@ -5114,70 +6305,45 @@ export default function ReclassificationPage({ onBack }) {
                                           : 'transparent'
                                     }}
                                   >
-                                    <td style={{ padding: '12px 14px', verticalAlign: 'top', whiteSpace: 'nowrap' }}>
+                                    <td style={{ padding: '12px 14px', verticalAlign: 'top', whiteSpace: 'nowrap', borderRight: isDark ? '1px solid rgba(51, 65, 85, 0.25)' : '1px solid var(--line)' }}>
                                       <div style={{ fontWeight: 800, color: 'var(--text)', whiteSpace: 'nowrap' }}>
                                         {crit.title}
                                       </div>
                                     </td>
-                                    <td style={{ padding: '12px 14px', verticalAlign: 'top', color: 'var(--text-secondary, #94a3b8)', lineHeight: 1.4 }}>
+                                    <td style={{ padding: '12px 14px', verticalAlign: 'top', color: 'var(--text-secondary, #94a3b8)', lineHeight: 1.4, borderRight: isDark ? '1px solid rgba(51, 65, 85, 0.25)' : '1px solid var(--line)' }}>
                                       {crit.standard}
                                     </td>
-                                    <td style={{ padding: '12px 14px', verticalAlign: 'top' }}>
+                                    <td style={{ padding: '12px 14px', verticalAlign: 'top', borderRight: isDark ? '1px solid rgba(51, 65, 85, 0.25)' : '1px solid var(--line)' }}>
                                       <div style={{ fontWeight: 700, color: 'var(--text)', lineHeight: 1.4 }}>
                                         {crit.candidate}
                                       </div>
                                     </td>
                                     <td style={{ padding: '12px 14px', textAlign: 'center', verticalAlign: 'middle', whiteSpace: 'nowrap', width: '230px', minWidth: '230px' }}>
-                                      <div style={{ display: 'inline-flex', gap: '6px', alignItems: 'center', whiteSpace: 'nowrap' }}>
+                                      <div className="qs-eval-btn-group">
                                         <button
                                           type="button"
                                           onClick={() => handleSetQsCriterion(crit.key, 'Meets')}
                                           disabled={isRegionalOffice}
-                                          style={{
-                                            padding: '5px 12px',
-                                            borderRadius: '6px',
-                                            border: isMeets
-                                              ? (isDark ? '1.5px solid #10b981' : '1.5px solid #059669')
-                                              : (isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid var(--line)'),
-                                            background: isMeets
-                                              ? (isDark ? 'rgba(6, 78, 59, 0.6)' : '#ecfdf5')
-                                              : (isDark ? 'rgba(30, 41, 59, 0.4)' : 'var(--card-solid, #ffffff)'),
-                                            color: isMeets
-                                              ? (isDark ? '#6ee7b7' : '#047857')
-                                              : 'var(--text-secondary, #94a3b8)',
-                                            fontWeight: isMeets ? 800 : 650,
-                                            fontSize: '11.5px',
-                                            cursor: isRegionalOffice ? 'not-allowed' : 'pointer',
-                                            transition: 'all 0.15s ease',
-                                            whiteSpace: 'nowrap'
-                                          }}
+                                          className={`qs-btn qs-btn-meets ${isMeets ? 'active' : ''}`}
+                                          title={isMeets ? "Click to deselect" : "Mark as Meets requirement"}
                                         >
-                                          ✓ Meets
+                                          <svg className="qs-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={isMeets ? "3" : "2.5"} strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                                            <polyline points="20 6 9 17 4 12" />
+                                          </svg>
+                                          <span>Meets</span>
                                         </button>
                                         <button
                                           type="button"
                                           onClick={() => handleSetQsCriterion(crit.key, 'Does Not Meet')}
                                           disabled={isRegionalOffice}
-                                          style={{
-                                            padding: '5px 12px',
-                                            borderRadius: '6px',
-                                            border: isDoesNotMeet
-                                              ? (isDark ? '1.5px solid #ef4444' : '1.5px solid #dc2626')
-                                              : (isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid var(--line)'),
-                                            background: isDoesNotMeet
-                                              ? (isDark ? 'rgba(127, 29, 29, 0.5)' : '#fee2e2')
-                                              : (isDark ? 'rgba(30, 41, 59, 0.4)' : 'var(--card-solid, #ffffff)'),
-                                            color: isDoesNotMeet
-                                              ? (isDark ? '#fca5a5' : '#b91c1c')
-                                              : 'var(--text-secondary, #94a3b8)',
-                                            fontWeight: isDoesNotMeet ? 800 : 650,
-                                            fontSize: '11.5px',
-                                            cursor: isRegionalOffice ? 'not-allowed' : 'pointer',
-                                            transition: 'all 0.15s ease',
-                                            whiteSpace: 'nowrap'
-                                          }}
+                                          className={`qs-btn qs-btn-not-meets ${isDoesNotMeet ? 'active' : ''}`}
+                                          title={isDoesNotMeet ? "Click to deselect" : "Mark as Does Not Meet requirement"}
                                         >
-                                          ✗ Does Not Meet
+                                          <svg className="qs-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={isDoesNotMeet ? "3" : "2.5"} strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                                            <line x1="18" y1="6" x2="6" y2="18" />
+                                            <line x1="6" y1="6" x2="18" y2="18" />
+                                          </svg>
+                                          <span>Does Not Meet</span>
                                         </button>
                                       </div>
                                     </td>
@@ -5186,6 +6352,18 @@ export default function ReclassificationPage({ onBack }) {
                               })}
                             </tbody>
                           </table>
+                        </div>
+
+                        {/* Grandfather Clause Note */}
+                        <div style={{
+                          fontSize: '11px',
+                          color: isDark ? '#94a3b8' : '#64748b',
+                          fontStyle: 'italic',
+                          marginBottom: '16px',
+                          lineHeight: 1.45,
+                          padding: '0 4px'
+                        }}>
+                          * <b>Grandfather Clause:</b> Individuals who acquired PRC license according to Section 14 of RA No. 9258 (Guidance and Counseling Act of 2004) and Section 16 of RA No. 10029 (Philippine Psychology Act of 2009) shall be considered as having met the Master's degree education requirement for positions covered by the corresponding board laws.
                         </div>
 
                         {/* Overall QS Evaluation Result Summary Card */}
@@ -5232,7 +6410,7 @@ export default function ReclassificationPage({ onBack }) {
 
                           {overallResult === 'QUALIFIED' && (
                             <div style={{ fontSize: '13px', color: isDark ? '#a7f3d0' : '#047857', fontWeight: 700 }}>
-                              Candidate satisfies all Civil Service Commission (CSC) and DepEd Qualification Standards (Education, Experience, Training, Eligibility) for <b>{effectiveTargetPos}</b>.
+                              Candidate satisfies all Civil Service Commission (CSC) and DepEd Qualification Standards (Education, Experience, Training, Eligibility) for <b>{displayTargetPos}</b>.
                             </div>
                           )}
 
@@ -5266,7 +6444,7 @@ export default function ReclassificationPage({ onBack }) {
                           {/* Position Classification Comparison & Determination */}
                           <div style={{
                             display: 'grid',
-                            gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))',
+                            gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
                             gap: '12px',
                             marginBottom: '16px',
                             paddingBottom: '16px',
@@ -5290,26 +6468,7 @@ export default function ReclassificationPage({ onBack }) {
                               </div>
                             </div>
 
-                            {/* 2. Indicative Position */}
-                            <div style={{
-                              background: isDark ? 'rgba(2, 132, 199, 0.1)' : 'rgba(2, 132, 199, 0.05)',
-                              padding: '12px 14px',
-                              borderRadius: '10px',
-                              border: isDark ? '1px solid rgba(56, 189, 248, 0.35)' : '1px solid rgba(2, 132, 199, 0.25)'
-                            }}>
-                              <div style={{ fontSize: '10.5px', fontWeight: 800, color: isDark ? '#38bdf8' : '#0284c7', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                                <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}><span>⚡</span> Indicative Position</span>
-                                <span style={{ fontSize: '10px', padding: '1px 6px', borderRadius: '4px', background: isDark ? 'rgba(56, 189, 248, 0.2)' : '#e0f2fe', color: isDark ? '#38bdf8' : '#0284c7', fontWeight: 800 }}>QS Match</span>
-                              </div>
-                              <div style={{ fontWeight: 850, color: isDark ? '#7dd3fc' : '#0369a1', fontSize: '13.5px', marginTop: '6px' }}>
-                                {determineIndicativePosition(selectedIncumbent)}
-                              </div>
-                              <div style={{ fontSize: '11px', color: isDark ? '#94a3b8' : '#64748b', marginTop: '3px' }}>
-                                Determined from qualifications
-                              </div>
-                            </div>
-
-                            {/* 3. Actual Reclassification Position */}
+                            {/* 2. Actual Reclassification Position */}
                             <div style={{
                               background: isDark ? 'rgba(15, 23, 42, 0.6)' : 'var(--card-solid, #ffffff)',
                               padding: '12px 14px',
@@ -5323,14 +6482,9 @@ export default function ReclassificationPage({ onBack }) {
                               <select
                                 value={modalTargetPosition}
                                 onChange={e => {
-                                  const newPos = e.target.value;
-                                  setModalTargetPosition(newPos);
-                                  if (selectedIncumbent) {
-                                    const updatedQs = computeAutoQs(selectedIncumbent, newPos);
-                                    setQsEvaluation(updatedQs);
-                                  }
+                                  setModalTargetPosition(e.target.value);
                                 }}
-                                disabled={isRegionalOffice || savingModalChanges}
+                                disabled={savingModalChanges}
                                 style={{
                                   width: '100%',
                                   padding: '7px 10px',
@@ -5418,12 +6572,7 @@ export default function ReclassificationPage({ onBack }) {
                     <select
                       value={modalTargetPosition}
                       onChange={e => {
-                        const newPos = e.target.value;
-                        setModalTargetPosition(newPos);
-                        if (selectedIncumbent) {
-                          const updatedQs = computeAutoQs(selectedIncumbent, newPos);
-                          setQsEvaluation(updatedQs);
-                        }
+                        setModalTargetPosition(e.target.value);
                       }}
                       disabled={isRegionalOffice || savingModalChanges}
                       style={{
@@ -5492,6 +6641,37 @@ export default function ReclassificationPage({ onBack }) {
                         ))
                       )}
                     </select>
+
+                    {canEndorseToDbm && ['endorsed to ro', 'endorsed'].includes(String(selectedIncumbent?.stage_of_reclassification || '').trim().toLowerCase()) && (
+                      <div style={{ marginTop: '8px' }}>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmEndorseModal({ open: true, counselor: selectedIncumbent, isBulk: false })}
+                          style={{
+                            padding: '6px 14px',
+                            borderRadius: '8px',
+                            background: 'linear-gradient(135deg, #4338ca 0%, #6366f1 100%)',
+                            border: 'none',
+                            color: '#ffffff',
+                            fontSize: '11.5px',
+                            fontWeight: 750,
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            boxShadow: '0 2px 8px rgba(99, 102, 241, 0.3)',
+                            transition: 'all 0.15s ease'
+                          }}
+                          title="Directly endorse this candidate to DBM Regional Office"
+                        >
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M22 2L11 13" />
+                            <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                          </svg>
+                          <span>Endorse to DBM RO</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -5589,6 +6769,425 @@ export default function ReclassificationPage({ onBack }) {
                   )}
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal for Endorsed to DBM RO */}
+      {confirmEndorseModal.open && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(2, 6, 23, 0.75)',
+            backdropFilter: 'blur(6px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 99999,
+            padding: '20px'
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !endorsingToDbm) {
+              setConfirmEndorseModal({ open: false, counselor: null, isBulk: false });
+            }
+          }}
+        >
+          <div
+            style={{
+              background: isDark ? '#0f172a' : '#ffffff',
+              borderRadius: '16px',
+              width: '100%',
+              maxWidth: '520px',
+              boxShadow: isDark ? '0 25px 50px -12px rgba(0, 0, 0, 0.65)' : '0 20px 40px -10px rgba(0, 0, 0, 0.15)',
+              border: isDark ? '1px solid rgba(99, 102, 241, 0.3)' : '1px solid #e0e7ff',
+              overflow: 'hidden'
+            }}
+          >
+            {/* Modal Header */}
+            <div style={{
+              padding: '20px 24px',
+              borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid #f1f5f9',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+              background: isDark ? 'linear-gradient(135deg, rgba(67, 56, 202, 0.25) 0%, rgba(15, 23, 42, 0.6) 100%)' : '#f8faff'
+            }}>
+              <div style={{
+                width: '42px',
+                height: '42px',
+                borderRadius: '10px',
+                background: 'linear-gradient(135deg, #4338ca 0%, #6366f1 100%)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#ffffff',
+                boxShadow: '0 4px 12px rgba(99, 102, 241, 0.3)',
+                flexShrink: 0
+              }}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M22 2L11 13" />
+                  <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                </svg>
+              </div>
+              <div style={{ flex: 1 }}>
+                <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 800, color: 'var(--text)' }}>
+                  Confirm Endorsement to DBM RO
+                </h3>
+                <p style={{ margin: '2px 0 0', fontSize: '12px', color: 'var(--text-secondary, #94a3b8)' }}>
+                  Stage of Reclassification Transmittal Action
+                </p>
+              </div>
+            </div>
+
+            {/* Modal Body */}
+            <div style={{ padding: '20px 24px' }}>
+              {confirmEndorseModal.isBulk ? (
+                <div>
+                  <p style={{ fontSize: '13.5px', color: 'var(--text)', lineHeight: 1.5, margin: '0 0 14px' }}>
+                    You are about to endorse <b>{incumbents.filter(i => {
+                      const s = String(i.stage_of_reclassification || '').trim().toLowerCase();
+                      return s === 'endorsed to ro' || s === 'endorsed';
+                    }).length} candidate(s)</b> to the Department of Budget and Management (DBM) Regional Office.
+                  </p>
+                  <div style={{
+                    maxHeight: '170px',
+                    overflowY: 'auto',
+                    borderRadius: '8px',
+                    border: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid #e2e8f0',
+                    background: isDark ? 'rgba(30, 41, 59, 0.4)' : '#f8fafc',
+                    padding: '8px 12px',
+                    marginBottom: '14px'
+                  }}>
+                    {incumbents.filter(i => {
+                      const s = String(i.stage_of_reclassification || '').trim().toLowerCase();
+                      return s === 'endorsed to ro' || s === 'endorsed';
+                    }).map((c, idx) => (
+                      <div key={c.id || idx} style={{
+                        padding: '6px 0',
+                        borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.4)' : '1px solid #e2e8f0',
+                        fontSize: '12px',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center'
+                      }}>
+                        <span style={{ fontWeight: 700, color: 'var(--text)' }}>{c.full_name}</span>
+                        <span style={{ fontFamily: 'monospace', color: 'var(--text-secondary, #94a3b8)', fontSize: '11px' }}>
+                          {c.plantilla_item_number || c.employee_id}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : confirmEndorseModal.counselor ? (
+                <div>
+                  <p style={{ fontSize: '13.5px', color: 'var(--text)', lineHeight: 1.5, margin: '0 0 14px' }}>
+                    Are you sure you want to advance this candidate to <b>Endorsed to DBM RO</b>?
+                  </p>
+                  <div style={{
+                    padding: '12px 16px',
+                    borderRadius: '10px',
+                    background: isDark ? 'rgba(30, 41, 59, 0.5)' : '#f8fafc',
+                    border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid #e2e8f0',
+                    marginBottom: '16px'
+                  }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', rowGap: '6px', fontSize: '12.5px' }}>
+                      <span style={{ color: 'var(--text-secondary, #94a3b8)', fontWeight: 650 }}>Candidate:</span>
+                      <span style={{ color: 'var(--text)', fontWeight: 750 }}>{confirmEndorseModal.counselor.full_name}</span>
+
+                      <span style={{ color: 'var(--text-secondary, #94a3b8)', fontWeight: 650 }}>Plantilla Item:</span>
+                      <span style={{ color: 'var(--text)', fontWeight: 700, fontFamily: 'monospace' }}>
+                        {confirmEndorseModal.counselor.plantilla_item_number || confirmEndorseModal.counselor.employee_id}
+                      </span>
+
+                      <span style={{ color: 'var(--text-secondary, #94a3b8)', fontWeight: 650 }}>Actual Reclassification Position:</span>
+                      <span style={{ color: '#4338ca', fontWeight: 750 }}>
+                        {confirmEndorseModal.counselor.actual_position || confirmEndorseModal.counselor.target_position || confirmEndorseModal.counselor.reclass_position || 'School Counselor'}
+                      </span>
+
+                      <span style={{ color: 'var(--text-secondary, #94a3b8)', fontWeight: 650 }}>Current Stage:</span>
+                      <span style={{ color: 'var(--text)', fontWeight: 700 }}>
+                        {confirmEndorseModal.counselor.stage_of_reclassification || 'Endorsed to RO'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              <div style={{
+                padding: '10px 14px',
+                borderRadius: '8px',
+                background: isDark ? 'rgba(99, 102, 241, 0.15)' : '#eef2ff',
+                border: isDark ? '1px solid rgba(99, 102, 241, 0.3)' : '1px solid #c7d2fe',
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: '8px'
+              }}>
+                <span style={{ fontSize: '14px' }}>ℹ️</span>
+                <span style={{ fontSize: '11.5px', color: isDark ? '#c7d2fe' : '#3730a3', lineHeight: 1.4 }}>
+                  This confirmation will officially persist <b>"Endorsed to DBM RO"</b> into the candidate's <b>Stage of Reclassification</b> in the database.
+                </span>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div style={{
+              padding: '14px 24px',
+              borderTop: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid #f1f5f9',
+              background: isDark ? 'rgba(15, 23, 42, 0.95)' : '#f8fafc',
+              display: 'flex',
+              justifyContent: 'flex-end',
+              alignItems: 'center',
+              gap: '10px'
+            }}>
+              <button
+                type="button"
+                onClick={() => setConfirmEndorseModal({ open: false, counselor: null, isBulk: false })}
+                disabled={endorsingToDbm}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: '8px',
+                  border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid #cbd5e1',
+                  background: isDark ? 'rgba(30, 41, 59, 0.6)' : '#ffffff',
+                  color: 'var(--text)',
+                  fontSize: '12.5px',
+                  fontWeight: 700,
+                  cursor: endorsingToDbm ? 'not-allowed' : 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={handleConfirmEndorseToDbm}
+                disabled={endorsingToDbm}
+                style={{
+                  padding: '8px 20px',
+                  borderRadius: '8px',
+                  background: 'linear-gradient(135deg, #4338ca 0%, #6366f1 100%)',
+                  border: 'none',
+                  color: '#ffffff',
+                  fontSize: '12.5px',
+                  fontWeight: 750,
+                  cursor: endorsingToDbm ? 'not-allowed' : 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  boxShadow: '0 4px 12px rgba(99, 102, 241, 0.35)',
+                  opacity: endorsingToDbm ? 0.7 : 1
+                }}
+              >
+                {endorsingToDbm ? (
+                  <>
+                    <div style={{ width: '13px', height: '13px', border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+                    <span>Saving Stage...</span>
+                  </>
+                ) : (
+                  <>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                    <span>Confirm Endorsement to DBM RO</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CONFIRMATION MODAL: REVERT ENDORSEMENT */}
+      {confirmRevertModal.open && confirmRevertModal.counselor && (
+        <div
+          onClick={(e) => { if (e.target === e.currentTarget && !revertingEndorsement) setConfirmRevertModal({ open: false, counselor: null, targetStage: 'For Review' }); }}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: isDark ? 'rgba(2, 6, 23, 0.78)' : 'rgba(15, 23, 42, 0.55)',
+            backdropFilter: 'blur(8px)',
+            display: 'grid',
+            placeItems: 'center',
+            zIndex: 120,
+            padding: '16px'
+          }}
+        >
+          <div style={{
+            background: isDark ? 'rgba(15, 23, 42, 0.96)' : '#ffffff',
+            borderRadius: '20px',
+            width: 'min(520px, 94vw)',
+            boxShadow: isDark ? '0 25px 60px rgba(0,0,0,0.65)' : '0 20px 50px rgba(0,0,0,0.18)',
+            border: isDark ? '1px solid rgba(239, 68, 68, 0.35)' : '1px solid #fecaca',
+            overflow: 'hidden'
+          }}>
+            {/* Modal Header */}
+            <div style={{
+              padding: '18px 24px',
+              background: isDark ? 'rgba(69, 10, 10, 0.45)' : 'linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%)',
+              borderBottom: isDark ? '1px solid rgba(239, 68, 68, 0.25)' : '1px solid #fecaca',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <span style={{ fontSize: '20px' }}>↺</span>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 850, color: isDark ? '#fca5a5' : '#991b1b' }}>
+                    Revert Candidate Endorsement
+                  </h3>
+                  <div style={{ fontSize: '12px', color: isDark ? '#f87171' : '#b91c1c', marginTop: '1px' }}>
+                    Regional Office Candidate Status Rollback
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setConfirmRevertModal({ open: false, counselor: null, targetStage: 'For Review' })}
+                disabled={revertingEndorsement}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: '18px',
+                  cursor: revertingEndorsement ? 'not-allowed' : 'pointer',
+                  color: isDark ? '#f87171' : '#b91c1c'
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div style={{ padding: '22px 24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div style={{
+                padding: '12px 16px',
+                borderRadius: '10px',
+                background: isDark ? 'rgba(30, 41, 59, 0.6)' : '#f8fafc',
+                border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid var(--line)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '6px'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '11px', color: 'var(--text-secondary, #94a3b8)', fontWeight: 700, textTransform: 'uppercase' }}>Candidate</span>
+                  <span style={{ color: 'var(--text)', fontWeight: 800, fontSize: '13.5px' }}>{confirmRevertModal.counselor.full_name}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '11px', color: 'var(--text-secondary, #94a3b8)', fontWeight: 700, textTransform: 'uppercase' }}>Current Stage</span>
+                  <span style={{
+                    fontSize: '11px',
+                    fontWeight: 750,
+                    padding: '2px 8px',
+                    borderRadius: '5px',
+                    background: isDark ? 'rgba(99, 102, 241, 0.2)' : '#e0e7ff',
+                    color: isDark ? '#a5b4fc' : '#4338ca'
+                  }}>
+                    {confirmRevertModal.counselor.stage_of_reclassification || 'Endorsed to RO'}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '11px', color: 'var(--text-secondary, #94a3b8)', fontWeight: 700, textTransform: 'uppercase' }}>Target Revert Stage</span>
+                  <span style={{
+                    fontSize: '11px',
+                    fontWeight: 800,
+                    padding: '2px 8px',
+                    borderRadius: '5px',
+                    background: confirmRevertModal.targetStage === 'For Review'
+                      ? (isDark ? 'rgba(234, 179, 8, 0.2)' : '#fef9c3')
+                      : (isDark ? 'rgba(99, 102, 241, 0.2)' : '#e0e7ff'),
+                    color: confirmRevertModal.targetStage === 'For Review'
+                      ? (isDark ? '#fef08a' : '#854d0e')
+                      : (isDark ? '#a5b4fc' : '#4338ca')
+                  }}>
+                    ↺ {confirmRevertModal.targetStage}
+                  </span>
+                </div>
+              </div>
+
+              <div style={{
+                padding: '12px 14px',
+                borderRadius: '8px',
+                background: isDark ? 'rgba(239, 68, 68, 0.15)' : '#fef2f2',
+                border: isDark ? '1px solid rgba(239, 68, 68, 0.3)' : '1px solid #fecaca',
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: '8px'
+              }}>
+                <span style={{ fontSize: '14px' }}>⚠️</span>
+                <span style={{ fontSize: '12px', color: isDark ? '#fca5a5' : '#991b1b', lineHeight: 1.45 }}>
+                  {confirmRevertModal.targetStage === 'For Review'
+                    ? 'Reverting to "For Review" will send this candidate back to the Division (SDO HRMO) workbench for portfolio updates and re-assessment.'
+                    : 'Reverting to "Endorsed to RO" will cancel the DBM transmission and return this candidate to the Regional review queue.'}
+                </span>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div style={{
+              padding: '14px 24px',
+              borderTop: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid #f1f5f9',
+              background: isDark ? 'rgba(15, 23, 42, 0.95)' : '#f8fafc',
+              display: 'flex',
+              justifyContent: 'flex-end',
+              alignItems: 'center',
+              gap: '10px'
+            }}>
+              <button
+                type="button"
+                onClick={() => setConfirmRevertModal({ open: false, counselor: null, targetStage: 'For Review' })}
+                disabled={revertingEndorsement}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: '8px',
+                  border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid #cbd5e1',
+                  background: isDark ? 'rgba(30, 41, 59, 0.6)' : '#ffffff',
+                  color: 'var(--text)',
+                  fontSize: '12.5px',
+                  fontWeight: 700,
+                  cursor: revertingEndorsement ? 'not-allowed' : 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={handleConfirmRevertEndorsement}
+                disabled={revertingEndorsement}
+                style={{
+                  padding: '8px 20px',
+                  borderRadius: '8px',
+                  background: 'linear-gradient(135deg, #dc2626 0%, #ef4444 100%)',
+                  border: 'none',
+                  color: '#ffffff',
+                  fontSize: '12.5px',
+                  fontWeight: 750,
+                  cursor: revertingEndorsement ? 'not-allowed' : 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  boxShadow: '0 4px 12px rgba(239, 68, 68, 0.35)',
+                  opacity: revertingEndorsement ? 0.7 : 1
+                }}
+              >
+                {revertingEndorsement ? (
+                  <>
+                    <div style={{ width: '13px', height: '13px', border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+                    <span>Reverting...</span>
+                  </>
+                ) : (
+                  <>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="1 4 1 10 7 10" />
+                      <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+                    </svg>
+                    <span>Confirm Revert to {confirmRevertModal.targetStage}</span>
+                  </>
+                )}
+              </button>
             </div>
           </div>
         </div>
@@ -5871,17 +7470,20 @@ export default function ReclassificationPage({ onBack }) {
                           <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569' }}>Item Number</th>
                           <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569' }}>Incumbent Name</th>
                           <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569' }}>Position</th>
-                          <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569' }}>Division / Station</th>
-                          <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569' }}>Target Reclass</th>
+                          <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569' }}>Division</th>
+                          <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569' }}>School</th>
+                          <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 700, color: isDark ? '#94a3b8' : '#475569' }}>Reclassification Position</th>
                         </tr>
                       </thead>
                       <tbody>
                         {csvPreviewRows.map((row, idx) => {
-                          const itemNo = row['PLANTILLA ITEM NUMBER'] || row['Plantilla Item Number'] || Object.values(row)[4] || '—';
-                          const name = row['INCUMBENT'] || row['Incumbent'] || Object.values(row)[7] || '#N/A';
-                          const pos = row['POSITION TITLE'] || row['Position Title'] || Object.values(row)[5] || '—';
-                          const division = row['DIVISION'] || row['Division'] || Object.values(row)[1] || '—';
-                          const target = row['RECLASS POSITION'] || row['Reclass Position'] || Object.values(row)[8] || 'For Review';
+                          const itemNo = row['PLANTILLA ITEM NUMBER'] || row['Plantilla Item Number'] || row['item_no'] || Object.values(row)[4] || '—';
+                          const name = extractIncumbentName(row);
+                          const pos = row['POSITION TITLE'] || row['Position Title'] || row['current_position'] || Object.values(row)[5] || '—';
+                          const division = row['DIVISION'] || row['Division'] || row['division'] || Object.values(row)[1] || '—';
+                          const schoolId = row['SCHOOL ID'] || row['School ID'] || row['school_id'] || row['schoolid'] || '—';
+                          const schoolName = row['SCHOOL NAME'] || row['School Name'] || row['school_name'] || row['UACS_OPER_DSC'] || '—';
+                          const target = row['RECLASS POSITION'] || row['Reclass Position'] || row['reclass_position'] || Object.values(row)[8] || 'For Review';
 
                           return (
                             <tr key={idx} style={{ borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.4)' : '1px solid #f1f5f9' }}>
@@ -5891,6 +7493,25 @@ export default function ReclassificationPage({ onBack }) {
                               </td>
                               <td style={{ padding: '8px 12px', color: isDark ? '#94a3b8' : '#64748b' }}>{pos}</td>
                               <td style={{ padding: '8px 12px', color: isDark ? '#94a3b8' : '#64748b' }}>{division}</td>
+                              <td style={{ padding: '8px 12px' }}>
+                                <div style={{ fontWeight: 650, color: isDark ? '#cbd5e1' : '#334155' }}>{schoolName}</div>
+                                {schoolId !== '—' && (
+                                  <span style={{
+                                    fontSize: '10.5px',
+                                    fontWeight: 750,
+                                    fontFamily: 'monospace',
+                                    color: isDark ? '#38bdf8' : '#0369a1',
+                                    background: isDark ? 'rgba(14, 165, 233, 0.15)' : '#e0f2fe',
+                                    border: isDark ? '1px solid rgba(14, 165, 233, 0.3)' : '1px solid #bae6fd',
+                                    padding: '1.5px 6px',
+                                    borderRadius: '4px',
+                                    display: 'inline-block',
+                                    marginTop: '2px'
+                                  }}>
+                                    {schoolId}
+                                  </span>
+                                )}
+                              </td>
                               <td style={{ padding: '8px 12px' }}>
                                 <span style={{
                                   padding: '2px 8px',
@@ -5935,42 +7556,142 @@ export default function ReclassificationPage({ onBack }) {
               {/* Upload Success Summary */}
               {uploadStats && (
                 <div style={{
-                  padding: '16px 20px',
-                  borderRadius: '12px',
-                  background: isDark ? 'rgba(16, 185, 129, 0.15)' : '#ecfdf5',
-                  border: isDark ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #a7f3d0',
+                  padding: '18px 20px',
+                  borderRadius: '16px',
+                  background: isDark
+                    ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.12) 0%, rgba(15, 23, 42, 0.8) 100%)'
+                    : 'linear-gradient(135deg, #f0fdf4 0%, #ffffff 100%)',
+                  border: isDark ? '1px solid rgba(16, 185, 129, 0.35)' : '1px solid #bbf7d0',
+                  boxShadow: isDark
+                    ? '0 8px 32px -8px rgba(0, 0, 0, 0.5)'
+                    : '0 8px 30px -6px rgba(16, 185, 129, 0.1), 0 2px 6px -1px rgba(0, 0, 0, 0.03)',
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: '10px'
+                  gap: '14px'
                 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: isDark ? '#6ee7b7' : '#065f46', fontWeight: 750, fontSize: '13.5px' }}>
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
-                      <polyline points="22 4 12 14.01 9 11.01" />
-                    </svg>
-                    {uploadStats.message}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <div style={{
+                      width: '32px',
+                      height: '32px',
+                      borderRadius: '8px',
+                      background: isDark ? 'rgba(16, 185, 129, 0.25)' : '#dcfce7',
+                      color: isDark ? '#34d399' : '#059669',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0
+                    }}>
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                        <polyline points="22 4 12 14.01 9 11.01" />
+                      </svg>
+                    </div>
+                    <div style={{ fontSize: '13.5px', fontWeight: 650, color: isDark ? '#f1f5f9' : '#0f172a' }}>
+                      {uploadStats.message}
+                    </div>
                   </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '8px' }}>
-                    <div style={{ padding: '8px', borderRadius: '8px', background: isDark ? 'rgba(15, 23, 42, 0.5)' : '#ffffff', border: isDark ? '1px solid rgba(51, 65, 85, 0.5)' : '1px solid #e2e8f0' }}>
-                      <div style={{ fontSize: '10.5px', color: isDark ? '#94a3b8' : '#64748b', textTransform: 'uppercase', fontWeight: 700 }}>Total In Database</div>
-                      <div style={{ fontSize: '16px', fontWeight: 800, color: isDark ? '#f8fafc' : '#0f172a' }}>{uploadStats.totalInDatabase || uploadStats.insertedOrUpdated}</div>
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+                    gap: '10px'
+                  }}>
+                    {/* Card 1: Total Incumbents */}
+                    <div style={{
+                      padding: '12px 14px',
+                      borderRadius: '10px',
+                      background: isDark ? 'rgba(15, 23, 42, 0.7)' : '#ffffff',
+                      border: isDark ? '1px solid rgba(59, 130, 246, 0.3)' : '1px solid #e2e8f0',
+                      borderLeft: '4px solid #3b82f6',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '4px'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span style={{ fontSize: '10.5px', color: isDark ? '#94a3b8' : '#64748b', textTransform: 'uppercase', fontWeight: 750 }}>Total Incumbents</span>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                          <circle cx="9" cy="7" r="4" />
+                        </svg>
+                      </div>
+                      <div style={{ fontSize: '20px', fontWeight: 800, color: isDark ? '#f8fafc' : '#0f172a' }}>
+                        {uploadStats.totalInDatabase || uploadStats.insertedOrUpdated}
+                      </div>
                     </div>
+
+                    {/* Card 2: For Review */}
                     {uploadStats.metrics && (
-                      <>
-                        <div style={{ padding: '8px', borderRadius: '8px', background: isDark ? 'rgba(15, 23, 42, 0.5)' : '#ffffff', border: isDark ? '1px solid rgba(51, 65, 85, 0.5)' : '1px solid #e2e8f0' }}>
-                          <div style={{ fontSize: '10.5px', color: isDark ? '#94a3b8' : '#64748b', textTransform: 'uppercase', fontWeight: 700 }}>For Review</div>
-                          <div style={{ fontSize: '16px', fontWeight: 800, color: '#f59e0b' }}>{uploadStats.metrics.forReview}</div>
+                      <div style={{
+                        padding: '12px 14px',
+                        borderRadius: '10px',
+                        background: isDark ? 'rgba(15, 23, 42, 0.7)' : '#ffffff',
+                        border: isDark ? '1px solid rgba(245, 158, 11, 0.3)' : '1px solid #e2e8f0',
+                        borderLeft: '4px solid #f59e0b',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '4px'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <span style={{ fontSize: '10.5px', color: isDark ? '#94a3b8' : '#64748b', textTransform: 'uppercase', fontWeight: 750 }}>For Review</span>
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                            <circle cx="12" cy="12" r="10" />
+                            <polyline points="12 6 12 12 16 14" />
+                          </svg>
                         </div>
-                        <div style={{ padding: '8px', borderRadius: '8px', background: isDark ? 'rgba(15, 23, 42, 0.5)' : '#ffffff', border: isDark ? '1px solid rgba(51, 65, 85, 0.5)' : '1px solid #e2e8f0' }}>
-                          <div style={{ fontSize: '10.5px', color: isDark ? '#94a3b8' : '#64748b', textTransform: 'uppercase', fontWeight: 700 }}>Vacant / Unfilled</div>
-                          <div style={{ fontSize: '16px', fontWeight: 800, color: '#64748b' }}>{uploadStats.metrics.vacant}</div>
+                        <div style={{ fontSize: '20px', fontWeight: 800, color: '#f59e0b' }}>
+                          {uploadStats.metrics.forReview}
                         </div>
-                        <div style={{ padding: '8px', borderRadius: '8px', background: isDark ? 'rgba(15, 23, 42, 0.5)' : '#ffffff', border: isDark ? '1px solid rgba(51, 65, 85, 0.5)' : '1px solid #e2e8f0' }}>
-                          <div style={{ fontSize: '10.5px', color: isDark ? '#94a3b8' : '#64748b', textTransform: 'uppercase', fontWeight: 700 }}>Abolition</div>
-                          <div style={{ fontSize: '16px', fontWeight: 800, color: '#ef4444' }}>{uploadStats.metrics.abolition}</div>
+                      </div>
+                    )}
+
+                    {/* Card 3: Vacant / Unfilled */}
+                    {uploadStats.metrics && (
+                      <div style={{
+                        padding: '12px 14px',
+                        borderRadius: '10px',
+                        background: isDark ? 'rgba(15, 23, 42, 0.7)' : '#ffffff',
+                        border: isDark ? '1px solid rgba(100, 116, 139, 0.3)' : '1px solid #e2e8f0',
+                        borderLeft: '4px solid #64748b',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '4px'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <span style={{ fontSize: '10.5px', color: isDark ? '#94a3b8' : '#64748b', textTransform: 'uppercase', fontWeight: 750 }}>Vacant / Unfilled</span>
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                            <circle cx="8.5" cy="7" r="4" />
+                          </svg>
                         </div>
-                      </>
+                        <div style={{ fontSize: '20px', fontWeight: 800, color: isDark ? '#94a3b8' : '#64748b' }}>
+                          {uploadStats.metrics.vacant}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Card 4: Abolition */}
+                    {uploadStats.metrics && (
+                      <div style={{
+                        padding: '12px 14px',
+                        borderRadius: '10px',
+                        background: isDark ? 'rgba(15, 23, 42, 0.7)' : '#ffffff',
+                        border: isDark ? '1px solid rgba(239, 68, 68, 0.3)' : '1px solid #e2e8f0',
+                        borderLeft: '4px solid #ef4444',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '4px'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <span style={{ fontSize: '10.5px', color: isDark ? '#94a3b8' : '#64748b', textTransform: 'uppercase', fontWeight: 750 }}>Abolition</span>
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="3 6 5 6 21 6" />
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                          </svg>
+                        </div>
+                        <div style={{ fontSize: '20px', fontWeight: 800, color: '#ef4444' }}>
+                          {uploadStats.metrics.abolition}
+                        </div>
+                      </div>
                     )}
                   </div>
                 </div>
@@ -6049,7 +7770,14 @@ export default function ReclassificationPage({ onBack }) {
         </div>
       )}
 
-      {/* REGIONAL OFFICE: NOSCA SCANNER & PLANTILLA ITEM SELECTION MODAL */}
+      {/* NOSCA SCANNER & PLANTILLA ITEM SELECTION MODAL */}
+      <input
+        ref={noscaFileInputRef}
+        type="file"
+        accept=".pdf,application/pdf"
+        style={{ display: 'none' }}
+        onChange={handleNoscaFileChange}
+      />
       {showNoscaModal && (
         <div
           onClick={(e) => { if (e.target === e.currentTarget && !scanningNosca) setShowNoscaModal(false); }}
@@ -6342,7 +8070,7 @@ export default function ReclassificationPage({ onBack }) {
                             <span style={{ fontWeight: 650, color: isDark ? '#cbd5e1' : '#334155', textAlign: 'right', maxWidth: '180px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{scannedNoscaResult.school_name || 'All Stations'}</span>
                           </div>
                           <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.4)' : '1px solid #f1f5f9' }}>
-                            <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>Target Position</span>
+                            <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>Actual Reclassification Position</span>
                             <span style={{ fontWeight: 700, color: isDark ? '#f8fafc' : '#0f172a', textAlign: 'right' }}>{scannedNoscaResult.position || 'School Counselor Associate I'}</span>
                           </div>
                           <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.4)' : '1px solid #f1f5f9' }}>
@@ -6590,176 +8318,230 @@ export default function ReclassificationPage({ onBack }) {
                       </div>
                     </div>
 
-                    {/* School ID Autocomplete Field (fetched from agap_schools) */}
-                    <div ref={schoolSearchContainerRef} style={{ position: 'relative' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
-                        <label style={{ fontSize: '11px', fontWeight: 700, color: isDark ? '#cbd5e1' : '#334155' }}>
-                          School ID <span style={{ fontSize: '10px', color: isDark ? '#94a3b8' : '#64748b', fontWeight: 400 }}>(agap_schools)</span>
+                    {/* Category & School ID Row */}
+                    <div style={{
+                      display: 'grid',
+                      gridTemplateColumns: manualNoscaCategory === 'JHS' ? '1fr 1fr' : '1fr',
+                      gap: '10px',
+                      transition: 'all 0.2s ease'
+                    }}>
+                      {/* Category Field on the Left Side */}
+                      <div>
+                        <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: isDark ? '#cbd5e1' : '#334155', marginBottom: '4px' }}>
+                          Category <span style={{ color: '#ef4444' }}>*</span>
                         </label>
-                        {manualNoscaSchoolId && (
-                          <span style={{
-                            fontSize: '10px',
-                            fontWeight: 750,
-                            color: '#10b981',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '3px'
-                          }}>
-                            ✓ ID: {manualNoscaSchoolId}
-                          </span>
-                        )}
-                      </div>
-
-                      <div style={{ position: 'relative' }}>
-                        <input
-                          type="text"
-                          value={manualNoscaSchoolSearch}
+                        <select
+                          value={manualNoscaCategory}
                           onChange={(e) => {
                             const val = e.target.value;
-                            setManualNoscaSchoolSearch(val);
-                            setShowSchoolDropdown(true);
-                            if (!val.trim()) {
+                            setManualNoscaCategory(val);
+                            if (val !== 'JHS') {
                               setManualNoscaSchoolId('');
                               setManualNoscaSchoolName('');
-                            } else if (/^\d+$/.test(val.trim())) {
-                              setManualNoscaSchoolId(val.trim());
+                              setManualNoscaSchoolSearch('');
+                              setShowSchoolDropdown(false);
                             }
                           }}
-                          onFocus={() => setShowSchoolDropdown(true)}
-                          placeholder="Type School ID or School Name..."
                           style={{
                             width: '100%',
-                            padding: '7px 28px 7px 9px',
+                            height: '34px',
+                            padding: '7px 8px',
                             borderRadius: '8px',
                             fontSize: '11.5px',
+                            fontWeight: 650,
                             border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid #cbd5e1',
                             background: isDark ? 'rgba(15, 23, 42, 0.6)' : '#f8fafc',
                             color: isDark ? '#f8fafc' : '#0f172a',
                             outline: 'none',
                             boxSizing: 'border-box'
                           }}
-                        />
-
-                        {/* Spinner or Clear / Search Icon */}
-                        {loadingSchools ? (
-                          <div style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)', display: 'flex', alignItems: 'center' }}>
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="2.5" style={{ animation: 'spin 1s linear infinite' }}>
-                              <circle cx="12" cy="12" r="10" strokeDasharray="32" strokeDashoffset="10" />
-                            </svg>
-                          </div>
-                        ) : manualNoscaSchoolSearch ? (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setManualNoscaSchoolSearch('');
-                              setManualNoscaSchoolId('');
-                              setManualNoscaSchoolName('');
-                              setSchoolSuggestions([]);
-                            }}
-                            style={{
-                              position: 'absolute',
-                              right: '7px',
-                              top: '50%',
-                              transform: 'translateY(-50%)',
-                              background: 'transparent',
-                              border: 'none',
-                              color: isDark ? '#94a3b8' : '#64748b',
-                              cursor: 'pointer',
-                              fontSize: '11px',
-                              padding: '2px',
-                              lineHeight: 1
-                            }}
-                            title="Clear School"
-                          >
-                            ✕
-                          </button>
-                        ) : (
-                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={isDark ? '#94a3b8' : '#64748b'} strokeWidth="2.2" style={{ position: 'absolute', right: '9px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}>
-                            <circle cx="11" cy="11" r="8" />
-                            <line x1="21" y1="21" x2="16.65" y2="16.65" />
-                          </svg>
-                        )}
+                        >
+                          <option value="ELEMENTARY">Elementary</option>
+                          <option value="JHS">JHS</option>
+                          <option value="SHS">SHS</option>
+                          <option value="ALS">ALS</option>
+                        </select>
                       </div>
 
-                      {/* Autocomplete Dropdown List */}
-                      {showSchoolDropdown && (
-                        <div style={{
-                          position: 'absolute',
-                          top: 'calc(100% + 4px)',
-                          left: 0,
-                          right: 0,
-                          background: isDark ? 'rgba(15, 23, 42, 0.98)' : '#ffffff',
-                          backdropFilter: 'blur(16px)',
-                          border: isDark ? '1px solid rgba(99, 102, 241, 0.45)' : '1px solid #c7d2fe',
-                          borderRadius: '10px',
-                          boxShadow: isDark ? '0 10px 25px rgba(0,0,0,0.5)' : '0 8px 24px rgba(0,0,0,0.12)',
-                          maxHeight: '220px',
-                          overflowY: 'auto',
-                          zIndex: 60,
-                          padding: '4px'
-                        }}>
-                          {loadingSchools && schoolSuggestions.length === 0 ? (
-                            <div style={{ padding: '12px', textAlign: 'center', fontSize: '11px', color: isDark ? '#94a3b8' : '#64748b' }}>
-                              Searching agap_schools...
-                            </div>
-                          ) : schoolSuggestions.length > 0 ? (
-                            schoolSuggestions.map((school) => {
-                              const isSelected = String(manualNoscaSchoolId) === String(school.school_id);
-                              return (
-                                <div
-                                  key={school.school_id}
-                                  onClick={() => handleSelectSchool(school)}
-                                  style={{
-                                    padding: '8px 10px',
-                                    borderRadius: '7px',
-                                    cursor: 'pointer',
-                                    background: isSelected
-                                      ? (isDark ? 'rgba(79, 70, 229, 0.25)' : '#eef2ff')
-                                      : 'transparent',
-                                    display: 'flex',
-                                    flexDirection: 'column',
-                                    gap: '2px',
-                                    transition: 'background 0.12s ease'
-                                  }}
-                                  onMouseOver={(e) => {
-                                    if (!isSelected) e.currentTarget.style.background = isDark ? 'rgba(51, 65, 85, 0.5)' : '#f1f5f9';
-                                  }}
-                                  onMouseOut={(e) => {
-                                    if (!isSelected) e.currentTarget.style.background = 'transparent';
-                                  }}
-                                >
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                    <span style={{
-                                      fontFamily: 'monospace',
-                                      fontWeight: 800,
-                                      fontSize: '11px',
-                                      color: isDark ? '#a5b4fc' : '#4338ca',
-                                      background: isDark ? 'rgba(99, 102, 241, 0.2)' : '#e0e7ff',
-                                      padding: '1px 6px',
-                                      borderRadius: '4px'
-                                    }}>
-                                      {school.school_id}
-                                    </span>
-                                    <span style={{
-                                      fontSize: '11.5px',
-                                      fontWeight: 700,
-                                      color: isDark ? '#f8fafc' : '#0f172a',
-                                      overflow: 'hidden',
-                                      textOverflow: 'ellipsis',
-                                      whiteSpace: 'nowrap'
-                                    }}>
-                                      {school.school_name}
-                                    </span>
-                                  </div>
-                                  <div style={{ fontSize: '10px', color: isDark ? '#94a3b8' : '#64748b', paddingLeft: '2px' }}>
-                                    {school.division ? `Division of ${school.division}` : ''}{school.region ? ` • ${school.region}` : ''}
-                                  </div>
+                      {/* School ID Autocomplete Field (fetched from agap_schools) - Only rendered when Category is JHS */}
+                      {manualNoscaCategory === 'JHS' && (
+                        <div ref={schoolSearchContainerRef} style={{ position: 'relative' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                            <label style={{ fontSize: '11px', fontWeight: 700, color: isDark ? '#cbd5e1' : '#334155' }}>
+                              School ID
+                            </label>
+                            {manualNoscaSchoolId && (
+                              <span style={{
+                                fontSize: '10px',
+                                fontWeight: 750,
+                                color: '#10b981',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '3px'
+                              }}>
+                                ✓ ID: {manualNoscaSchoolId}
+                              </span>
+                            )}
+                          </div>
+
+                          <div style={{ position: 'relative' }}>
+                            <input
+                              type="text"
+                              value={manualNoscaSchoolSearch}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setManualNoscaSchoolSearch(val);
+                                setShowSchoolDropdown(true);
+                                if (!val.trim()) {
+                                  setManualNoscaSchoolId('');
+                                  setManualNoscaSchoolName('');
+                                } else if (/^\d+$/.test(val.trim())) {
+                                  setManualNoscaSchoolId(val.trim());
+                                }
+                              }}
+                              onFocus={() => setShowSchoolDropdown(true)}
+                              placeholder="Type School ID or School Name..."
+                              style={{
+                                width: '100%',
+                                padding: '7px 28px 7px 9px',
+                                borderRadius: '8px',
+                                fontSize: '11.5px',
+                                border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid #cbd5e1',
+                                background: isDark ? 'rgba(15, 23, 42, 0.6)' : '#f8fafc',
+                                color: isDark ? '#f8fafc' : '#0f172a',
+                                outline: 'none',
+                                boxSizing: 'border-box'
+                              }}
+                            />
+
+                            {/* Spinner or Clear / Search Icon */}
+                            {loadingSchools ? (
+                              <div style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)', display: 'flex', alignItems: 'center' }}>
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="2.5" style={{ animation: 'spin 1s linear infinite' }}>
+                                  <circle cx="12" cy="12" r="10" strokeDasharray="32" strokeDashoffset="10" />
+                                </svg>
+                              </div>
+                            ) : manualNoscaSchoolSearch ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setManualNoscaSchoolSearch('');
+                                  setManualNoscaSchoolId('');
+                                  setManualNoscaSchoolName('');
+                                  setSchoolSuggestions([]);
+                                }}
+                                style={{
+                                  position: 'absolute',
+                                  right: '7px',
+                                  top: '50%',
+                                  transform: 'translateY(-50%)',
+                                  background: 'transparent',
+                                  border: 'none',
+                                  color: isDark ? '#94a3b8' : '#64748b',
+                                  cursor: 'pointer',
+                                  fontSize: '11px',
+                                  padding: '2px',
+                                  lineHeight: 1
+                                }}
+                                title="Clear School"
+                              >
+                                ✕
+                              </button>
+                            ) : (
+                              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={isDark ? '#94a3b8' : '#64748b'} strokeWidth="2.2" style={{ position: 'absolute', right: '9px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}>
+                                <circle cx="11" cy="11" r="8" />
+                                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                              </svg>
+                            )}
+                          </div>
+
+                          {/* Autocomplete Dropdown List */}
+                          {showSchoolDropdown && (
+                            <div style={{
+                              position: 'absolute',
+                              top: 'calc(100% + 4px)',
+                              right: 0,
+                              minWidth: '100%',
+                              width: 'max(100%, 340px)',
+                              maxWidth: 'min(460px, calc(100vw - 32px))',
+                              background: isDark ? 'rgba(15, 23, 42, 0.98)' : '#ffffff',
+                              backdropFilter: 'blur(16px)',
+                              border: isDark ? '1px solid rgba(99, 102, 241, 0.45)' : '1px solid #c7d2fe',
+                              borderRadius: '10px',
+                              boxShadow: isDark ? '0 10px 25px rgba(0,0,0,0.5)' : '0 8px 24px rgba(0,0,0,0.12)',
+                              maxHeight: '260px',
+                              overflowY: 'auto',
+                              zIndex: 60,
+                              padding: '5px',
+                              boxSizing: 'border-box'
+                            }}>
+                              {loadingSchools && schoolSuggestions.length === 0 ? (
+                                <div style={{ padding: '12px', textAlign: 'center', fontSize: '11px', color: isDark ? '#94a3b8' : '#64748b' }}>
+                                  Searching schools...
                                 </div>
-                              );
-                            })
-                          ) : (
-                            <div style={{ padding: '12px', textAlign: 'center', fontSize: '11px', color: isDark ? '#94a3b8' : '#64748b' }}>
-                              {manualNoscaSchoolSearch.trim() ? 'No matching schools found.' : 'Type to search schools...'}
+                              ) : schoolSuggestions.length > 0 ? (
+                                schoolSuggestions.map((school) => {
+                                  const isSelected = String(manualNoscaSchoolId) === String(school.school_id);
+                                  return (
+                                    <div
+                                      key={school.school_id}
+                                      onClick={() => handleSelectSchool(school)}
+                                      title={school.school_name}
+                                      style={{
+                                        padding: '8px 10px',
+                                        borderRadius: '7px',
+                                        cursor: 'pointer',
+                                        background: isSelected
+                                          ? (isDark ? 'rgba(79, 70, 229, 0.25)' : '#eef2ff')
+                                          : 'transparent',
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        gap: '3px',
+                                        transition: 'background 0.12s ease'
+                                      }}
+                                      onMouseOver={(e) => {
+                                        if (!isSelected) e.currentTarget.style.background = isDark ? 'rgba(51, 65, 85, 0.5)' : '#f1f5f9';
+                                      }}
+                                      onMouseOut={(e) => {
+                                        if (!isSelected) e.currentTarget.style.background = 'transparent';
+                                      }}
+                                    >
+                                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '6px' }}>
+                                        <span style={{
+                                          fontFamily: 'monospace',
+                                          fontWeight: 800,
+                                          fontSize: '11px',
+                                          color: isDark ? '#a5b4fc' : '#4338ca',
+                                          background: isDark ? 'rgba(99, 102, 241, 0.2)' : '#e0e7ff',
+                                          padding: '2px 6px',
+                                          borderRadius: '4px',
+                                          flexShrink: 0,
+                                          marginTop: '1px'
+                                        }}>
+                                          {school.school_id}
+                                        </span>
+                                        <span style={{
+                                          fontSize: '11.5px',
+                                          fontWeight: 700,
+                                          color: isDark ? '#f8fafc' : '#0f172a',
+                                          lineHeight: 1.35,
+                                          wordBreak: 'break-word',
+                                          whiteSpace: 'normal'
+                                        }}>
+                                          {school.school_name}
+                                        </span>
+                                      </div>
+                                      <div style={{ fontSize: '10px', color: isDark ? '#94a3b8' : '#64748b', paddingLeft: '2px', lineHeight: 1.3 }}>
+                                        {school.division ? `Division of ${school.division}` : ''}{school.region ? ` • ${school.region}` : ''}
+                                      </div>
+                                    </div>
+                                  );
+                                })
+                              ) : (
+                                <div style={{ padding: '12px', textAlign: 'center', fontSize: '11px', color: isDark ? '#94a3b8' : '#64748b' }}>
+                                  {manualNoscaSchoolSearch.trim() ? 'No matching schools found.' : 'Type to search schools...'}
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>
@@ -6801,7 +8583,7 @@ export default function ReclassificationPage({ onBack }) {
                           type="text"
                           value={manualNoscaDivision}
                           onChange={(e) => setManualNoscaDivision(e.target.value)}
-                          placeholder={divisionFilter && divisionFilter !== 'ALL' ? divisionFilter : 'Regional Scope'}
+                          placeholder={sdoDivisionFilter && sdoDivisionFilter !== 'ALL' ? sdoDivisionFilter : 'Regional Scope'}
                           style={{
                             width: '100%',
                             padding: '7px 8px',
@@ -6899,7 +8681,7 @@ export default function ReclassificationPage({ onBack }) {
                         border: isDark ? '1px solid rgba(59, 130, 246, 0.3)' : '1px solid #bfdbfe'
                       }}>
                         <div style={{ fontSize: '10px', fontWeight: 800, color: isDark ? '#93c5fd' : '#1d4ed8', textTransform: 'uppercase' }}>
-                          Target Position
+                          Actual Reclassification Position
                         </div>
                         <div style={{ fontSize: '13px', fontWeight: 850, color: isDark ? '#dbeafe' : '#1e3a8a', margin: '2px 0 1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {scannedNoscaResult.position || 'School Counselor Associate I'}
@@ -7743,7 +9525,7 @@ export default function ReclassificationPage({ onBack }) {
                 <span style={{ fontWeight: 700, color: isDark ? '#f8fafc' : '#0f172a' }}>{scannedNoscaResult?.division ? `Division of ${scannedNoscaResult.division}` : 'Regional Office'}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: isDark ? '#94a3b8' : '#64748b', fontWeight: 600 }}>Target Position:</span>
+                <span style={{ color: isDark ? '#94a3b8' : '#64748b', fontWeight: 600 }}>Actual Reclassification Position:</span>
                 <span style={{ fontWeight: 700, color: '#10b981' }}>{scannedNoscaResult?.position || 'School Counselor Associate I'}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid #e2e8f0', paddingTop: '8px', marginTop: '2px' }}>
@@ -7815,6 +9597,490 @@ export default function ReclassificationPage({ onBack }) {
                     <span>Confirm & Add to Inventory</span>
                   </>
                 )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* STATION MISMATCH ERROR POPUP MODAL */}
+      {stationMismatchModal.open && (
+        <div
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setStationMismatchModal(prev => ({ ...prev, open: false }));
+            }
+          }}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(2, 6, 23, 0.75)',
+            backdropFilter: 'blur(8px)',
+            display: 'grid',
+            placeItems: 'center',
+            zIndex: 9999,
+            padding: '16px'
+          }}
+        >
+          <div style={{
+            background: isDark ? '#0f172a' : '#ffffff',
+            borderRadius: '20px',
+            width: 'min(620px, 94vw)',
+            maxHeight: '90vh',
+            display: 'flex',
+            flexDirection: 'column',
+            boxShadow: '0 25px 60px rgba(0,0,0,0.5)',
+            border: isDark ? '1px solid rgba(239, 68, 68, 0.4)' : '1px solid #fecaca',
+            overflow: 'hidden'
+          }}>
+            {/* Modal Header */}
+            <div style={{
+              padding: '24px 26px 16px',
+              borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid #f1f5f9',
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: '14px'
+            }}>
+              <div style={{
+                width: '46px',
+                height: '46px',
+                borderRadius: '12px',
+                background: isDark ? 'rgba(239, 68, 68, 0.2)' : '#fee2e2',
+                color: '#ef4444',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0
+              }}>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                  <line x1="12" y1="9" x2="12" y2="13" />
+                  <line x1="12" y1="17" x2="12.01" y2="17" />
+                </svg>
+              </div>
+
+              <div style={{ flex: 1 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                  <h4 style={{ fontSize: '18px', fontWeight: 850, margin: 0, color: isDark ? '#f8fafc' : '#0f172a' }}>
+                    {stationMismatchModal.hasDuplicateItems && stationMismatchModal.hasStationMismatch
+                      ? 'Duplicate Item Numbers & Station Mismatch'
+                      : (stationMismatchModal.hasDuplicateItems ? 'Duplicate Item Numbers Detected' : 'Station Mismatch Detected')}
+                  </h4>
+                  <button
+                    type="button"
+                    onClick={() => setStationMismatchModal(prev => ({ ...prev, open: false }))}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: isDark ? '#94a3b8' : '#64748b',
+                      cursor: 'pointer',
+                      padding: '4px'
+                    }}
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="18" y1="6" x2="6" y2="18" />
+                      <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                  </button>
+                </div>
+                <p style={{ margin: '4px 0 0', fontSize: '12.5px', color: isDark ? '#cbd5e1' : '#64748b' }}>
+                  {stationMismatchModal.hasDuplicateItems && stationMismatchModal.hasStationMismatch
+                    ? <>The uploaded file <b>{stationMismatchModal.fileName}</b> contains repeated Plantilla Item Numbers and station mismatches. In <b>reclass_gc</b>, the item_no must not repeat.</>
+                    : (stationMismatchModal.hasDuplicateItems
+                        ? <>The uploaded file <b>{stationMismatchModal.fileName}</b> contains duplicate Plantilla Item Numbers. In <b>reclass_gc</b>, each item_no must be unique and must not repeat.</>
+                        : <>The uploaded file <b>{stationMismatchModal.fileName}</b> contains records that do not belong to your assigned division.</>
+                      )}
+                </p>
+              </div>
+            </div>
+
+            {/* Modal Body */}
+            <div style={{ padding: '20px 26px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              {/* Station Comparison Box */}
+              <div style={{
+                background: isDark ? 'rgba(30, 41, 59, 0.6)' : '#f8fafc',
+                border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid #e2e8f0',
+                borderRadius: '12px',
+                padding: '14px 16px',
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                gap: '12px',
+                fontSize: '12.5px'
+              }}>
+                <div>
+                  <span style={{ fontSize: '11px', fontWeight: 750, color: isDark ? '#94a3b8' : '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '2px' }}>
+                    Rule & Station Requirement
+                  </span>
+                  <span style={{ fontWeight: 800, color: '#10b981', fontSize: '13px' }}>
+                    Unique Item No • {stationMismatchModal.expectedDivision || 'Assigned Division'}
+                  </span>
+                </div>
+                <div>
+                  <span style={{ fontSize: '11px', fontWeight: 750, color: isDark ? '#94a3b8' : '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '2px' }}>
+                    Invalid / Duplicate Entries Found
+                  </span>
+                  <span style={{ fontWeight: 800, color: '#ef4444', fontSize: '13px' }}>
+                    {stationMismatchModal.mismatchCount} record(s) out of {stationMismatchModal.totalRows}
+                  </span>
+                </div>
+              </div>
+
+              {/* Mismatch Records Table */}
+              <div>
+                <div style={{ fontSize: '12px', fontWeight: 750, color: isDark ? '#94a3b8' : '#475569', marginBottom: '8px' }}>
+                  Issues Identified in CSV:
+                </div>
+                <div style={{
+                  maxHeight: '180px',
+                  overflowY: 'auto',
+                  border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid #e2e8f0',
+                  borderRadius: '10px',
+                  background: isDark ? 'rgba(15, 23, 42, 0.7)' : '#ffffff'
+                }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11.5px' }}>
+                    <thead>
+                      <tr style={{ background: isDark ? 'rgba(30, 41, 59, 0.9)' : '#f1f5f9', borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid #e2e8f0' }}>
+                        <th style={{ padding: '6px 10px', textAlign: 'left', fontWeight: 750, color: isDark ? '#94a3b8' : '#475569' }}>Row</th>
+                        <th style={{ padding: '6px 10px', textAlign: 'left', fontWeight: 750, color: isDark ? '#94a3b8' : '#475569' }}>Item No / Name</th>
+                        <th style={{ padding: '6px 10px', textAlign: 'left', fontWeight: 750, color: '#ef4444' }}>Found in File</th>
+                        <th style={{ padding: '6px 10px', textAlign: 'left', fontWeight: 750, color: '#ef4444' }}>Issue</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {stationMismatchModal.mismatches.map((m, i) => (
+                        <tr key={i} style={{ borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.4)' : '1px solid #f1f5f9' }}>
+                          <td style={{ padding: '6px 10px', fontWeight: 700, color: isDark ? '#cbd5e1' : '#334155' }}>
+                            Line {m.rowNumber}
+                          </td>
+                          <td style={{ padding: '6px 10px', color: isDark ? '#f8fafc' : '#0f172a' }}>
+                            <div style={{ fontWeight: 650 }}>{m.itemNo}</div>
+                            {m.name && m.name !== '—' && <div style={{ fontSize: '10.5px', color: isDark ? '#94a3b8' : '#64748b' }}>{m.name}</div>}
+                          </td>
+                          <td style={{ padding: '6px 10px', color: '#ef4444', fontWeight: 650 }}>
+                            {m.foundRegion} • {m.foundDivision}
+                          </td>
+                          <td style={{ padding: '6px 10px' }}>
+                            <span style={{
+                              padding: '2px 6px',
+                              borderRadius: '4px',
+                              background: isDark ? 'rgba(239, 68, 68, 0.2)' : '#fee2e2',
+                              color: '#ef4444',
+                              fontSize: '10.5px',
+                              fontWeight: 750
+                            }}>
+                              {m.mismatchType}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Instructions banner */}
+              <div style={{
+                padding: '10px 14px',
+                borderRadius: '10px',
+                background: isDark ? 'rgba(239, 68, 68, 0.12)' : '#fef2f2',
+                border: isDark ? '1px solid rgba(239, 68, 68, 0.3)' : '1px solid #fecaca',
+                fontSize: '12px',
+                color: isDark ? '#fca5a5' : '#991b1b',
+                lineHeight: 1.4
+              }}>
+                <b>Action Required:</b> Please open your CSV file, ensure every <b>item_no is unique and not repeating</b> and belongs to <b>{stationMismatchModal.expectedDivision || 'your assigned division'}</b>, then re-drag or re-drop the file.
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div style={{
+              padding: '14px 26px',
+              borderTop: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid #f1f5f9',
+              background: isDark ? 'rgba(30, 41, 59, 0.4)' : '#f8fafc',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'flex-end',
+              gap: '10px'
+            }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setStationMismatchModal(prev => ({ ...prev, open: false }));
+                  const dropzoneEl = document.getElementById('step1-reclass-csv-input')?.parentElement;
+                  if (dropzoneEl) dropzoneEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }}
+                style={{
+                  background: '#2563eb',
+                  border: 'none',
+                  padding: '9px 20px',
+                  borderRadius: '10px',
+                  fontSize: '12.5px',
+                  fontWeight: 750,
+                  color: '#ffffff',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  boxShadow: '0 2px 8px rgba(37, 99, 235, 0.25)'
+                }}
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="1 4 1 10 7 10" />
+                  <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+                </svg>
+                <span>Check File & Re-drag / Re-drop</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* INGESTION SUCCESS POPUP MODAL */}
+      {ingestionSuccessModal.open && (
+        <div
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setIngestionSuccessModal(prev => ({ ...prev, open: false }));
+            }
+          }}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(2, 6, 23, 0.75)',
+            backdropFilter: 'blur(8px)',
+            display: 'grid',
+            placeItems: 'center',
+            zIndex: 9999,
+            padding: '16px'
+          }}
+        >
+          <div style={{
+            background: isDark ? '#0f172a' : '#ffffff',
+            borderRadius: '20px',
+            width: 'min(680px, 95vw)',
+            maxHeight: '90vh',
+            display: 'flex',
+            flexDirection: 'column',
+            boxShadow: '0 25px 60px rgba(0,0,0,0.5)',
+            border: isDark ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #a7f3d0',
+            overflow: 'hidden'
+          }}>
+            {/* Modal Header */}
+            <div style={{
+              padding: '24px 26px 18px',
+              borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid #f1f5f9',
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: '14px'
+            }}>
+              <div style={{
+                width: '48px',
+                height: '48px',
+                borderRadius: '14px',
+                background: isDark ? 'rgba(16, 185, 129, 0.2)' : '#dcfce7',
+                color: isDark ? '#34d399' : '#059669',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0
+              }}>
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                  <polyline points="22 4 12 14.01 9 11.01" />
+                </svg>
+              </div>
+
+              <div style={{ flex: 1 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                  <h4 style={{ fontSize: '18px', fontWeight: 850, margin: 0, color: isDark ? '#f8fafc' : '#0f172a' }}>
+                    All Incumbents Added Successfully!
+                  </h4>
+                  <button
+                    type="button"
+                    onClick={() => setIngestionSuccessModal(prev => ({ ...prev, open: false }))}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: isDark ? '#94a3b8' : '#64748b',
+                      cursor: 'pointer',
+                      padding: '4px'
+                    }}
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="18" y1="6" x2="6" y2="18" />
+                      <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                  </button>
+                </div>
+                <p style={{ margin: '4px 0 0', fontSize: '13px', color: isDark ? '#cbd5e1' : '#64748b' }}>
+                  Successfully imported from <b>{ingestionSuccessModal.fileName}</b>.
+                </p>
+              </div>
+            </div>
+
+            {/* Modal Body */}
+            <div style={{ padding: '20px 26px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              {/* Summary Stats Grid - 2 KPIs */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(2, 1fr)',
+                gap: '12px'
+              }}>
+                <div style={{
+                  padding: '14px 18px',
+                  borderRadius: '12px',
+                  background: isDark ? 'rgba(16, 185, 129, 0.12)' : '#ecfdf5',
+                  border: isDark ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid #a7f3d0'
+                }}>
+                  <span style={{ fontSize: '11px', fontWeight: 750, color: isDark ? '#6ee7b7' : '#065f46', textTransform: 'uppercase', display: 'block', marginBottom: '2px' }}>
+                    Newly Added
+                  </span>
+                  <span style={{ fontWeight: 850, color: isDark ? '#34d399' : '#059669', fontSize: '22px' }}>
+                    +{ingestionSuccessModal.insertedOrUpdated}
+                  </span>
+                </div>
+
+                <div style={{
+                  padding: '14px 18px',
+                  borderRadius: '12px',
+                  background: isDark ? 'rgba(30, 41, 59, 0.6)' : '#f8fafc',
+                  border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid #e2e8f0'
+                }}>
+                  <span style={{ fontSize: '11px', fontWeight: 750, color: isDark ? '#94a3b8' : '#64748b', textTransform: 'uppercase', display: 'block', marginBottom: '2px' }}>
+                    Total Incumbent
+                  </span>
+                  <span style={{ fontWeight: 850, color: isDark ? '#f8fafc' : '#0f172a', fontSize: '22px' }}>
+                    {ingestionSuccessModal.totalInDatabase || ingestionSuccessModal.insertedOrUpdated}
+                  </span>
+                </div>
+              </div>
+
+              {/* Added Items List Table */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 750, color: isDark ? '#94a3b8' : '#475569', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+                    Incumbents Added to Inventory ({ingestionSuccessModal.addedItems?.length || ingestionSuccessModal.insertedOrUpdated})
+                  </span>
+                </div>
+
+                <div style={{
+                  maxHeight: '220px',
+                  overflowY: 'auto',
+                  border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid #e2e8f0',
+                  borderRadius: '12px',
+                  background: isDark ? 'rgba(15, 23, 42, 0.7)' : '#ffffff'
+                }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11.5px' }}>
+                    <thead>
+                      <tr style={{ background: isDark ? 'rgba(30, 41, 59, 0.9)' : '#f8fafc', borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid #e2e8f0' }}>
+                        <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 750, color: isDark ? '#94a3b8' : '#475569' }}>Item Number</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 750, color: isDark ? '#94a3b8' : '#475569' }}>Incumbent</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 750, color: isDark ? '#94a3b8' : '#475569' }}>Current Position</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 750, color: isDark ? '#94a3b8' : '#475569' }}>Reclassification Position</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 750, color: isDark ? '#94a3b8' : '#475569' }}>School / Division</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(ingestionSuccessModal.addedItems && ingestionSuccessModal.addedItems.length > 0) ? (
+                        ingestionSuccessModal.addedItems.map((item, idx) => (
+                          <tr key={idx} style={{ borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.4)' : '1px solid #f1f5f9' }}>
+                            <td style={{ padding: '8px 12px', fontWeight: 750, color: isDark ? '#f8fafc' : '#0f172a', fontFamily: 'monospace' }}>
+                              {item.itemNo}
+                            </td>
+                            <td style={{ padding: '8px 12px', color: isDark ? '#cbd5e1' : '#334155' }}>
+                              {item.name === '#N/A' || item.name === 'VACANT' ? (
+                                <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>Unfilled / Vacant</span>
+                              ) : (
+                                <span style={{ fontWeight: 650 }}>{item.name}</span>
+                              )}
+                            </td>
+                            <td style={{ padding: '8px 12px', color: isDark ? '#94a3b8' : '#64748b' }}>
+                              {item.currentPosition}
+                            </td>
+                            <td style={{ padding: '8px 12px' }}>
+                              <span style={{
+                                padding: '2px 8px',
+                                borderRadius: '6px',
+                                fontSize: '10.5px',
+                                fontWeight: 750,
+                                background: isDark ? 'rgba(99, 102, 241, 0.2)' : '#e0e7ff',
+                                color: isDark ? '#a5b4fc' : '#4338ca'
+                              }}>
+                                {item.targetPosition || 'For Review'}
+                              </span>
+                            </td>
+                            <td style={{ padding: '8px 12px', color: isDark ? '#94a3b8' : '#64748b' }}>
+                              <div>{item.schoolName || '—'}</div>
+                              {item.division && <div style={{ fontSize: '10px', color: isDark ? '#64748b' : '#94a3b8' }}>{item.division}</div>}
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={5} style={{ padding: '16px', textAlign: 'center', color: isDark ? '#94a3b8' : '#64748b' }}>
+                            {ingestionSuccessModal.insertedOrUpdated} records committed to reclass_gc database table.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div style={{
+              padding: '14px 26px',
+              borderTop: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid #f1f5f9',
+              background: isDark ? 'rgba(30, 41, 59, 0.4)' : '#f8fafc',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'flex-end',
+              gap: '10px'
+            }}>
+              <button
+                type="button"
+                onClick={() => setIngestionSuccessModal(prev => ({ ...prev, open: false }))}
+                style={{
+                  background: isDark ? 'rgba(51, 65, 85, 0.6)' : '#f1f5f9',
+                  border: isDark ? '1px solid rgba(71, 85, 105, 0.7)' : '1px solid #cbd5e1',
+                  padding: '9px 16px',
+                  borderRadius: '10px',
+                  fontSize: '12.5px',
+                  fontWeight: 700,
+                  color: isDark ? '#cbd5e1' : '#475569',
+                  cursor: 'pointer'
+                }}
+              >
+                Close / Stay on Step 1
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setIngestionSuccessModal(prev => ({ ...prev, open: false }));
+                  setCurrentStep(2);
+                }}
+                style={{
+                  background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)',
+                  border: 'none',
+                  padding: '9px 20px',
+                  borderRadius: '10px',
+                  fontSize: '12.5px',
+                  fontWeight: 750,
+                  color: '#ffffff',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  boxShadow: '0 2px 10px rgba(16, 185, 129, 0.35)'
+                }}
+              >
+                <span>Proceed to Step 2: Assessment Workbench</span>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                  <polyline points="12 5 19 12 12 19" />
+                </svg>
               </button>
             </div>
           </div>
