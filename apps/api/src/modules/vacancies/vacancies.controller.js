@@ -345,14 +345,6 @@ export async function toggleVacancyStatus(req, res) {
       }
 
       if (sanitizedEmails.length > 0) {
-        // Enforce that all invited emails must exist in applicants table
-        const { skipped } = await findRegisteredApplicantEmails(sanitizedEmails);
-        if (skipped.length > 0) {
-          return res.status(400).json({
-            error: `Unable to invite: "${skipped.join(', ')}" is not registered in the applicants database.`
-          });
-        }
-
         // Enforce that applicants with is_submitted = true cannot be invited
         const submittedSet = await checkSubmittedApplicantEmails(sanitizedEmails, null, id);
         const alreadySubmittedList = sanitizedEmails.filter(e => submittedSet.has(e));
@@ -880,21 +872,17 @@ export async function saveAgapInvited(req, res) {
     return res.status(400).json({ error: 'emails array is required.' });
   }
   try {
-    // Only allow emails that already exist in applicants.email_address
-    const { validEmails, skipped } = await findRegisteredApplicantEmails(emails);
+    const sanitizedEmails = emails
+      .map(e => (typeof e === 'string' ? e.trim().toLowerCase() : ''))
+      .filter(e => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e));
 
-    if (skipped.length > 0) {
-      return res.status(400).json({
-        error: `Unable to invite: "${skipped.join(', ')}" is not registered in the applicants database. Only existing registered applicants can be invited.`,
-        skipped
-      });
+    if (sanitizedEmails.length === 0) {
+      return res.status(400).json({ error: 'No valid email addresses provided.' });
     }
 
-    const validEmailsList = Array.from(validEmails);
-
     // Enforce that applicants with is_submitted = true cannot be invited
-    const submittedSet = await checkSubmittedApplicantEmails(validEmailsList, jobClusterId || null, vacancyId || null);
-    const alreadySubmittedList = validEmailsList.filter(e => submittedSet.has(e));
+    const submittedSet = await checkSubmittedApplicantEmails(sanitizedEmails, jobClusterId || null, vacancyId || null);
+    const alreadySubmittedList = sanitizedEmails.filter(e => submittedSet.has(e));
     if (alreadySubmittedList.length > 0) {
       return res.status(400).json({
         error: `Applicant "${alreadySubmittedList[0]}" has already submitted an application for this vacancy and cannot be re-invited.`
@@ -902,12 +890,11 @@ export async function saveAgapInvited(req, res) {
     }
 
     // Upsert each email into agap_invited via service
-    const inserted = await upsertAgapInvitedRecords(validEmailsList, jobClusterId || null);
+    const inserted = await upsertAgapInvitedRecords(sanitizedEmails, jobClusterId || null);
 
     res.json({
       success: true,
       inserted: inserted.length,
-      skipped,
       message: `${inserted.length} applicant(s) saved to invite list.`
     });
   } catch (error) {

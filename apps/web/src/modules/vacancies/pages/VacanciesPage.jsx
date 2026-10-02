@@ -218,6 +218,14 @@ export default function VacanciesPage() {
   const [showResendConfirmModal, setShowResendConfirmModal] = useState(false);
   const [resendConfirmEmail, setResendConfirmEmail] = useState(null);
 
+  // Unregistered Email Authentication Modal states
+  const [showUnregisteredInviteAuthModal, setShowUnregisteredInviteAuthModal] = useState(false);
+  const [unregisteredInviteEmails, setUnregisteredInviteEmails] = useState([]);
+  const [unregisteredInvitePendingEmails, setUnregisteredInvitePendingEmails] = useState([]);
+  const [unregisteredInvitePasscode, setUnregisteredInvitePasscode] = useState('');
+  const [unregisteredInvitePasscodeError, setUnregisteredInvitePasscodeError] = useState('');
+  const [unregisteredInviteActionType, setUnregisteredInviteActionType] = useState('add'); // 'add' | 'save'
+
   const isValidEmailFormat = (email) => {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email).trim().toLowerCase());
   };
@@ -330,17 +338,17 @@ export default function VacanciesPage() {
     if (!raw) return;
 
     const parts = raw.split(/[\s,]+/).map(e => e.trim().toLowerCase()).filter(Boolean);
-    let addedCount = 0;
-    let nextEmails = [...inviteAllowedEmails];
     let errorMsg = '';
     const submittedEmails = inviteVacancy ? getSubmittedEmailsForVacancy(inviteVacancy) : new Set();
+    const registeredToAdd = [];
+    const unregisteredToAdd = [];
 
     for (const p of parts) {
       if (!isValidEmailFormat(p)) {
         errorMsg = `Invalid email format: "${p}". Please enter a valid email address.`;
         break;
       }
-      if (nextEmails.includes(p)) {
+      if (inviteAllowedEmails.includes(p) || registeredToAdd.includes(p) || unregisteredToAdd.includes(p)) {
         errorMsg = `Email "${p}" is already in the invitation list.`;
         continue;
       }
@@ -351,38 +359,50 @@ export default function VacanciesPage() {
         const vacParam = inviteVacancy?.id ? `&vacancyId=${encodeURIComponent(inviteVacancy.id)}` : '';
         const verifyRes = await apiFetch(`/api/vacancies/applicants/verify?email=${encodeURIComponent(p)}${clusterParam}${vacParam}`);
         
-        if (!verifyRes?.exists) {
-          errorMsg = `Unable to invite: "${p}" is not registered in the applicants database. Only existing applicants can be invited.`;
-          break;
-        }
-
         if (verifyRes?.isSubmitted) {
           errorMsg = verifyRes.error || `Applicant "${p}" has already submitted an application for this vacancy and cannot be re-invited.`;
           break;
         }
-      } catch (err) {
-        errorMsg = err.message || `Unable to invite: "${p}" is not registered in the applicants database.`;
-        break;
-      }
 
-      nextEmails.push(p);
-      addedCount++;
+        if (verifyRes?.exists) {
+          registeredToAdd.push(p);
+        } else {
+          unregisteredToAdd.push(p);
+        }
+      } catch (err) {
+        unregisteredToAdd.push(p);
+      }
     }
 
-    if (errorMsg && addedCount === 0) {
+    if (errorMsg && registeredToAdd.length === 0 && unregisteredToAdd.length === 0) {
       setInviteEmailError(errorMsg);
       setToast({ message: errorMsg, type: 'error' });
       return;
     }
 
-    if (errorMsg) {
-      setToast({ message: errorMsg, type: 'warning' });
+    if (unregisteredToAdd.length > 0) {
+      const combinedNext = [...inviteAllowedEmails, ...registeredToAdd, ...unregisteredToAdd];
+      if (registeredToAdd.length > 0) {
+        setInviteAllowedEmails(prev => [...prev, ...registeredToAdd]);
+      }
+      setUnregisteredInviteEmails(unregisteredToAdd);
+      setUnregisteredInvitePendingEmails(combinedNext);
+      setUnregisteredInvitePasscode('');
+      setUnregisteredInvitePasscodeError('');
+      setUnregisteredInviteActionType('add');
+      setShowUnregisteredInviteAuthModal(true);
+      setInviteEmailInput('');
+      setInviteEmailError('');
+      setShowInviteSuggestionsDropdown(false);
+      return;
     }
 
-    setInviteAllowedEmails(nextEmails);
-    setInviteEmailInput('');
-    setInviteEmailError('');
-    setShowInviteSuggestionsDropdown(false);
+    if (registeredToAdd.length > 0) {
+      setInviteAllowedEmails(prev => [...prev, ...registeredToAdd]);
+      setInviteEmailInput('');
+      setInviteEmailError('');
+      setShowInviteSuggestionsDropdown(false);
+    }
   };
 
   const handleSelectInviteSuggestion = (email) => {
@@ -439,6 +459,67 @@ export default function VacanciesPage() {
     setResendConfirmEmail(null);
   };
 
+  const handleConfirmUnregisteredInvite = async () => {
+    if (!unregisteredInvitePasscode || !unregisteredInvitePasscode.trim()) {
+      setUnregisteredInvitePasscodeError('Please enter your HR passcode.');
+      return;
+    }
+
+    try {
+      await apiFetch('/api/auth/verify-passcode', {
+        method: 'POST',
+        body: JSON.stringify({ passcode: unregisteredInvitePasscode.trim() })
+      });
+
+      const nextEmails = unregisteredInvitePendingEmails;
+
+      if (unregisteredInviteActionType === 'save' && inviteVacancy) {
+        // 1. First persist to agap_invited table
+        await apiFetch('/api/vacancies/invited', {
+          method: 'POST',
+          body: JSON.stringify({
+            emails: nextEmails,
+            jobClusterId: inviteVacancy.jobClusterId || inviteVacancy.job_cluster_id || null,
+            vacancyId: inviteVacancy.id || null
+          })
+        });
+
+        // 2. Update vacancy allowedEmails
+        await apiFetch(`/api/vacancies/${inviteVacancy.id}`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            allowedEmails: nextEmails
+          })
+        });
+
+        setToast({
+          message: `Invitations saved! Access granted to ${nextEmails.length} applicant email(s).`,
+          type: 'success'
+        });
+        setInviteAllowedEmails(nextEmails);
+        setInviteVacancy(prev => prev ? { ...prev, allowedEmails: nextEmails } : null);
+        setInviteModalTab('invitations');
+        setShowUnregisteredInviteAuthModal(false);
+        setUnregisteredInviteEmails([]);
+        setUnregisteredInvitePasscode('');
+        setUnregisteredInvitePasscodeError('');
+        loadAllData();
+      } else {
+        setInviteAllowedEmails(nextEmails);
+        setToast({
+          message: `Added ${unregisteredInviteEmails.length} unregistered email(s) to invitation list.`,
+          type: 'success'
+        });
+        setShowUnregisteredInviteAuthModal(false);
+        setUnregisteredInviteEmails([]);
+        setUnregisteredInvitePasscode('');
+        setUnregisteredInvitePasscodeError('');
+      }
+    } catch (e) {
+      setUnregisteredInvitePasscodeError(e.message || 'Incorrect passcode. Invitation is not allowed.');
+    }
+  };
+
   const handleSaveInviteModal = async () => {
     if (!inviteVacancy) return;
 
@@ -447,46 +528,60 @@ export default function VacanciesPage() {
 
     if (inviteEmailInput.trim()) {
       const raw = inviteEmailInput.trim().toLowerCase();
-      if (isValidEmailFormat(raw) && !currentEmails.includes(raw)) {
-        try {
-          const clusterParam = inviteVacancy?.jobClusterId || inviteVacancy?.job_cluster_id ? `&jobClusterId=${encodeURIComponent(inviteVacancy.jobClusterId || inviteVacancy.job_cluster_id)}` : '';
-          const vacParam = inviteVacancy?.id ? `&vacancyId=${encodeURIComponent(inviteVacancy.id)}` : '';
-          const verifyRes = await apiFetch(`/api/vacancies/applicants/verify?email=${encodeURIComponent(raw)}${clusterParam}${vacParam}`);
-          
-          if (!verifyRes?.exists) {
-            const err = `Unable to invite: "${raw}" is not registered in the applicants database. Only existing applicants can be invited.`;
-            setInviteEmailError(err);
-            setToast({ message: err, type: 'error' });
-            return;
-          }
+      const parts = raw.split(/[\s,]+/).map(e => e.trim().toLowerCase()).filter(Boolean);
+      const registeredInInput = [];
+      const unregisteredInInput = [];
 
-          if (verifyRes?.isSubmitted) {
-            const err = verifyRes.error || `Applicant "${raw}" has already submitted an application for this vacancy and cannot be re-invited.`;
-            setInviteEmailError(err);
-            setToast({ message: err, type: 'error' });
-            return;
-          }
+      for (const p of parts) {
+        if (isValidEmailFormat(p) && !currentEmails.includes(p)) {
+          try {
+            const clusterParam = inviteVacancy?.jobClusterId || inviteVacancy?.job_cluster_id ? `&jobClusterId=${encodeURIComponent(inviteVacancy.jobClusterId || inviteVacancy.job_cluster_id)}` : '';
+            const vacParam = inviteVacancy?.id ? `&vacancyId=${encodeURIComponent(inviteVacancy.id)}` : '';
+            const verifyRes = await apiFetch(`/api/vacancies/applicants/verify?email=${encodeURIComponent(p)}${clusterParam}${vacParam}`);
+            
+            if (verifyRes?.isSubmitted) {
+              const err = verifyRes.error || `Applicant "${p}" has already submitted an application for this vacancy and cannot be re-invited.`;
+              setInviteEmailError(err);
+              setToast({ message: err, type: 'error' });
+              return;
+            }
 
-          currentEmails.push(raw);
-          setInviteAllowedEmails(currentEmails);
-          setInviteEmailInput('');
-        } catch (err) {
-          const errMsg = err.message || `Unable to invite: "${raw}" is not registered in the applicants database.`;
-          setInviteEmailError(errMsg);
-          setToast({ message: errMsg, type: 'error' });
-          return;
+            if (verifyRes?.exists) {
+              registeredInInput.push(p);
+            } else {
+              unregisteredInInput.push(p);
+            }
+          } catch (err) {
+            unregisteredInInput.push(p);
+          }
         }
       }
+
+      if (unregisteredInInput.length > 0) {
+        const nextCombined = [...currentEmails, ...registeredInInput, ...unregisteredInInput];
+        setUnregisteredInviteEmails(unregisteredInInput);
+        setUnregisteredInvitePendingEmails(nextCombined);
+        setUnregisteredInvitePasscode('');
+        setUnregisteredInvitePasscodeError('');
+        setUnregisteredInviteActionType('save');
+        setShowUnregisteredInviteAuthModal(true);
+        setInviteEmailInput('');
+        return;
+      }
+
+      currentEmails = [...currentEmails, ...registeredInInput];
+      setInviteAllowedEmails(currentEmails);
+      setInviteEmailInput('');
     }
 
     if (currentEmails.length === 0) {
-      setInviteEmailError('Please add at least one valid registered applicant email address to invite.');
-      setToast({ message: 'Please add at least one valid registered applicant email address to invite.', type: 'error' });
+      setInviteEmailError('Please add at least one valid email address to invite.');
+      setToast({ message: 'Please add at least one valid email address to invite.', type: 'error' });
       return;
     }
 
     try {
-      // 1. First persist to agap_invited table (which validates against applicants and inserts)
+      // 1. First persist to agap_invited table
       await apiFetch('/api/vacancies/invited', {
         method: 'POST',
         body: JSON.stringify({
@@ -2067,6 +2162,125 @@ export default function VacanciesPage() {
                   <span>+ Add More Applicants</span>
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: UNREGISTERED EMAIL INVITATION AUTHENTICATION */}
+      {showUnregisteredInviteAuthModal && (
+        <div className="modal open" style={{ zIndex: 100004, left: 0, background: 'rgba(15, 23, 42, 0.55)', backdropFilter: 'blur(16px)' }}>
+          <div className="modal-box" style={{ width: 'min(520px, 94vw)', padding: '28px 32px', borderRadius: '24px', background: 'white', borderTop: '6px solid #F59E0B', boxShadow: '0 24px 60px rgba(0, 0, 0, 0.22)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '14px' }}>
+              <div style={{ width: '44px', height: '44px', borderRadius: '14px', background: '#FEF3C7', color: '#D97706', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '22px', flexShrink: 0 }}>
+                ⚠️
+              </div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '800', color: '#0F172A', fontFamily: 'var(--font-heading)' }}>
+                  Authentication Required
+                </h3>
+                <span style={{ fontSize: '12px', color: '#64748B', fontWeight: '600' }}>Unregistered Email Confirmation</span>
+              </div>
+            </div>
+
+            <p style={{ margin: '0 0 16px', fontSize: '14px', color: '#334155', lineHeight: '1.5', fontWeight: '600' }}>
+              {unregisteredInviteEmails.length === 1 
+                ? 'This email is not registered in the AGAP Portal are you sure you want to invite this email'
+                : 'These emails are not registered in the AGAP Portal are you sure you want to invite these emails'}
+            </p>
+
+            {/* List of unregistered invited emails */}
+            <div style={{ background: '#FFFBEB', border: '1.5px solid #FDE68A', borderRadius: '14px', padding: '12px 16px', marginBottom: '18px' }}>
+              <div style={{ fontSize: '11px', fontWeight: '800', textTransform: 'uppercase', color: '#B45309', marginBottom: '8px', letterSpacing: '0.05em', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span>Unregistered Email List</span>
+                <span style={{ background: '#FDE68A', padding: '1px 8px', borderRadius: '10px', fontSize: '10px', color: '#92400E', fontWeight: '800' }}>{unregisteredInviteEmails.length} Pending</span>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '130px', overflowY: 'auto' }}>
+                {unregisteredInviteEmails.map((email) => (
+                  <div key={email} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 10px', background: '#FFFFFF', borderRadius: '8px', border: '1px solid #FEF08A' }}>
+                    <span style={{ fontFamily: 'monospace', fontSize: '12.5px', color: '#92400E', fontWeight: '700' }}>
+                      ✉ {email}
+                    </span>
+                    <span style={{ fontSize: '10.5px', fontWeight: '800', color: '#B45309', background: '#FEF3C7', padding: '2px 6px', borderRadius: '6px' }}>
+                      Not Registered
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Passcode input field */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '20px' }}>
+              <label style={{ color: '#92400E', fontWeight: '900', fontSize: '11px', letterSpacing: '0.06em', textTransform: 'uppercase', margin: '0 0 2px', display: 'block' }}>
+                Enter HR Passcode to Authorize Invitation
+              </label>
+              <input
+                type="password"
+                placeholder="Enter 6-digit passcode"
+                value={unregisteredInvitePasscode}
+                onChange={e => {
+                  setUnregisteredInvitePasscode(e.target.value.replace(/\D/g, '').slice(0, 6));
+                  if (unregisteredInvitePasscodeError) setUnregisteredInvitePasscodeError('');
+                }}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') {
+                    handleConfirmUnregisteredInvite();
+                  }
+                }}
+                autoFocus
+                style={{
+                  background: 'white',
+                  border: unregisteredInvitePasscodeError ? '1.5px solid #EF4444' : '1.5px solid #CBD5E1',
+                  height: '42px',
+                  borderRadius: '10px',
+                  fontSize: '13px',
+                  width: '100%',
+                  boxSizing: 'border-box',
+                  padding: '0 12px',
+                  outline: 'none'
+                }}
+              />
+              {unregisteredInvitePasscodeError && (
+                <div style={{ color: '#DC2626', fontSize: '12px', fontWeight: '800', marginTop: '2px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <span>⚠️</span> {unregisteredInvitePasscodeError}
+                </div>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button 
+                type="button" 
+                className="secondary" 
+                onClick={() => {
+                  setShowUnregisteredInviteAuthModal(false);
+                  setUnregisteredInviteEmails([]);
+                  setUnregisteredInvitePasscode('');
+                  setUnregisteredInvitePasscodeError('');
+                }}
+                style={{ padding: '10px 20px', borderRadius: '12px', cursor: 'pointer', fontWeight: '700', fontSize: '13px' }}
+              >
+                Cancel
+              </button>
+              <button 
+                type="button" 
+                onClick={handleConfirmUnregisteredInvite}
+                style={{
+                  padding: '10px 22px',
+                  borderRadius: '12px',
+                  border: 'none',
+                  background: 'linear-gradient(135deg, #F59E0B 0%, #D97706 100%)',
+                  color: 'white',
+                  fontWeight: '800',
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 12px rgba(245, 158, 11, 0.35)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                <span>Invite</span>
+              </button>
             </div>
           </div>
         </div>
