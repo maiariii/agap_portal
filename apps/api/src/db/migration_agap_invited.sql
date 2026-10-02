@@ -5,7 +5,7 @@
 CREATE TABLE IF NOT EXISTS agap_invited (
   id             UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   email          TEXT NOT NULL,
-  job_cluster_id UUID,
+  job_cluster_id TEXT,
   created_at     TIMESTAMPTZ DEFAULT NOW(),
   updated_at     TIMESTAMPTZ DEFAULT NOW(),
   is_submitted   BOOLEAN DEFAULT FALSE
@@ -15,10 +15,12 @@ CREATE TABLE IF NOT EXISTS agap_invited (
 ALTER TABLE agap_invited 
   ADD COLUMN IF NOT EXISTS id UUID DEFAULT gen_random_uuid(),
   ADD COLUMN IF NOT EXISTS email TEXT,
-  ADD COLUMN IF NOT EXISTS job_cluster_id UUID,
+  ADD COLUMN IF NOT EXISTS job_cluster_id TEXT,
   ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW(),
   ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW(),
   ADD COLUMN IF NOT EXISTS is_submitted BOOLEAN DEFAULT FALSE;
+
+ALTER TABLE agap_invited ALTER COLUMN job_cluster_id TYPE TEXT USING job_cluster_id::text;
 
 -- 3. Add unique index to prevent duplicate invitations per email & job_cluster_id
 CREATE UNIQUE INDEX IF NOT EXISTS idx_agap_invited_email_job_cluster 

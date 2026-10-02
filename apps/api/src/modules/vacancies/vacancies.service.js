@@ -86,7 +86,7 @@ export async function checkSubmittedApplicantEmails(emails, jobClusterId = null,
   const invitedParams = [emailList];
   if (resolvedClusterId) {
     invitedParams.push(resolvedClusterId);
-    invitedQuery += ` AND (job_cluster_id = $2 OR job_cluster_id IS NULL)`;
+    invitedQuery += ` AND (job_cluster_id::text = $2::text OR job_cluster_id IS NULL)`;
   }
 
   try {

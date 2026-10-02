@@ -263,27 +263,36 @@ export default function VacanciesPage() {
 
   // Autocomplete search for Invite modal
   React.useEffect(() => {
-    if (!inviteEmailInput || !inviteEmailInput.trim() || !showInviteModal) {
+    if (!showInviteModal) {
       setInviteSuggestions([]);
       setShowInviteSuggestionsDropdown(false);
       return;
     }
-    const term = inviteEmailInput.trim().toLowerCase();
+    const lastToken = (inviteEmailInput || '').split(/[\s,]+/).pop() || '';
+    const term = lastToken.trim().toLowerCase();
+    const submittedEmails = inviteVacancy ? getSubmittedEmailsForVacancy(inviteVacancy) : new Set();
+
+    // Instant local matches from applications
+    const localMatches = (applications || [])
+      .map(a => {
+        const e = a.applicant?.email_address || a.applicant_email_address || a.email_address || a.email || a.applicantObj?.email_address || '';
+        const n = a.applicantName || a.applicant_name || a.applicant?.fullName || a.applicant?.name || a.applicantObj?.name || '';
+        return { email: (e || '').trim().toLowerCase(), name: n || '' };
+      })
+      .filter(it => it.email && !submittedEmails.has(it.email) && !inviteAllowedEmails.includes(it.email) && (!term || it.email.includes(term) || (it.name && it.name.toLowerCase().includes(term))));
+
+    if (localMatches.length > 0) {
+      const mergedLocal = new Map();
+      localMatches.forEach(item => mergedLocal.set(item.email, item));
+      setInviteSuggestions(Array.from(mergedLocal.values()).slice(0, 10));
+      setShowInviteSuggestionsDropdown(true);
+    }
+
     const delayDebounce = setTimeout(async () => {
       try {
         const vacParam = inviteVacancy?.id ? `&vacancyId=${encodeURIComponent(inviteVacancy.id)}` : '';
         const data = await apiFetch(`/api/vacancies/applicants/autocomplete?q=${encodeURIComponent(term)}${vacParam}`);
         let list = Array.isArray(data) ? data : [];
-
-        const submittedEmails = inviteVacancy ? getSubmittedEmailsForVacancy(inviteVacancy) : new Set();
-
-        // Combine with local applications for instant matching, excluding already applied
-        const localMatches = (applications || [])
-          .map(a => ({
-            email: a.applicant?.email_address || a.applicant_email_address || a.email_address || a.email || a.applicantObj?.email_address || '',
-            name: a.applicantName || a.applicant_name || a.applicant?.fullName || a.applicant?.name || a.applicantObj?.name || ''
-          }))
-          .filter(it => it.email && !submittedEmails.has(it.email.toLowerCase()) && (it.email.toLowerCase().includes(term) || (it.name && it.name.toLowerCase().includes(term))));
 
         const merged = new Map();
         [...list, ...localMatches].forEach(item => {
@@ -298,11 +307,13 @@ export default function VacanciesPage() {
 
         const finalList = Array.from(merged.values()).slice(0, 10);
         setInviteSuggestions(finalList);
-        setShowInviteSuggestionsDropdown(finalList.length > 0);
+        if (finalList.length > 0) {
+          setShowInviteSuggestionsDropdown(true);
+        }
       } catch (err) {
         console.error('Error fetching applicant suggestions for invite:', err);
       }
-    }, 200);
+    }, 150);
     return () => clearTimeout(delayDebounce);
   }, [inviteEmailInput, showInviteModal, inviteAllowedEmails, applications, inviteVacancy]);
 
@@ -1787,7 +1798,7 @@ export default function VacanciesPage() {
                   </p>
 
                   {/* Input bar with floating suggestions dropdown */}
-                  <div style={{ display: 'flex', gap: '8px', position: 'relative' }}>
+                  <div style={{ display: 'flex', gap: '8px', position: 'relative', zIndex: 50 }}>
                     <div style={{ position: 'relative', flex: 1 }}>
                       <input
                         type="email"
@@ -1798,9 +1809,10 @@ export default function VacanciesPage() {
                           setShowInviteSuggestionsDropdown(true);
                         }}
                         onFocus={() => {
-                          if (inviteSuggestions.length > 0) {
-                            setShowInviteSuggestionsDropdown(true);
-                          }
+                          setShowInviteSuggestionsDropdown(true);
+                        }}
+                        onBlur={() => {
+                          setTimeout(() => setShowInviteSuggestionsDropdown(false), 200);
                         }}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter' || e.key === ',') {
@@ -1831,28 +1843,31 @@ export default function VacanciesPage() {
                         <div
                           style={{
                             position: 'absolute',
-                            top: '100%',
+                            top: 'calc(100% + 4px)',
                             left: 0,
                             right: 0,
                             background: '#FFFFFF',
                             border: '1.5px solid #C7D2FE',
-                            borderRadius: '10px',
-                            boxShadow: '0 10px 25px -5px rgba(79, 70, 229, 0.25), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
+                            borderRadius: '12px',
+                            boxShadow: '0 12px 28px -4px rgba(79, 70, 229, 0.25), 0 8px 16px -6px rgba(0, 0, 0, 0.12)',
                             zIndex: 999999,
-                            maxHeight: '160px',
-                            overflowY: 'auto',
-                            marginTop: '4px'
+                            maxHeight: '200px',
+                            overflowY: 'auto'
                           }}
                         >
-                          <div style={{ padding: '6px 12px 4px', fontSize: '10px', fontWeight: '800', color: '#6366F1', textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: '1px solid #F1F5F9', background: '#F8FAFC' }}>
-                            Matching Applicants ({inviteSuggestions.length})
+                          <div style={{ padding: '8px 12px 6px', fontSize: '10px', fontWeight: '800', color: '#4F46E5', textTransform: 'uppercase', letterSpacing: '0.06em', borderBottom: '1px solid #F1F5F9', background: '#F8FAFC', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span>Matching Suggestions ({inviteSuggestions.length})</span>
+                            <span style={{ fontSize: '9.5px', color: '#94A3B8', textTransform: 'none' }}>Click to select</span>
                           </div>
                           {inviteSuggestions.map((sug) => (
                             <div
                               key={sug.email}
-                              onClick={() => handleSelectInviteSuggestion(sug.email)}
+                              onMouseDown={(e) => {
+                                e.preventDefault();
+                                handleSelectInviteSuggestion(sug.email);
+                              }}
                               style={{
-                                padding: '8px 12px',
+                                padding: '9px 12px',
                                 fontSize: '12px',
                                 cursor: 'pointer',
                                 userSelect: 'none',
@@ -1877,7 +1892,7 @@ export default function VacanciesPage() {
                                   )}
                                 </div>
                               </div>
-                              <span style={{ fontSize: '10.5px', color: '#4F46E5', fontWeight: '800', background: '#E0E7FF', padding: '2px 8px', borderRadius: '6px', flexShrink: 0 }}>
+                              <span style={{ fontSize: '10.5px', color: '#4F46E5', fontWeight: '800', background: '#E0E7FF', padding: '3px 8px', borderRadius: '6px', flexShrink: 0 }}>
                                 + Select
                               </span>
                             </div>

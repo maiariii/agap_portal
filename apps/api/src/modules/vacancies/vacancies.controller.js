@@ -823,45 +823,49 @@ export async function autocompleteSchools(req, res) {
 }
 
 export async function autocompleteApplicantEmails(req, res) {
-  const { q, vacancyId } = req.query;
-  if (!q || !q.trim()) {
-    return res.json([]);
-  }
+  const { q } = req.query;
+  const cleanQ = (q || '').trim();
   try {
-    const queryTerm = `%${q.trim()}%`;
-    let excludeClause = '';
-    const params = [queryTerm];
+    const params = [];
+    let query;
 
-    if (vacancyId) {
-      params.push(vacancyId);
-      excludeClause = `
-        AND LOWER(TRIM(ap.email_address)) NOT IN (
-          SELECT DISTINCT LOWER(TRIM(ai.email))
-          FROM vacancies v
-          JOIN agap_invited ai ON (
-            (v.job_cluster_id IS NOT NULL AND ai.job_cluster_id = v.job_cluster_id)
-            OR (ai.job_cluster_id IS NULL)
+    if (cleanQ) {
+      params.push(`%${cleanQ}%`);
+      query = `
+        SELECT DISTINCT
+          ap.email_address as email,
+          CONCAT_WS(' ', NULLIF(ap.first_name, ''), NULLIF(ap.middle_name, ''), NULLIF(ap.surname, '')) as name
+        FROM applicants ap
+        WHERE ap.email_address IS NOT NULL 
+          AND ap.email_address != ''
+          AND (
+            ap.email_address ILIKE $1 
+            OR ap.first_name ILIKE $1 
+            OR ap.middle_name ILIKE $1 
+            OR ap.surname ILIKE $1 
+            OR ap.applicant_number ILIKE $1 
+            OR CONCAT_WS(' ', NULLIF(ap.first_name, ''), NULLIF(ap.middle_name, ''), NULLIF(ap.surname, '')) ILIKE $1
           )
-          WHERE v.id = $2 AND ai.is_submitted = TRUE
-        )
+        ORDER BY ap.email_address ASC
+        LIMIT 15;
+      `;
+    } else {
+      query = `
+        SELECT DISTINCT
+          ap.email_address as email,
+          CONCAT_WS(' ', NULLIF(ap.first_name, ''), NULLIF(ap.middle_name, ''), NULLIF(ap.surname, '')) as name
+        FROM applicants ap
+        WHERE ap.email_address IS NOT NULL 
+          AND ap.email_address != ''
+        ORDER BY ap.email_address ASC
+        LIMIT 15;
       `;
     }
 
-    const { rows } = await pool.query(
-      `SELECT DISTINCT 
-         ap.email_address as email,
-         CONCAT_WS(' ', NULLIF(ap.first_name, ''), NULLIF(ap.surname, '')) as name
-       FROM applicants ap
-       WHERE (ap.email_address ILIKE $1 
-          OR ap.first_name ILIKE $1 
-          OR ap.surname ILIKE $1)
-          ${excludeClause}
-       ORDER BY ap.email_address ASC
-       LIMIT 10;`,
-      params
-    );
+    const { rows } = await pool.query(query, params);
     res.json(rows.filter(r => r.email && r.email.trim()));
   } catch (error) {
+    console.error('Error in autocompleteApplicantEmails:', error);
     res.status(500).json({ error: error.message });
   }
 }
