@@ -112,14 +112,19 @@ def main():
         # Move web static files inside dist/ instead of renaming directory (prevents Nginx locks)
         f"mv apps/web/dist/* dist/ && "
         f"rm -rf apps/web && "
+        # Sync frontend bundle to Nginx document root and fix permissions
+        f"sudo mkdir -p /var/www/html/InsightED-AGAP/agap-hrmo/dist && "
+        f"sudo cp -ru {REMOTE_ROOT}/dist/* /var/www/html/InsightED-AGAP/agap-hrmo/dist/ && "
+        f"sudo chown -R {REMOTE_USER}:{REMOTE_USER} /var/www/html/InsightED-AGAP/agap-hrmo && "
         # Install workspace dependencies in production mode
         f"echo '       → Installing production npm packages...' && "
         f"npm install --omit=dev --legacy-peer-deps --prefer-offline --no-audit --no-fund 2>&1 | tail -n 5 && "
         # Setup directories for logs
         f"mkdir -p apps/api/logs && "
-        # Start server with PM2
+        # Start server with PM2 and reload Nginx
         f"pm2 delete {PM2_NAME} 2>/dev/null || true && "
         f"pm2 start {ECOSYSTEM_CONFIG} && "
+        f"sudo nginx -t && sudo nginx -s reload 2>/dev/null || true && "
         f"rm -f {ARCHIVE_NAME}"
     )
 
