@@ -1,5 +1,60 @@
 import React, { useRef, useState, useMemo, useEffect } from 'react';
 import { createPortal } from 'react-dom';
+// Helper to extract position level ('1', '2', '3', '4') from positions and item numbers
+export const getPositionLevel = (str) => {
+  if (!str) return null;
+  const s = String(str).toUpperCase().trim();
+
+  // Check code patterns like SCA4, SC4, GC4, etc.
+  const codeMatch = s.match(/(?:SCA|SC|GC)[-_\s]?([1-4])\b/);
+  if (codeMatch) return codeMatch[1];
+
+  // Check Roman numerals or words in reverse order IV -> III -> II -> I
+  if (/\b(IV|FOUR)\b/.test(s) || s.includes('ASSOCIATE IV') || s.includes('COUNSELOR IV') || s.includes('LEVEL IV')) return '4';
+  if (/\b(III|THREE)\b/.test(s) || s.includes('ASSOCIATE III') || s.includes('COUNSELOR III') || s.includes('LEVEL III')) return '3';
+  if (/\b(II|TWO)\b/.test(s) || s.includes('ASSOCIATE II') || s.includes('COUNSELOR II') || s.includes('LEVEL II')) return '2';
+  if (/\b(I|ONE)\b/.test(s) || s.includes('ASSOCIATE I') || s.includes('COUNSELOR I') || s.includes('LEVEL I')) return '1';
+
+  // Standalone digit after Counselor / Associate
+  const afterWordMatch = s.match(/(?:COUNSELOR|ASSOCIATE)\s*([1-4])\b/);
+  if (afterWordMatch) return afterWordMatch[1];
+
+  if (/^[1-4]$/.test(s)) return s;
+
+  return null;
+};
+
+export const getItemPositionLevel = (item) => {
+  if (!item) return null;
+  if (typeof item === 'string') return getPositionLevel(item);
+  const pos = item.position_title || item.position;
+  if (pos) {
+    const lvl = getPositionLevel(pos);
+    if (lvl) return lvl;
+  }
+  const itemNo = item.plantilla_item_number || item.new_item_no;
+  if (itemNo) {
+    const lvl = getPositionLevel(itemNo);
+    if (lvl) return lvl;
+  }
+  return null;
+};
+
+export const getCandidatePositionLevel = (candidate) => {
+  if (!candidate) return null;
+  const pos = candidate.actual_position || candidate.reclass_position || candidate.target_position || '';
+  return getPositionLevel(pos);
+};
+
+export const romanLevel = (lvl) => {
+  switch (String(lvl)) {
+    case '1': return 'I';
+    case '2': return 'II';
+    case '3': return 'III';
+    case '4': return 'IV';
+    default: return lvl || '';
+  }
+};
 
 export default function NoscaItemTrackingTab({
   incumbents = [],
@@ -77,6 +132,79 @@ export default function NoscaItemTrackingTab({
       console.warn('Copy error:', e);
     }
   };
+
+
+  // Filter available plantilla item numbers matching the selected candidate's Actual Reclassification Position
+  const matchingNoscaItems = useMemo(() => {
+    const candidate = sdoEditItemModal?.personnel;
+    if (!candidate) return [];
+
+    const candLevel = getCandidatePositionLevel(candidate);
+    if (!candLevel) return [];
+
+    const list = [];
+    const seen = new Set();
+
+    // 1. From database noscaItems
+    if (Array.isArray(noscaItems)) {
+      noscaItems.forEach(item => {
+        const itemNo = (item.plantilla_item_number || item.new_item_no || '').trim();
+        if (!itemNo) return;
+
+        // Position level check: strictly match candidate position level
+        const itemLevel = getItemPositionLevel(item);
+        if (itemLevel !== candLevel) return;
+
+        // Availability check: must be either assigned to this candidate or currently available
+        const isAssignedToThisCandidate =
+          (candidate.id && (String(item.reclass_gc_id) === String(candidate.id) || String(item.assigned_to_incumbent_id) === String(candidate.id))) ||
+          (candidate.new_item_number && (itemNo === candidate.new_item_number));
+
+        const status = String(item.assignment_status || item.new_item_no_status || 'AVAILABLE').toUpperCase();
+        const isAvailable = (status === 'AVAILABLE' || !status) && !item.reclass_gc_id && !item.assigned_to_incumbent_id;
+
+        if (isAssignedToThisCandidate || isAvailable) {
+          const key = itemNo.toLowerCase();
+          if (!seen.has(key)) {
+            seen.add(key);
+            list.push({
+              id: item.id || itemNo,
+              plantilla_item_number: itemNo,
+              position: item.position_title || item.position || '',
+              serial_no: item.serial_no || '',
+              assignedToCurrent: Boolean(isAssignedToThisCandidate)
+            });
+          }
+        }
+      });
+    }
+
+    // 2. From currently active scannedNoscaResult (if any scanned batch in session)
+    if (scannedNoscaResult?.items && Array.isArray(scannedNoscaResult.items)) {
+      const scannedPos = scannedNoscaResult.position || '';
+      scannedNoscaResult.items.forEach(rawItem => {
+        const itemNo = String(rawItem || '').trim();
+        if (!itemNo) return;
+        const key = itemNo.toLowerCase();
+        if (seen.has(key)) return;
+
+        // Position level check: check scanned result position first, then item number string
+        const itemLevel = getPositionLevel(scannedPos) || getPositionLevel(itemNo);
+        if (itemLevel !== candLevel) return;
+
+        seen.add(key);
+        list.push({
+          id: `scanned-${itemNo}`,
+          plantilla_item_number: itemNo,
+          position: scannedPos,
+          serial_no: scannedNoscaResult.serial_no || '',
+          assignedToCurrent: candidate.new_item_number === itemNo
+        });
+      });
+    }
+
+    return list;
+  }, [noscaItems, scannedNoscaResult, sdoEditItemModal?.personnel]);
 
   const roAvailableCount = useMemo(() => {
     return noscaItems.filter(item => {
@@ -319,35 +447,6 @@ export default function NoscaItemTrackingTab({
                 )}
               </button>
             )}
-
-            <button
-              type="button"
-              onClick={() => setShowNoscaDocsArchiveModal(true)}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '8px',
-                padding: '10px 16px',
-                borderRadius: '10px',
-                background: isDark ? 'rgba(30, 41, 59, 0.8)' : '#ffffff',
-                border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid #cbd5e1',
-                color: isDark ? '#cbd5e1' : '#334155',
-                fontSize: '13px',
-                fontWeight: 750,
-                cursor: 'pointer',
-                boxShadow: '0 2px 6px rgba(0,0,0,0.04)',
-                transition: 'all 0.15s ease'
-              }}
-            >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                <polyline points="14 2 14 8 20 8" />
-                <line x1="16" y1="13" x2="8" y2="13" />
-                <line x1="16" y1="17" x2="8" y2="17" />
-                <polyline points="10 9 9 9 8 9" />
-              </svg>
-              <span>NOSCA Archive ({noscaDocuments.length})</span>
-            </button>
 
             <button
               type="button"
@@ -925,7 +1024,7 @@ export default function NoscaItemTrackingTab({
                       No personnel currently matching criteria.
                     </div>
                     <div style={{ fontSize: '11.5px', marginTop: '4px', maxWidth: '440px', marginInline: 'auto' }}>
-                      Personnel whose Stage of Reclassification is set to "Endorsed to DBM RO" or "Approved" in the Assessment Workbench will appear here for NOSCA linking.
+                      Personnel whose Stage of Reclassification is set to "Endorsed to DBM RO" in the Assessment Workbench will appear here for NOSCA linking.
                     </div>
                   </td>
                 </tr>
@@ -1359,164 +1458,145 @@ export default function NoscaItemTrackingTab({
               marginBottom: '16px',
               fontSize: '12px'
             }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}>
+                <span style={{ color: 'var(--text-secondary, #94a3b8)' }}>Current Position:</span>
+                <span style={{ fontWeight: 750, color: 'var(--text)' }}>
+                  {sdoEditItemModal.personnel.current_position || sdoEditItemModal.personnel.position_title || '—'}
+                </span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}>
                 <span style={{ color: 'var(--text-secondary, #94a3b8)' }}>Current / Previous Item:</span>
                 <span style={{ fontWeight: 750, fontFamily: 'monospace', color: 'var(--text)' }}>
                   {sdoEditItemModal.personnel.plantilla_item_number || '—'}
                 </span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--text-secondary, #94a3b8)' }}>Target / Reclass Position:</span>
+                <span style={{ color: 'var(--text-secondary, #94a3b8)' }}>Actual Reclassification Position:</span>
                 <span style={{ fontWeight: 750, color: isDark ? '#6ee7b7' : '#047857' }}>
-                  {sdoEditItemModal.personnel.actual_position || sdoEditItemModal.personnel.target_position || 'School Counselor Associate I'}
+                  {sdoEditItemModal.personnel.actual_position || sdoEditItemModal.personnel.reclass_position || sdoEditItemModal.personnel.target_position || 'School Counselor Associate I'}
                 </span>
               </div>
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              {sdoEndorsees.length > 0 && (
+              {sdoEditItemModal.personnel && (
                 <div>
                   <label style={{ display: 'block', fontSize: '12px', fontWeight: 750, color: 'var(--text)', marginBottom: '6px' }}>
-                    Select Candidate for Plantilla Assignment <span style={{ color: '#ef4444' }}>*</span>
+                    Candidate for Plantilla Assignment
                   </label>
-                  <select
-                    value={sdoEditItemModal.personnel?.id || ''}
-                    onChange={(e) => {
-                      const chosen = sdoEndorsees.find(c => String(c.id) === String(e.target.value));
-                      if (chosen) {
-                        setSdoEditItemModal(prev => ({ ...prev, personnel: chosen }));
-                      }
-                    }}
+                  <input
+                    type="text"
+                    readOnly
+                    value={`${sdoEditItemModal.personnel.full_name || ''}${sdoEditItemModal.personnel.employee_id ? ` (${sdoEditItemModal.personnel.employee_id})` : ''} — ${sdoEditItemModal.personnel.station_division || sdoEditItemModal.personnel.division || 'SDO'} [${sdoEditItemModal.personnel.new_item_number ? `Assigned: ${sdoEditItemModal.personnel.new_item_number}` : 'Pending Item'}]`}
                     style={{
                       width: '100%',
-                      padding: '8px 12px',
+                      padding: '9px 12px',
                       borderRadius: '8px',
                       border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid var(--line)',
-                      background: isDark ? '#1e293b' : '#ffffff',
+                      background: isDark ? 'rgba(30, 41, 59, 0.45)' : '#f8fafc',
                       color: 'var(--text)',
                       fontSize: '12.5px',
                       fontWeight: 700,
                       outline: 'none',
-                      cursor: 'pointer'
+                      cursor: 'default'
                     }}
-                  >
-                    {sdoEndorsees.map(cand => (
-                      <option key={cand.id} value={cand.id}>
-                        {cand.full_name} ({cand.employee_id}) — {cand.station_division || cand.division || 'SDO'} {cand.new_item_number ? `[Assigned: ${cand.new_item_number}]` : '[⏳ Pending Item]'}
-                      </option>
-                    ))}
-                  </select>
+                  />
                 </div>
               )}
 
               <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 750, color: 'var(--text)', marginBottom: '6px' }}>
-                  NEW Item Number <span style={{ color: '#ef4444' }}>*</span>
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. OSEC-DECSB-SCA1-300010-2024"
-                  value={sdoEditItemModal.newItemNumber}
-                  onChange={(e) => setSdoEditItemModal(prev => ({ ...prev, newItemNumber: e.target.value }))}
-                  style={{
-                    width: '100%',
-                    padding: '10px 12px',
-                    borderRadius: '9px',
-                    border: isDark ? '1.5px solid rgba(51, 65, 85, 0.8)' : '1.5px solid var(--line)',
-                    background: 'var(--input-bg)',
-                    color: 'var(--input-text, var(--text))',
-                    fontFamily: 'monospace',
-                    fontSize: '13px',
-                    fontWeight: 750,
-                    outline: 'none'
-                  }}
-                />
+                {/* 1. Quick picker from unassigned NOSCA items strictly filtered by Actual Reclassification Position */}
+                {(() => {
+                  const candLevel = getCandidatePositionLevel(sdoEditItemModal.personnel);
+                  const levelTag = candLevel ? `SC ${romanLevel(candLevel)}` : null;
 
-                {/* Quick picker from unassigned NOSCA items */}
-                {noscaItems.length > 0 && (
-                  <div style={{ marginTop: '8px' }}>
-                    <div style={{ fontSize: '11px', color: 'var(--text-secondary, #94a3b8)', marginBottom: '4px' }}>
-                      Or choose an available scanned item:
+                  return (
+                    <div>
+                      <div style={{ fontSize: '11px', color: 'var(--text-secondary, #94a3b8)', marginBottom: '4px' }}>
+                        Choose an available scanned item:
+                      </div>
+                      <select
+                        value={matchingNoscaItems.some(i => i.plantilla_item_number === sdoEditItemModal.newItemNumber) ? sdoEditItemModal.newItemNumber : ''}
+                        onChange={(e) => {
+                          if (e.target.value) {
+                            setSdoEditItemModal(prev => ({ ...prev, newItemNumber: e.target.value }));
+                          }
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: '8px 10px',
+                          borderRadius: '8px',
+                          border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid var(--line)',
+                          background: isDark ? '#1e293b' : '#ffffff',
+                          color: 'var(--text)',
+                          fontSize: '12px',
+                          fontWeight: 600,
+                          cursor: matchingNoscaItems.length > 0 ? 'pointer' : 'default',
+                          outline: 'none'
+                        }}
+                      >
+                        {matchingNoscaItems.length > 0 ? (
+                          <>
+                            <option value="">
+                              — Select an available item assigned to {levelTag || 'position'} ({matchingNoscaItems.length} available) —
+                            </option>
+                            {matchingNoscaItems.map(item => {
+                              const itemNo = item.plantilla_item_number;
+                              const posTitle = item.position || (levelTag || 'NOSCA');
+                              return (
+                                <option key={item.id} value={itemNo}>
+                                  {itemNo} ({posTitle}{item.serial_no ? ` • ${item.serial_no}` : ''})
+                                </option>
+                              );
+                            })}
+                          </>
+                        ) : (
+                          <option value="" disabled>
+                            {levelTag
+                              ? `— No available item numbers matching ${levelTag} —`
+                              : '— No matching item numbers found —'}
+                          </option>
+                        )}
+                      </select>
                     </div>
-                    <select
-                      onChange={(e) => {
-                        if (e.target.value) {
-                          setSdoEditItemModal(prev => ({ ...prev, newItemNumber: e.target.value }));
-                        }
-                      }}
-                      style={{
-                        width: '100%',
-                        padding: '6px 10px',
-                        borderRadius: '6px',
-                        border: '1px solid var(--line)',
-                        background: isDark ? '#1e293b' : '#ffffff',
-                        color: 'var(--text)',
-                        fontSize: '12px'
-                      }}
-                    >
-                      <option value="">— Select an unassigned NOSCA item —</option>
-                      {noscaItems.slice(0, 30).map(item => (
-                        <option key={item.id} value={item.plantilla_item_number}>
-                          {item.plantilla_item_number} ({item.serial_no || 'NOSCA'})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-              </div>
+                  );
+                })()}
 
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 750, color: 'var(--text)', marginBottom: '6px' }}>
-                  NOSCA Serial Reference
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. RO-NCR-2024-089"
-                  value={sdoEditItemModal.serialNo}
-                  onChange={(e) => setSdoEditItemModal(prev => ({ ...prev, serialNo: e.target.value }))}
-                  style={{
-                    width: '100%',
-                    padding: '9px 12px',
-                    borderRadius: '9px',
-                    border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid var(--line)',
-                    background: 'var(--input-bg)',
-                    color: 'var(--input-text, var(--text))',
-                    fontSize: '12.5px',
-                    outline: 'none'
-                  }}
-                />
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 750, color: 'var(--text)', marginBottom: '6px' }}>
-                  NOSCA File Name / Transaction Tag
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. NOSCA_NCR_2024_089.pdf"
-                  value={sdoEditItemModal.fileName}
-                  onChange={(e) => setSdoEditItemModal(prev => ({ ...prev, fileName: e.target.value }))}
-                  style={{
-                    width: '100%',
-                    padding: '9px 12px',
-                    borderRadius: '9px',
-                    border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid var(--line)',
-                    background: 'var(--input-bg)',
-                    color: 'var(--input-text, var(--text))',
-                    fontSize: '12.5px',
-                    outline: 'none'
-                  }}
-                />
+                {/* 2. NEW Item Number input */}
+                <div style={{ marginTop: '10px' }}>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 750, color: 'var(--text)', marginBottom: '6px' }}>
+                    NEW Item Number <span style={{ color: '#ef4444' }}>*</span>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. OSEC-DECSB-SCA1-300010-2024"
+                    value={sdoEditItemModal.newItemNumber}
+                    onChange={(e) => setSdoEditItemModal(prev => ({ ...prev, newItemNumber: e.target.value }))}
+                    style={{
+                      width: '100%',
+                      padding: '10px 12px',
+                      borderRadius: '9px',
+                      border: isDark ? '1.5px solid rgba(51, 65, 85, 0.8)' : '1.5px solid var(--line)',
+                      background: 'var(--input-bg)',
+                      color: 'var(--input-text, var(--text))',
+                      fontFamily: 'monospace',
+                      fontSize: '13px',
+                      fontWeight: 750,
+                      outline: 'none'
+                    }}
+                  />
+                </div>
               </div>
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '20px' }}>
-              {sdoEditItemModal.personnel.new_item_number ? (
+              {Boolean(sdoEditItemModal.personnel?.new_item_number || sdoEditItemModal.personnel?.new_item_no) ? (
                 <button
                   type="button"
                   onClick={() => {
+                    if (savingSdoItem) return;
                     setSdoEditItemModal(prev => ({ ...prev, newItemNumber: '', serialNo: '', fileName: '' }));
-                    onSaveSdoItem();
+                    onSaveSdoItem('');
                   }}
                   disabled={savingSdoItem}
                   style={{
@@ -1527,10 +1607,29 @@ export default function NoscaItemTrackingTab({
                     color: '#ef4444',
                     fontSize: '12px',
                     fontWeight: 700,
-                    cursor: 'pointer'
+                    cursor: savingSdoItem ? 'not-allowed' : 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    transition: 'all 0.15s ease'
+                  }}
+                  onMouseOver={e => {
+                    if (!savingSdoItem) e.currentTarget.style.background = 'rgba(239, 68, 68, 0.08)';
+                  }}
+                  onMouseOut={e => {
+                    e.currentTarget.style.background = 'none';
                   }}
                 >
-                  Remove Appointment
+                  {savingSdoItem ? (
+                    <>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ animation: 'spin 1s linear infinite' }}>
+                        <circle cx="12" cy="12" r="10" strokeDasharray="32" strokeDashoffset="10" />
+                      </svg>
+                      Removing...
+                    </>
+                  ) : (
+                    'Remove Appointment'
+                  )}
                 </button>
               ) : <div />}
 
@@ -1554,7 +1653,7 @@ export default function NoscaItemTrackingTab({
                 </button>
                 <button
                   type="button"
-                  onClick={onSaveSdoItem}
+                  onClick={() => onSaveSdoItem()}
                   disabled={savingSdoItem}
                   style={{
                     padding: '8px 20px',
@@ -2144,12 +2243,16 @@ export default function NoscaItemTrackingTab({
             @keyframes modalCardPopIn {
               0% {
                 opacity: 0;
-                transform: scale(0.94) translateY(14px);
+                transform: scale(0.95) translateY(14px);
               }
               100% {
                 opacity: 1;
                 transform: scale(1) translateY(0);
               }
+            }
+            @keyframes pulseEmeraldDot {
+              0%, 100% { transform: scale(1); opacity: 1; }
+              50% { transform: scale(1.35); opacity: 0.6; }
             }
             .agap-modal-scrollbar::-webkit-scrollbar {
               width: 6px;
@@ -2180,7 +2283,7 @@ export default function NoscaItemTrackingTab({
               bottom: 0,
               width: '100vw',
               height: '100vh',
-              background: isDark ? 'rgba(3, 7, 18, 0.82)' : 'rgba(15, 23, 42, 0.68)',
+              background: isDark ? 'rgba(3, 7, 18, 0.85)' : 'rgba(15, 23, 42, 0.68)',
               backdropFilter: 'blur(16px)',
               WebkitBackdropFilter: 'blur(16px)',
               display: 'flex',
@@ -2194,26 +2297,19 @@ export default function NoscaItemTrackingTab({
             <div
               style={{
                 background: isDark ? '#0f172a' : '#ffffff',
-                borderRadius: '24px',
-                width: 'min(1140px, 96vw)',
+                borderRadius: '22px',
+                width: 'min(1240px, 96vw)',
                 maxHeight: '88vh',
                 boxShadow: isDark
                   ? '0 30px 90px -12px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(255, 255, 255, 0.12)'
-                  : '0 30px 80px -15px rgba(15, 23, 42, 0.38), 0 0 0 1px rgba(15, 23, 42, 0.08)',
+                  : '0 30px 85px -15px rgba(15, 23, 42, 0.35), 0 0 0 1px rgba(15, 23, 42, 0.08)',
                 border: isDark ? '1px solid rgba(255, 255, 255, 0.1)' : '1px solid #e2e8f0',
                 display: 'flex',
                 flexDirection: 'column',
                 overflow: 'hidden',
-                animation: 'modalCardPopIn 0.26s cubic-bezier(0.16, 1, 0.3, 1)'
+                animation: 'modalCardPopIn 0.25s cubic-bezier(0.16, 1, 0.3, 1)'
               }}
             >
-              {/* Top Accent Gradient Line */}
-              <div style={{
-                height: '4px',
-                width: '100%',
-                background: 'linear-gradient(90deg, #059669 0%, #10b981 30%, #3b82f6 70%, #6366f1 100%)'
-              }} />
-
               {/* Modal Header */}
               <div style={{
                 padding: '20px 28px',
@@ -2226,17 +2322,17 @@ export default function NoscaItemTrackingTab({
                 justifyContent: 'space-between',
                 gap: '16px'
               }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
                   <div style={{
-                    width: '46px',
-                    height: '46px',
-                    borderRadius: '13px',
+                    width: '48px',
+                    height: '48px',
+                    borderRadius: '14px',
                     background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)',
                     color: '#ffffff',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    boxShadow: '0 6px 18px rgba(16, 185, 129, 0.35)',
+                    boxShadow: '0 8px 20px -4px rgba(16, 185, 129, 0.45)',
                     flexShrink: 0
                   }}>
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
@@ -2247,37 +2343,53 @@ export default function NoscaItemTrackingTab({
                     </svg>
                   </div>
                   <div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
                       <span style={{
-                        fontSize: '10px',
+                        fontSize: '10.5px',
                         fontWeight: 800,
-                        padding: '2.5px 8px',
+                        padding: '3px 10px',
                         borderRadius: '999px',
-                        background: isDark ? 'rgba(16, 185, 129, 0.2)' : '#dcfce7',
+                        background: isDark ? 'rgba(16, 185, 129, 0.18)' : '#dcfce7',
                         color: isDark ? '#6ee7b7' : '#15803d',
-                        border: isDark ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #86efac',
+                        border: isDark ? '1px solid rgba(16, 185, 129, 0.35)' : '1px solid #86efac',
                         textTransform: 'uppercase',
                         letterSpacing: '0.06em',
                         display: 'inline-flex',
                         alignItems: 'center',
-                        gap: '5px'
+                        gap: '6px'
                       }}>
                         <span style={{
-                          width: '6px',
-                          height: '6px',
+                          width: '7px',
+                          height: '7px',
                           borderRadius: '50%',
                           background: '#10b981',
                           display: 'inline-block',
-                          boxShadow: '0 0 6px #10b981'
+                          boxShadow: '0 0 8px #10b981',
+                          animation: 'pulseEmeraldDot 2s ease-in-out infinite'
                         }} />
                         Unassigned Inventory
                       </span>
-                      <h3 style={{ fontSize: '18px', fontWeight: 850, margin: 0, color: isDark ? '#f8fafc' : '#0f172a', letterSpacing: '-0.02em' }}>
+                      <h3 style={{ fontSize: '19px', fontWeight: 850, margin: 0, color: isDark ? '#f8fafc' : '#0f172a', letterSpacing: '-0.025em' }}>
                         Available Plantilla Item Numbers
                       </h3>
                     </div>
-                    <div style={{ fontSize: '12.5px', color: 'var(--text-secondary, #64748b)', marginTop: '3px' }}>
-                      Showing <b>{availableItemsList.length}</b> of <b>{roAvailableCount}</b> unassigned items ready for candidate assignment.
+                    <div style={{ fontSize: '12.5px', color: 'var(--text-secondary, #64748b)', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>
+                        Showing <strong style={{ color: isDark ? '#f1f5f9' : '#0f172a' }}>{availableItemsList.length}</strong> of <strong style={{ color: isDark ? '#f1f5f9' : '#0f172a' }}>{roAvailableCount}</strong> unassigned items ready for candidate assignment.
+                      </span>
+                      {(availSearchTerm || availCategoryFilter !== 'ALL') && (
+                        <span style={{
+                          padding: '1.5px 7px',
+                          borderRadius: '6px',
+                          fontSize: '10.5px',
+                          fontWeight: 750,
+                          background: isDark ? 'rgba(59, 130, 246, 0.2)' : '#eff6ff',
+                          color: isDark ? '#93c5fd' : '#2563eb',
+                          border: isDark ? '1px solid rgba(59, 130, 246, 0.35)' : '1px solid #bfdbfe'
+                        }}>
+                          Filtered
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -2286,33 +2398,42 @@ export default function NoscaItemTrackingTab({
                   type="button"
                   onClick={() => setShowAvailableModal(false)}
                   style={{
-                    background: isDark ? 'rgba(51, 65, 85, 0.5)' : '#f1f5f9',
-                    border: isDark ? '1px solid rgba(71, 85, 105, 0.7)' : '1px solid #cbd5e1',
-                    borderRadius: '10px',
-                    width: '36px',
-                    height: '36px',
-                    display: 'grid',
-                    placeItems: 'center',
-                    color: isDark ? '#94a3b8' : '#64748b',
+                    background: isDark ? 'rgba(51, 65, 85, 0.45)' : '#f1f5f9',
+                    border: isDark ? '1px solid rgba(71, 85, 105, 0.6)' : '1px solid #cbd5e1',
+                    borderRadius: '50%',
+                    width: '34px',
+                    height: '34px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
                     cursor: 'pointer',
+                    padding: 0,
                     transition: 'all 0.16s ease',
-                    boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+                    boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
+                    flexShrink: 0
                   }}
                   onMouseOver={(e) => {
-                    e.currentTarget.style.background = isDark ? '#ef4444' : '#fee2e2';
-                    e.currentTarget.style.color = isDark ? '#ffffff' : '#dc2626';
-                    e.currentTarget.style.borderColor = '#ef4444';
+                    e.currentTarget.style.background = isDark ? 'rgba(239, 68, 68, 0.25)' : '#fee2e2';
+                    e.currentTarget.style.borderColor = isDark ? '#ef4444' : '#fca5a5';
+                    const path = e.currentTarget.querySelector('path');
+                    if (path) path.style.stroke = '#dc2626';
                   }}
                   onMouseOut={(e) => {
-                    e.currentTarget.style.background = isDark ? 'rgba(51, 65, 85, 0.5)' : '#f1f5f9';
-                    e.currentTarget.style.color = isDark ? '#94a3b8' : '#64748b';
-                    e.currentTarget.style.borderColor = isDark ? 'rgba(71, 85, 105, 0.7)' : '#cbd5e1';
+                    e.currentTarget.style.background = isDark ? 'rgba(51, 65, 85, 0.45)' : '#f1f5f9';
+                    e.currentTarget.style.borderColor = isDark ? 'rgba(71, 85, 105, 0.6)' : '#cbd5e1';
+                    const path = e.currentTarget.querySelector('path');
+                    if (path) path.style.stroke = isDark ? '#cbd5e1' : '#475569';
                   }}
                   title="Close (Esc)"
                 >
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-                    <line x1="18" y1="6" x2="6" y2="18" />
-                    <line x1="6" y1="6" x2="18" y2="18" />
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" style={{ display: 'block', pointerEvents: 'none' }}>
+                    <path
+                      d="M18 6L6 18M6 6l12 12"
+                      stroke={isDark ? '#cbd5e1' : '#475569'}
+                      strokeWidth="2.6"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
                   </svg>
                 </button>
               </div>
@@ -2320,15 +2441,16 @@ export default function NoscaItemTrackingTab({
               {/* Modal Search & Filter Toolbar */}
               <div style={{
                 padding: '12px 28px',
-                borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.5)' : '1px solid #f1f5f9',
+                borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.5)' : '1px solid #eef2f6',
                 background: isDark ? 'rgba(30, 41, 59, 0.45)' : '#fbfcfe',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                gap: '14px',
+                gap: '16px',
                 flexWrap: 'wrap'
               }}>
-                <div style={{ position: 'relative', flex: '1 1 280px', minWidth: '220px' }}>
+                {/* Search Field */}
+                <div style={{ position: 'relative', flex: '1 1 320px', maxWidth: '440px', minWidth: '220px' }}>
                   <input
                     type="text"
                     placeholder="Search by item no., position, station, division..."
@@ -2336,11 +2458,11 @@ export default function NoscaItemTrackingTab({
                     onChange={(e) => setAvailSearchTerm(e.target.value)}
                     style={{
                       width: '100%',
-                      height: '38px',
-                      padding: '0 32px 0 38px',
-                      borderRadius: '10px',
+                      height: '40px',
+                      padding: '0 36px 0 40px',
+                      borderRadius: '11px',
                       fontSize: '12.5px',
-                      border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid #cbd5e1',
+                      border: isDark ? '1px solid rgba(71, 85, 105, 0.7)' : '1px solid #cbd5e1',
                       background: isDark ? '#1e293b' : '#ffffff',
                       color: 'var(--text)',
                       outline: 'none',
@@ -2348,17 +2470,17 @@ export default function NoscaItemTrackingTab({
                       transition: 'border-color 0.15s ease, box-shadow 0.15s ease'
                     }}
                     onFocus={(e) => {
-                      e.target.style.borderColor = '#3b82f6';
-                      e.target.style.boxShadow = '0 0 0 3px rgba(59, 130, 246, 0.15)';
+                      e.target.style.borderColor = '#10b981';
+                      e.target.style.boxShadow = '0 0 0 3px rgba(16, 185, 129, 0.16)';
                     }}
                     onBlur={(e) => {
-                      e.target.style.borderColor = isDark ? 'rgba(51, 65, 85, 0.8)' : '#cbd5e1';
+                      e.target.style.borderColor = isDark ? 'rgba(71, 85, 105, 0.7)' : '#cbd5e1';
                       e.target.style.boxShadow = '0 1px 3px rgba(0,0,0,0.04)';
                     }}
                   />
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" style={{
                     position: 'absolute',
-                    left: '13px',
+                    left: '14px',
                     top: '50%',
                     transform: 'translateY(-50%)',
                     color: 'var(--text-secondary, #94a3b8)',
@@ -2373,10 +2495,10 @@ export default function NoscaItemTrackingTab({
                       onClick={() => setAvailSearchTerm('')}
                       style={{
                         position: 'absolute',
-                        right: '10px',
+                        right: '11px',
                         top: '50%',
                         transform: 'translateY(-50%)',
-                        background: isDark ? 'rgba(51, 65, 85, 0.6)' : '#e2e8f0',
+                        background: isDark ? 'rgba(71, 85, 105, 0.6)' : '#e2e8f0',
                         border: 'none',
                         borderRadius: '50%',
                         width: '20px',
@@ -2396,17 +2518,18 @@ export default function NoscaItemTrackingTab({
                 </div>
 
                 {/* Category Filter Group */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: '11px', fontWeight: 800, color: 'var(--text-secondary, #64748b)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '11px', fontWeight: 800, color: 'var(--text-secondary, #64748b)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                     Category:
                   </span>
                   <div style={{
                     display: 'inline-flex',
                     alignItems: 'center',
-                    background: isDark ? 'rgba(15, 23, 42, 0.65)' : '#e2e8f0',
+                    background: isDark ? 'rgba(15, 23, 42, 0.7)' : '#f1f5f9',
                     padding: '3px',
-                    borderRadius: '10px',
-                    gap: '2px'
+                    borderRadius: '11px',
+                    border: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid #e2e8f0',
+                    gap: '3px'
                   }}>
                     {[
                       { key: 'ALL', label: 'All', count: availCategoryCounts.ALL },
@@ -2421,9 +2544,9 @@ export default function NoscaItemTrackingTab({
                           type="button"
                           onClick={() => setAvailCategoryFilter(key)}
                           style={{
-                            padding: '5px 12px',
+                            padding: '6px 13px',
                             borderRadius: '8px',
-                            fontSize: '11.5px',
+                            fontSize: '12px',
                             fontWeight: 750,
                             cursor: 'pointer',
                             border: 'none',
@@ -2432,22 +2555,23 @@ export default function NoscaItemTrackingTab({
                               : 'transparent',
                             color: isActive ? '#ffffff' : (isDark ? '#cbd5e1' : '#475569'),
                             boxShadow: isActive ? '0 2px 8px rgba(37, 99, 235, 0.35)' : 'none',
-                            transition: 'all 0.16s ease',
+                            transition: 'all 0.15s ease',
                             display: 'inline-flex',
                             alignItems: 'center',
-                            gap: '5px'
+                            gap: '6px',
+                            whiteSpace: 'nowrap'
                           }}
                         >
                           <span>{label}</span>
                           <span style={{
-                            fontSize: '10px',
+                            fontSize: '10.5px',
                             fontWeight: 800,
-                            padding: '1px 6px',
+                            padding: '1.5px 7px',
                             borderRadius: '999px',
                             background: isActive
                               ? 'rgba(255, 255, 255, 0.25)'
-                              : (isDark ? 'rgba(51, 65, 85, 0.8)' : '#cbd5e1'),
-                            color: isActive ? '#ffffff' : 'var(--text-secondary, #64748b)'
+                              : (isDark ? 'rgba(51, 65, 85, 0.8)' : '#e2e8f0'),
+                            color: isActive ? '#ffffff' : (isDark ? '#94a3b8' : '#64748b')
                           }}>
                             {count}
                           </span>
@@ -2459,20 +2583,20 @@ export default function NoscaItemTrackingTab({
               </div>
 
               {/* Modal Body: Available Items Table */}
-              <div className="agap-modal-scrollbar" style={{ padding: '0', overflowY: 'auto', overflowX: 'auto', flex: 1, minHeight: '200px', maxHeight: '500px' }}>
+              <div className="agap-modal-scrollbar" style={{ padding: '0', overflowY: 'auto', overflowX: 'auto', flex: 1, minHeight: '260px', maxHeight: '540px' }}>
                 {availableItemsList.length === 0 ? (
-                  <div style={{ padding: '52px 24px', textAlign: 'center', color: 'var(--text-secondary, #94a3b8)' }}>
+                  <div style={{ padding: '56px 24px', textAlign: 'center', color: 'var(--text-secondary, #94a3b8)' }}>
                     <div style={{
-                      width: '54px',
-                      height: '54px',
+                      width: '58px',
+                      height: '58px',
                       borderRadius: '50%',
                       background: isDark ? 'rgba(30, 41, 59, 0.6)' : '#f1f5f9',
                       display: 'grid',
                       placeItems: 'center',
-                      margin: '0 auto 14px',
+                      margin: '0 auto 16px',
                       color: 'var(--text-secondary, #64748b)'
                     }}>
-                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <circle cx="11" cy="11" r="8" />
                         <line x1="21" y1="21" x2="16.65" y2="16.65" />
                       </svg>
@@ -2495,14 +2619,14 @@ export default function NoscaItemTrackingTab({
                           setAvailCategoryFilter('ALL');
                         }}
                         style={{
-                          marginTop: '16px',
-                          padding: '7px 16px',
-                          borderRadius: '8px',
+                          marginTop: '18px',
+                          padding: '8px 18px',
+                          borderRadius: '9px',
                           background: isDark ? '#1e293b' : '#f1f5f9',
-                          border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid #cbd5e1',
+                          border: isDark ? '1px solid rgba(71, 85, 105, 0.8)' : '1px solid #cbd5e1',
                           color: 'var(--text)',
                           fontSize: '12px',
-                          fontWeight: 700,
+                          fontWeight: 750,
                           cursor: 'pointer'
                         }}
                       >
@@ -2511,35 +2635,35 @@ export default function NoscaItemTrackingTab({
                     )}
                   </div>
                 ) : (
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px', tableLayout: 'auto' }}>
+                  <table style={{ width: '100%', minWidth: '920px', borderCollapse: 'collapse', fontSize: '12.5px', tableLayout: 'auto' }}>
                     <thead>
                       <tr style={{
-                        background: isDark ? 'rgba(30, 41, 59, 0.95)' : '#f8fafc',
+                        background: isDark ? '#1e293b' : '#f8fafc',
                         borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid #e2e8f0',
                         position: 'sticky',
                         top: 0,
-                        zIndex: 2,
+                        zIndex: 5,
                         color: 'var(--text-secondary, #64748b)',
                         fontSize: '11px',
                         textTransform: 'uppercase',
-                        letterSpacing: '0.05em'
+                        letterSpacing: '0.06em'
                       }}>
-                        <th style={{ padding: '13px 14px', textAlign: 'center', width: '48px', whiteSpace: 'nowrap' }}>#</th>
-                        <th style={{ padding: '13px 18px', textAlign: 'left', minWidth: '240px', whiteSpace: 'nowrap' }}>Plantilla Item Number</th>
-                        <th style={{ padding: '13px 14px', textAlign: 'left', minWidth: '120px', whiteSpace: 'nowrap' }}>Category</th>
-                        <th style={{ padding: '13px 16px', textAlign: 'left', minWidth: '200px', whiteSpace: 'nowrap' }}>Position Title</th>
-                        <th style={{ padding: '13px 16px', textAlign: 'left', minWidth: '180px', whiteSpace: 'nowrap' }}>Station / Division</th>
-                        <th style={{ padding: '13px 14px', textAlign: 'center', width: '120px', whiteSpace: 'nowrap' }}>Status</th>
-                        {isAuthorizedToAssign && (
-                          <th style={{ padding: '13px 20px', textAlign: 'right', minWidth: '170px', whiteSpace: 'nowrap' }}>Action</th>
-                        )}
+                        <th style={{ padding: '14px 16px', textAlign: 'center', width: '54px', whiteSpace: 'nowrap' }}>#</th>
+                        <th style={{ padding: '14px 20px', textAlign: 'left', width: '280px', whiteSpace: 'nowrap' }}>Plantilla Item Number</th>
+                        <th style={{ padding: '14px 16px', textAlign: 'left', width: '140px', whiteSpace: 'nowrap' }}>Category</th>
+                        <th style={{ padding: '14px 20px', textAlign: 'left', minWidth: '240px', whiteSpace: 'nowrap' }}>Position Title</th>
+                        <th style={{ padding: '14px 20px', textAlign: 'left', minWidth: '220px', whiteSpace: 'nowrap' }}>Station / Division</th>
+                        <th style={{ padding: '14px 20px', textAlign: 'center', width: '130px', whiteSpace: 'nowrap' }}>Status</th>
                       </tr>
                     </thead>
                     <tbody>
                       {availableItemsList.map((item, idx) => {
                         const itemNoStr = item.plantilla_item_number || item.new_item_no || '—';
                         const isCopied = copiedAvailItemNo === itemNoStr;
-                        const isSecondary = item.category === 'JHS' || item.category === 'SHS';
+                        const cat = String(item.category || '').toUpperCase();
+                        const isJHS = cat.includes('JHS');
+                        const isSHS = cat.includes('SHS');
+
                         return (
                           <tr
                             key={item.id || idx}
@@ -2547,188 +2671,184 @@ export default function NoscaItemTrackingTab({
                               borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.35)' : '1px solid #f1f5f9',
                               transition: 'background 0.15s ease'
                             }}
-                            onMouseOver={(e) => e.currentTarget.style.background = isDark ? 'rgba(30, 41, 59, 0.45)' : '#f8fafc'}
+                            onMouseOver={(e) => e.currentTarget.style.background = isDark ? 'rgba(30, 41, 59, 0.55)' : '#f8fafc'}
                             onMouseOut={(e) => e.currentTarget.style.background = 'transparent'}
                           >
-                            <td style={{ padding: '13px 14px', textAlign: 'center', color: 'var(--text-secondary, #94a3b8)', fontWeight: 700, fontSize: '11.5px' }}>
+                            {/* Row Index */}
+                            <td style={{ padding: '14px 16px', textAlign: 'center', color: 'var(--text-secondary, #94a3b8)', fontWeight: 700, fontSize: '11.5px' }}>
                               {idx + 1}
                             </td>
-                            <td style={{ padding: '13px 18px' }}>
-                              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
-                                <span style={{
-                                  fontFamily: 'monospace',
-                                  fontWeight: 800,
+
+                            {/* Plantilla Item Number */}
+                            <td style={{ padding: '14px 20px' }}>
+                              <div
+                                onClick={() => handleCopyAvailItemNo(itemNoStr)}
+                                style={{
+                                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                                  fontWeight: 750,
                                   fontSize: '12px',
                                   color: isDark ? '#38bdf8' : '#0369a1',
-                                  background: isDark ? 'rgba(14, 165, 233, 0.15)' : '#f0f9ff',
+                                  background: isDark ? 'rgba(14, 165, 233, 0.14)' : '#f0f9ff',
                                   border: isDark ? '1px solid rgba(14, 165, 233, 0.35)' : '1px solid #bae6fd',
-                                  padding: '4px 10px',
-                                  borderRadius: '7px',
-                                  letterSpacing: '0.02em',
-                                  boxShadow: isDark ? 'none' : '0 1px 2px rgba(3, 105, 161, 0.05)'
-                                }}>
-                                  {itemNoStr}
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => handleCopyAvailItemNo(itemNoStr)}
-                                  style={{
-                                    background: isCopied
-                                      ? (isDark ? 'rgba(16, 185, 129, 0.2)' : '#dcfce7')
-                                      : (isDark ? 'rgba(51, 65, 85, 0.5)' : '#f1f5f9'),
-                                    border: isCopied
-                                      ? (isDark ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #86efac')
-                                      : (isDark ? '1px solid rgba(71, 85, 105, 0.6)' : '1px solid #cbd5e1'),
-                                    cursor: 'pointer',
-                                    padding: '4px 9px',
-                                    fontSize: '11px',
-                                    fontWeight: 700,
-                                    color: isCopied ? (isDark ? '#6ee7b7' : '#15803d') : 'var(--text-secondary, #64748b)',
-                                    borderRadius: '7px',
-                                    transition: 'all 0.15s ease',
+                                  padding: '5px 12px',
+                                  borderRadius: '8px',
+                                  letterSpacing: '0.025em',
+                                  whiteSpace: 'nowrap',
+                                  cursor: 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '6px',
+                                  boxShadow: isDark ? 'none' : '0 1px 2px rgba(3, 105, 161, 0.05)',
+                                  transition: 'all 0.15s ease'
+                                }}
+                                title="Click to copy item number"
+                                onMouseOver={(e) => {
+                                  e.currentTarget.style.borderColor = isDark ? '#38bdf8' : '#0284c7';
+                                  e.currentTarget.style.background = isDark ? 'rgba(14, 165, 233, 0.24)' : '#e0f2fe';
+                                }}
+                                onMouseOut={(e) => {
+                                  e.currentTarget.style.borderColor = isDark ? 'rgba(14, 165, 233, 0.35)' : '#bae6fd';
+                                  e.currentTarget.style.background = isDark ? 'rgba(14, 165, 233, 0.14)' : '#f0f9ff';
+                                }}
+                              >
+                                <span>{itemNoStr}</span>
+                                {isCopied && (
+                                  <span style={{
+                                    fontSize: '10px',
+                                    fontWeight: 800,
+                                    color: isDark ? '#6ee7b7' : '#15803d',
+                                    background: isDark ? 'rgba(16, 185, 129, 0.25)' : '#dcfce7',
+                                    padding: '1px 6px',
+                                    borderRadius: '5px',
                                     display: 'inline-flex',
                                     alignItems: 'center',
-                                    gap: '4px'
-                                  }}
-                                  title="Copy item number to clipboard"
-                                >
-                                  {isCopied ? (
-                                    <>
-                                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round">
-                                        <polyline points="20 6 9 17 4 12" />
-                                      </svg>
-                                      <span>Copied!</span>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                                      </svg>
-                                      <span>Copy</span>
-                                    </>
-                                  )}
-                                </button>
+                                    gap: '3px'
+                                  }}>
+                                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                                      <polyline points="20 6 9 17 4 12" />
+                                    </svg>
+                                    Copied
+                                  </span>
+                                )}
                               </div>
                             </td>
-                            <td style={{ padding: '13px 14px' }}>
+
+                            {/* Category Pill */}
+                            <td style={{ padding: '14px 16px' }}>
                               <span style={{
-                                fontSize: '10.5px',
+                                fontSize: '11px',
                                 fontWeight: 800,
-                                padding: '3px 9px',
-                                borderRadius: '6px',
-                                background: isSecondary
-                                  ? (isDark ? 'rgba(168, 85, 247, 0.2)' : '#f3e8ff')
-                                  : (isDark ? 'rgba(59, 130, 246, 0.2)' : '#eff6ff'),
-                                color: isSecondary
-                                  ? (isDark ? '#c084fc' : '#7e22ce')
+                                padding: '3.5px 10px',
+                                borderRadius: '7px',
+                                whiteSpace: 'nowrap',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '5px',
+                                background: isSHS
+                                  ? (isDark ? 'rgba(245, 158, 11, 0.18)' : '#fffbeb')
+                                  : isJHS
+                                  ? (isDark ? 'rgba(168, 85, 247, 0.18)' : '#f5f3ff')
+                                  : (isDark ? 'rgba(59, 130, 246, 0.18)' : '#eff6ff'),
+                                color: isSHS
+                                  ? (isDark ? '#fcd34d' : '#b45309')
+                                  : isJHS
+                                  ? (isDark ? '#c084fc' : '#6d28d9')
                                   : (isDark ? '#93c5fd' : '#1d4ed8'),
-                                border: isSecondary
-                                  ? (isDark ? '1px solid rgba(168, 85, 247, 0.35)' : '1px solid #d8b4fe')
+                                border: isSHS
+                                  ? (isDark ? '1px solid rgba(245, 158, 11, 0.35)' : '1px solid #fde68a')
+                                  : isJHS
+                                  ? (isDark ? '1px solid rgba(168, 85, 247, 0.35)' : '1px solid #ddd6fe')
                                   : (isDark ? '1px solid rgba(59, 130, 246, 0.35)' : '1px solid #bfdbfe')
                               }}>
+                                <span style={{
+                                  width: '5px',
+                                  height: '5px',
+                                  borderRadius: '50%',
+                                  background: 'currentColor',
+                                  opacity: 0.85
+                                }} />
                                 {item.category || 'ELEMENTARY'}
                               </span>
                             </td>
-                            <td style={{ padding: '13px 16px' }}>
-                              <div style={{ color: isDark ? '#f8fafc' : '#0f172a', fontWeight: 750, fontSize: '12.5px' }}>
+
+                            {/* Position Title & SG */}
+                            <td style={{ padding: '14px 20px' }}>
+                              <div style={{ color: isDark ? '#f8fafc' : '#0f172a', fontWeight: 750, fontSize: '12.5px', lineHeight: 1.35 }}>
                                 {item.position_title || item.position || 'School Counselor Associate I'}
                               </div>
                               {item.salary_grade && (
-                                <span style={{
-                                  fontSize: '10px',
-                                  fontWeight: 800,
-                                  color: isDark ? '#94a3b8' : '#64748b',
-                                  marginTop: '2px',
-                                  display: 'inline-block'
-                                }}>
-                                  Salary Grade {item.salary_grade}
-                                </span>
+                                <div style={{ marginTop: '3px' }}>
+                                  <span style={{
+                                    fontSize: '10.5px',
+                                    fontWeight: 700,
+                                    color: isDark ? '#94a3b8' : '#64748b',
+                                    background: isDark ? 'rgba(51, 65, 85, 0.45)' : '#f1f5f9',
+                                    border: isDark ? '1px solid rgba(71, 85, 105, 0.5)' : '1px solid #e2e8f0',
+                                    padding: '1.5px 7px',
+                                    borderRadius: '5px',
+                                    display: 'inline-block'
+                                  }}>
+                                    Salary Grade {item.salary_grade}
+                                  </span>
+                                </div>
                               )}
                             </td>
-                            <td style={{ padding: '13px 16px' }}>
+
+                            {/* Station / Division */}
+                            <td style={{ padding: '14px 20px' }}>
                               <div style={{
                                 display: 'flex',
                                 alignItems: 'center',
-                                gap: '5px',
-                                color: 'var(--text-secondary, #64748b)',
+                                gap: '7px',
+                                color: isDark ? '#cbd5e1' : '#334155',
                                 fontSize: '12px',
-                                fontWeight: 600
+                                fontWeight: 650
                               }}>
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, opacity: 0.65 }}>
-                                  <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
-                                  <circle cx="12" cy="10" r="3" />
-                                </svg>
+                                <div style={{
+                                  width: '22px',
+                                  height: '22px',
+                                  borderRadius: '50%',
+                                  background: isDark ? 'rgba(51, 65, 85, 0.4)' : '#f1f5f9',
+                                  display: 'grid',
+                                  placeItems: 'center',
+                                  flexShrink: 0,
+                                  color: isDark ? '#94a3b8' : '#64748b'
+                                }}>
+                                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+                                    <circle cx="12" cy="10" r="3" />
+                                  </svg>
+                                </div>
                                 <span>{item.division || item.station_division || item.school_name || 'Regional Office Pool'}</span>
                               </div>
                             </td>
-                            <td style={{ padding: '13px 14px', textAlign: 'center' }}>
+
+                            {/* Status */}
+                            <td style={{ padding: '14px 20px', textAlign: 'center' }}>
                               <span style={{
                                 display: 'inline-flex',
                                 alignItems: 'center',
                                 gap: '5px',
-                                padding: '3.5px 10px',
+                                padding: '4px 10px',
                                 borderRadius: '999px',
-                                background: isDark ? 'rgba(16, 185, 129, 0.2)' : '#dcfce7',
+                                background: isDark ? 'rgba(16, 185, 129, 0.16)' : '#ecfdf5',
                                 color: isDark ? '#6ee7b7' : '#059669',
-                                border: isDark ? '1px solid rgba(16, 185, 129, 0.35)' : '1px solid #bbf7d0',
-                                fontSize: '10.5px',
+                                border: isDark ? '1px solid rgba(16, 185, 129, 0.35)' : '1px solid #a7f3d0',
+                                fontSize: '11px',
                                 fontWeight: 800,
                                 whiteSpace: 'nowrap'
                               }}>
-                                <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: '#10b981', display: 'inline-block' }} />
+                                <span style={{
+                                  width: '6px',
+                                  height: '6px',
+                                  borderRadius: '50%',
+                                  background: '#10b981',
+                                  display: 'inline-block',
+                                  boxShadow: '0 0 6px #10b981'
+                                }} />
                                 Available
                               </span>
                             </td>
-                            {isAuthorizedToAssign && (
-                              <td style={{ padding: '13px 20px', textAlign: 'right' }}>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setShowAvailableModal(false);
-                                    const pendingCandidate = sdoEndorsees.find(c => !c.new_item_number) || sdoEndorsees[0] || null;
-                                    setSdoEditItemModal({
-                                      open: true,
-                                      personnel: pendingCandidate,
-                                      newItemNumber: itemNoStr,
-                                      serialNo: item.serial_no || '',
-                                      fileName: item.nosca_file_name || ''
-                                    });
-                                  }}
-                                  style={{
-                                    padding: '6.5px 14px',
-                                    borderRadius: '8px',
-                                    background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)',
-                                    border: 'none',
-                                    color: '#ffffff',
-                                    fontSize: '11.5px',
-                                    fontWeight: 750,
-                                    cursor: 'pointer',
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: '6px',
-                                    boxShadow: '0 2px 8px rgba(16, 185, 129, 0.32)',
-                                    whiteSpace: 'nowrap',
-                                    transition: 'transform 0.12s ease, box-shadow 0.15s ease'
-                                  }}
-                                  onMouseOver={(e) => {
-                                    e.currentTarget.style.transform = 'translateY(-1px)';
-                                    e.currentTarget.style.boxShadow = '0 4px 12px rgba(16, 185, 129, 0.45)';
-                                  }}
-                                  onMouseOut={(e) => {
-                                    e.currentTarget.style.transform = 'translateY(0)';
-                                    e.currentTarget.style.boxShadow = '0 2px 8px rgba(16, 185, 129, 0.32)';
-                                  }}
-                                  title="Assign this item number to an SDO candidate"
-                                >
-                                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
-                                    <line x1="12" y1="5" x2="12" y2="19" />
-                                    <line x1="5" y1="12" x2="19" y2="12" />
-                                  </svg>
-                                  <span>Assign to Candidate</span>
-                                </button>
-                              </td>
-                            )}
                           </tr>
                         );
                       })}
@@ -2746,22 +2866,35 @@ export default function NoscaItemTrackingTab({
                 alignItems: 'center',
                 justifyContent: 'space-between',
                 flexWrap: 'wrap',
-                gap: '12px'
+                gap: '14px'
               }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <span style={{ fontSize: '12px', color: 'var(--text-secondary, #64748b)', fontWeight: 650 }}>
-                    Total Available Plantilla Items:
-                  </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '12px', color: 'var(--text-secondary, #64748b)', fontWeight: 650 }}>
+                      Total Available Plantilla Items:
+                    </span>
+                    <span style={{
+                      fontSize: '12px',
+                      fontWeight: 800,
+                      padding: '3px 10px',
+                      borderRadius: '7px',
+                      background: isDark ? 'rgba(16, 185, 129, 0.18)' : '#dcfce7',
+                      color: isDark ? '#6ee7b7' : '#15803d',
+                      border: isDark ? '1px solid rgba(16, 185, 129, 0.35)' : '1px solid #86efac'
+                    }}>
+                      {roAvailableCount} Items
+                    </span>
+                  </div>
+
                   <span style={{
-                    fontSize: '12px',
-                    fontWeight: 800,
-                    padding: '2.5px 9px',
-                    borderRadius: '6px',
-                    background: isDark ? 'rgba(16, 185, 129, 0.2)' : '#dcfce7',
-                    color: isDark ? '#6ee7b7' : '#15803d',
-                    border: isDark ? '1px solid rgba(16, 185, 129, 0.35)' : '1px solid #86efac'
+                    fontSize: '11.5px',
+                    color: isDark ? '#94a3b8' : '#64748b',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '5px'
                   }}>
-                    {roAvailableCount} Items
+                    <span>💡</span>
+                    <span>Tip: Click any item number to copy it to your clipboard.</span>
                   </span>
                 </div>
 

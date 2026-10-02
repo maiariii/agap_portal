@@ -413,7 +413,6 @@ const VALID_MANUAL_STAGES = [
   'Endorsed to RO',
   'Endorsed to DBM RO',
   'Endorsed', // Backward compatibility
-  'Approved',
   'Denied'
 ];
 const VALID_POSITIONS = ['School Counselor I', 'School Counselor II', 'School Counselor III', 'School Counselor IV'];
@@ -737,7 +736,7 @@ export async function updateIncumbentStage(req, res) {
     const HRMO_STAGES = ['For Review', 'Endorsed to RO', 'Endorsed'];
 
     if (!isAdmin) {
-      if (isRO && !RO_ALLOWED_STAGES.includes(stage_of_reclassification) && stage_of_reclassification !== 'Approved') {
+      if (isRO && !RO_ALLOWED_STAGES.includes(stage_of_reclassification)) {
         return res.status(403).json({
           error: `Regional Office personnel can only set stages to: ${RO_ALLOWED_STAGES.join(', ')}`
         });
@@ -750,18 +749,7 @@ export async function updateIncumbentStage(req, res) {
       }
     }
 
-    if (stage_of_reclassification === 'Approved') {
-      const current = await pool.query('SELECT nosca_serial_no, new_item_no FROM reclass_gc WHERE id = $1', [id]);
-      if (current.rows.length === 0) {
-        return res.status(404).json({ error: 'Incumbent counselor not found' });
-      }
-      const hasNosca = Boolean(current.rows[0].nosca_serial_no || current.rows[0].new_item_no);
-      if (!hasNosca && !isAdmin) {
-        return res.status(400).json({
-          error: 'The "Approved" stage is automatically set when NOSCA is assigned and cannot be manually selected.'
-        });
-      }
-    } else if (!stage_of_reclassification || !VALID_MANUAL_STAGES.includes(stage_of_reclassification)) {
+    if (!stage_of_reclassification || !VALID_MANUAL_STAGES.includes(stage_of_reclassification)) {
       return res.status(400).json({
         error: `Invalid stage_of_reclassification. Must be one of: ${VALID_MANUAL_STAGES.join(', ')}`
       });
@@ -1023,8 +1011,7 @@ export async function updateIncumbentDbmStatus(req, res) {
     if (cleanItemNo) {
       updateQuery = `
         UPDATE reclass_gc
-        SET stage_of_reclassification = 'Approved',
-            plantilla_item_number = $1,
+        SET plantilla_item_number = $1,
             new_item_number = $1,
             updated_at = NOW()
         WHERE id = $2
@@ -2152,7 +2139,6 @@ export async function uploadNoscaAndMatch(req, res) {
       await client.query(`
         UPDATE reclass_gc
         SET new_item_no = $1,
-            stage_of_reclassification = 'Approved',
             updated_at = NOW()
         WHERE id = $2;
       `, [newItemNo, candidate.id]);
@@ -2283,10 +2269,10 @@ export async function updateIncumbentNoscaItem(req, res) {
       await client.query(`
         UPDATE reclass_gc
         SET new_item_no = $1,
-            stage_of_reclassification = 'Approved',
+            nosca_serial_no = COALESCE($3, nosca_serial_no),
             updated_at = NOW()
         WHERE id = $2;
-      `, [cleanItemNo, id]);
+      `, [cleanItemNo, id, (serialNo || null)]);
 
       await client.query(`
         UPDATE reclass_applications
@@ -2318,33 +2304,40 @@ export async function updateIncumbentNoscaItem(req, res) {
         WHERE new_item_no = $2;
       `, [id, cleanItemNo]);
     } else {
-      // Unlink item
+      // Find current item details before unlinking so we can release it in reclass_item_no
+      const currentRes = await client.query('SELECT new_item_no, item_no FROM reclass_gc WHERE id = $1', [id]);
+      const currentNewItemNo = (currentRes.rows[0]?.new_item_no || '').trim();
+      const incumbentItemNo = (currentRes.rows[0]?.item_no || '').trim();
+
+      // Unlink item from reclass_gc and fall back status to Endorsed to DBM RO
       await client.query(`
         UPDATE reclass_gc
         SET new_item_no = NULL,
-            stage_of_reclassification = CASE
-              WHEN stage_of_reclassification = 'Approved' THEN 'Endorsed to DBM RO'
-              ELSE stage_of_reclassification
-            END,
+            nosca_serial_no = NULL,
+            stage_of_reclassification = 'Endorsed to DBM RO',
             updated_at = NOW()
         WHERE id = $1;
       `, [id]);
 
+      // Unlink item from reclass_applications
       await client.query(`
         UPDATE reclass_applications
         SET new_item_no = NULL,
             updated_at = NOW()
-        WHERE reclass_gc_id = $1;
-      `, [id]);
+        WHERE reclass_gc_id = $1
+           OR ($2 <> '' AND item_no ILIKE $2);
+      `, [id, incumbentItemNo]);
 
+      // Mark the item back to AVAILABLE in reclass_item_no
       await client.query(`
         UPDATE reclass_item_no
         SET new_item_no_status = 'AVAILABLE',
             reclass_gc_id = NULL,
             reclass_at = NULL,
             updated_at = NOW()
-        WHERE reclass_gc_id = $1;
-      `, [id]);
+        WHERE reclass_gc_id = $1
+           OR ($2 <> '' AND TRIM(LOWER(new_item_no)) = TRIM(LOWER($2)));
+      `, [id, currentNewItemNo]);
     }
 
     await client.query('COMMIT');

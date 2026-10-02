@@ -8,7 +8,12 @@ import HqBackground from '../../../components/HqBackground.jsx';
 import ThemeToggle from '../../../components/ThemeToggle.jsx';
 import { useTheme } from '../../../middleware/ThemeProvider.jsx';
 import IncumbentDocumentVaultModal from '../components/IncumbentDocumentVaultModal.jsx';
-import NoscaItemTrackingTab from '../components/NoscaItemTrackingTab.jsx';
+import NoscaItemTrackingTab, {
+  getPositionLevel,
+  getItemPositionLevel,
+  getCandidatePositionLevel,
+  romanLevel
+} from '../components/NoscaItemTrackingTab.jsx';
 
 const ALL_RECLASS_STAGES = [
   'For Review',
@@ -17,7 +22,6 @@ const ALL_RECLASS_STAGES = [
 ];
 const HRMO_RECLASS_STAGES = ['For Review', 'Endorsed to RO'];
 const RO_RECLASS_STAGES = ['Endorsed to DBM RO'];
-const APPROVED_POST_ACTION_STAGES = ['Approved'];
 const RECLASS_POSITIONS_OPTIONS = ['School Counselor I', 'School Counselor II', 'School Counselor III', 'School Counselor IV'];
 const NOSCA_POSITION_OPTIONS = [
   'School Counselor I',
@@ -285,6 +289,14 @@ export default function ReclassificationPage({ onBack }) {
 
   // Modal assessment decisions state
   const [modalTargetPosition, setModalTargetPosition] = useState('');
+  const [initialModalPosition, setInitialModalPosition] = useState('');
+  const [positionWarningModal, setPositionWarningModal] = useState({
+    open: false,
+    isUnassigned: false,
+    currentPosition: '',
+    targetPosition: '',
+    candidateName: ''
+  });
   const [modalStage, setModalStage] = useState('For Review');
   const [savingModalChanges, setSavingModalChanges] = useState(false);
   const [showIncumbentDocsModal, setShowIncumbentDocsModal] = useState(false);
@@ -322,8 +334,9 @@ export default function ReclassificationPage({ onBack }) {
   useEffect(() => {
     if (selectedIncumbent) {
       setSelectedVaultDocKey('pds');
-      const initialPos = selectedIncumbent.actual_position || selectedIncumbent.reclass_position || selectedIncumbent.target_position || 'School Counselor I';
+      const initialPos = selectedIncumbent.actual_position || '';
       setModalTargetPosition(initialPos);
+      setInitialModalPosition(initialPos);
       setModalStage(selectedIncumbent.stage_of_reclassification || 'For Review');
 
       // Initialize Document Checklist
@@ -667,8 +680,8 @@ export default function ReclassificationPage({ onBack }) {
     reader.readAsDataURL(file);
   };
 
-  // Manually link or edit NEW Item No. on an SDO endorsee (Division HRMO)
-  const handleSaveSdoItem = async () => {
+  // Manually link, edit, or remove NEW Item No. on an SDO endorsee (Division HRMO)
+  const handleSaveSdoItem = async (explicitItemNumber = undefined) => {
     if (!canAssignItemNo) {
       setToast({
         title: 'Access Restricted',
@@ -679,22 +692,55 @@ export default function ReclassificationPage({ onBack }) {
     }
     if (!sdoEditItemModal.personnel) return;
     setSavingSdoItem(true);
+
+    const isRemoving = explicitItemNumber === '' || explicitItemNumber === null;
+    const itemNumberToSave = explicitItemNumber !== undefined 
+      ? (explicitItemNumber || '') 
+      : (sdoEditItemModal.newItemNumber || '');
+    const serialNoToSave = isRemoving ? '' : (sdoEditItemModal.serialNo || '');
+    const fileNameToSave = isRemoving ? '' : (sdoEditItemModal.fileName || '');
+
     try {
       const res = await apiFetch(`/api/reclassification/incumbents/${sdoEditItemModal.personnel.id}/nosca-item`, {
         method: 'PUT',
         body: JSON.stringify({
-          newItemNumber: sdoEditItemModal.newItemNumber,
-          serialNo: sdoEditItemModal.serialNo,
-          fileName: sdoEditItemModal.fileName
+          newItemNumber: itemNumberToSave,
+          serialNo: serialNoToSave,
+          fileName: fileNameToSave
         })
       });
 
       if (res && res.success) {
+        const nextStage = 'Endorsed to DBM RO';
+        const nextItemNo = isRemoving ? null : (itemNumberToSave || null);
+        const targetId = sdoEditItemModal.personnel.id;
+
+        setIncumbents(prev => prev.map(item => {
+          if (item.id === targetId) {
+            return {
+              ...item,
+              new_item_no: nextItemNo,
+              new_item_number: nextItemNo,
+              stage_of_reclassification: nextStage
+            };
+          }
+          return item;
+        }));
+
+        if (selectedIncumbent && selectedIncumbent.id === targetId) {
+          setSelectedIncumbent(prev => ({
+            ...prev,
+            new_item_no: nextItemNo,
+            new_item_number: nextItemNo,
+            stage_of_reclassification: nextStage
+          }));
+        }
+
         setToast({
-          title: 'Item No. Updated',
-          message: sdoEditItemModal.newItemNumber 
-            ? `Assigned NEW Item No. ${sdoEditItemModal.newItemNumber} to ${sdoEditItemModal.personnel.full_name}`
-            : `Unlinked Item No. from ${sdoEditItemModal.personnel.full_name}`,
+          title: isRemoving ? 'Appointment Removed' : 'Item No. Updated',
+          message: isRemoving 
+            ? `Removed appointment and unlinked Item No. from ${sdoEditItemModal.personnel.full_name}`
+            : `Assigned NEW Item No. ${itemNumberToSave} to ${sdoEditItemModal.personnel.full_name}`,
           type: 'success'
         });
         setSdoEditItemModal({ open: false, personnel: null, newItemNumber: '', serialNo: '', fileName: '' });
@@ -807,43 +853,56 @@ export default function ReclassificationPage({ onBack }) {
   const availableNoscaItemOptions = useMemo(() => {
     const list = [];
     const seen = new Set();
+    const candidate = noscaItemAssignModal?.personnel;
+    const candLevel = candidate ? getCandidatePositionLevel(candidate) : null;
 
     // 1. From active scanned / uploaded NOSCA batch in current session
     if (scannedNoscaResult?.items && Array.isArray(scannedNoscaResult.items)) {
+      const scannedPos = scannedNoscaResult.position || '';
       scannedNoscaResult.items.forEach(item => {
         const str = String(item).trim();
-        if (str && !seen.has(str.toLowerCase())) {
-          seen.add(str.toLowerCase());
-          list.push({
-            itemNo: str,
-            source: scannedNoscaResult.serial_no ? `NOSCA #${scannedNoscaResult.serial_no}` : (scannedNoscaResult.fileName || 'Scanned NOSCA'),
-            division: scannedNoscaResult.division || '',
-            category: 'NOSCA Allocation',
-            isNA: str.toUpperCase() === '#N/A' || str.toUpperCase() === 'N/A'
-          });
+        if (!str || seen.has(str.toLowerCase())) return;
+
+        if (candLevel) {
+          const itemLevel = getPositionLevel(scannedPos) || getPositionLevel(str);
+          if (itemLevel !== candLevel) return;
         }
+
+        seen.add(str.toLowerCase());
+        list.push({
+          itemNo: str,
+          source: scannedNoscaResult.serial_no ? `NOSCA #${scannedNoscaResult.serial_no}` : (scannedNoscaResult.fileName || 'Scanned NOSCA'),
+          division: scannedNoscaResult.division || '',
+          category: 'NOSCA Allocation',
+          isNA: str.toUpperCase() === '#N/A' || str.toUpperCase() === 'N/A'
+        });
       });
     }
 
     // 2. From dedicated reclassification_nosca_items table (Available items)
     if (Array.isArray(noscaItems)) {
       noscaItems.forEach(item => {
-        const itemNo = (item.plantilla_item_number || '').trim();
-        if (itemNo && !seen.has(itemNo.toLowerCase())) {
-          seen.add(itemNo.toLowerCase());
-          list.push({
-            itemNo,
-            source: item.serial_no ? `NOSCA #${item.serial_no}` : 'NOSCA Allocation',
-            division: item.division || '',
-            category: item.category || 'ELEMENTARY',
-            isNA: itemNo.toUpperCase() === '#N/A' || itemNo.toUpperCase() === 'N/A'
-          });
+        const itemNo = (item.plantilla_item_number || item.new_item_no || '').trim();
+        if (!itemNo || seen.has(itemNo.toLowerCase())) return;
+
+        if (candLevel) {
+          const itemLevel = getItemPositionLevel(item);
+          if (itemLevel !== candLevel) return;
         }
+
+        seen.add(itemNo.toLowerCase());
+        list.push({
+          itemNo,
+          source: item.serial_no ? `NOSCA #${item.serial_no}` : 'NOSCA Allocation',
+          division: item.division || '',
+          category: item.category || 'ELEMENTARY',
+          isNA: itemNo.toUpperCase() === '#N/A' || itemNo.toUpperCase() === 'N/A'
+        });
       });
     }
 
     return list;
-  }, [scannedNoscaResult, noscaItems]);
+  }, [scannedNoscaResult, noscaItems, noscaItemAssignModal?.personnel]);
 
   // Confirm NOSCA Item Assignment
   const handleConfirmNoscaItemAssignment = async () => {
@@ -962,9 +1021,45 @@ export default function ReclassificationPage({ onBack }) {
     return 'PENDING';
   };
 
+  // Helper to return to modal and focus actual reclassification position select
+  const handleGoBackToChangePosition = () => {
+    setPositionWarningModal(prev => ({ ...prev, open: false }));
+    setTimeout(() => {
+      const el = document.getElementById('actual-reclass-position-select') || document.getElementById('top-actual-reclass-position-select');
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.focus();
+        el.style.transition = 'box-shadow 0.25s ease, border-color 0.25s ease';
+        el.style.borderColor = '#f59e0b';
+        el.style.boxShadow = '0 0 0 3px rgba(245, 158, 11, 0.45)';
+        setTimeout(() => {
+          el.style.borderColor = '';
+          el.style.boxShadow = '';
+        }, 2200);
+      }
+    }, 100);
+  };
+
   // Save assessment changes from modal
-  const handleSaveModalChanges = async () => {
+  const handleSaveModalChanges = async (forceProceed = false) => {
     if (!selectedIncumbent) return;
+
+    // Check if the user is saving without designating or changing the actual reclassification position
+    const isForced = forceProceed === true;
+    const isUnassigned = !modalTargetPosition || String(modalTargetPosition).trim() === '';
+    const isUnchanged = String(modalTargetPosition || '').trim() === String(initialModalPosition || '').trim();
+
+    if (!isForced && (isUnassigned || isUnchanged)) {
+      setPositionWarningModal({
+        open: true,
+        isUnassigned,
+        currentPosition: modalTargetPosition || '',
+        targetPosition: selectedIncumbent.target_position || selectedIncumbent.reclass_position || 'School Counselor I',
+        candidateName: selectedIncumbent.full_name || 'Incumbent Counselor'
+      });
+      return;
+    }
+
     setSavingModalChanges(true);
     const incumbentId = selectedIncumbent.id;
     const formattedPos = modalTargetPosition === '' ? null : modalTargetPosition;
@@ -1036,6 +1131,9 @@ export default function ReclassificationPage({ onBack }) {
         ...prev,
         ...updatedFields
       }));
+
+      setInitialModalPosition(modalTargetPosition || '');
+      setPositionWarningModal({ open: false, isUnassigned: false, currentPosition: '', targetPosition: '', candidateName: '' });
 
       setToast({
         type: 'success',
@@ -1238,23 +1336,23 @@ export default function ReclassificationPage({ onBack }) {
   const isStep1Done = incumbents.length > 0 || currentStep > 1;
   const isStep2Done = currentStep > 2 || incumbents.some(i => {
     const s = String(i.stage_of_reclassification || '').trim().toLowerCase();
-    return ['endorsed to ro', 'endorsed to dbm ro', 'endorsed', 'approved'].includes(s) || 
+    return ['endorsed to ro', 'endorsed to dbm ro', 'endorsed'].includes(s) || 
       ((i.target_position || i.reclass_position) && (i.target_position || i.reclass_position) !== '#N/A');
   });
   const isStep3Done = currentStep > 3 || incumbents.some(i => {
     const s = String(i.stage_of_reclassification || '').trim().toLowerCase();
-    return s === 'endorsed to dbm ro' || s === 'approved';
+    return s === 'endorsed to dbm ro';
   });
   const isStep4Done = incumbents.some(i => {
     const s = String(i.stage_of_reclassification || '').trim().toLowerCase();
-    return ['endorsed to dbm ro', 'approved'].includes(s) && i.new_item_number;
+    return s === 'endorsed to dbm ro' && i.new_item_number;
   });
 
-  // Personnel tracked in Tab 4 (Candidates at Endorsed to DBM RO & Approved with item)
+  // Personnel tracked in Tab 4 (Candidates at Endorsed to DBM RO with item)
   const sdoEndorsees = useMemo(() => {
     return incumbents.filter(i => {
       const s = String(i.stage_of_reclassification || '').trim().toLowerCase();
-      return ['endorsed to dbm ro', 'endorsed to dbm', 'approved'].includes(s);
+      return ['endorsed to dbm ro', 'endorsed to dbm'].includes(s);
     });
   }, [incumbents]);
 
@@ -3553,15 +3651,15 @@ export default function ReclassificationPage({ onBack }) {
             border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid var(--line)',
             padding: '18px 22px',
             boxShadow: isDark ? '0 8px 32px rgba(0, 0, 0, 0.3)' : '0 4px 12px rgba(0, 0, 0, 0.03)',
-            borderLeft: isDark ? '4px solid #10b981' : '4px solid #059669'
+            borderLeft: isDark ? '4px solid #6366f1' : '4px solid #4f46e5'
           }}>
-            <div style={{ fontSize: '12px', fontWeight: 700, color: isDark ? '#34d399' : '#047857', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-              Approved
+            <div style={{ fontSize: '12px', fontWeight: 700, color: isDark ? '#a5b4fc' : '#4338ca', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Endorsed to DBM RO
             </div>
-            <div style={{ fontSize: '30px', fontWeight: 850, color: isDark ? '#a7f3d0' : '#065f46', margin: '6px 0 2px' }}>
-              {incumbentMetrics.approved}
+            <div style={{ fontSize: '30px', fontWeight: 850, color: isDark ? '#c7d2fe' : '#312e81', margin: '6px 0 2px' }}>
+              {incumbentMetrics.endorsedToDbm}
             </div>
-            <div style={{ fontSize: '12px', color: isDark ? '#34d399' : '#059669' }}>Reclassification approved</div>
+            <div style={{ fontSize: '12px', color: isDark ? '#a5b4fc' : '#4f46e5' }}>Endorsed to DBM Regional Office</div>
           </div>
 
           <div className="card" style={{
@@ -4405,16 +4503,16 @@ export default function ReclassificationPage({ onBack }) {
               <div style={{
                 padding: '16px 20px',
                 borderRadius: '12px',
-                background: isDark ? 'rgba(6, 95, 70, 0.25)' : '#ecfdf5',
-                border: isDark ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #a7f3d0'
+                background: isDark ? 'rgba(99, 102, 241, 0.2)' : '#eef2ff',
+                border: isDark ? '1px solid rgba(99, 102, 241, 0.4)' : '1px solid #c7d2fe'
               }}>
-                <div style={{ fontSize: '11px', fontWeight: 750, color: isDark ? '#6ee7b7' : '#047857', textTransform: 'uppercase' }}>
-                  Approved by Appointing Authority
+                <div style={{ fontSize: '11px', fontWeight: 750, color: isDark ? '#a5b4fc' : '#4338ca', textTransform: 'uppercase' }}>
+                  Endorsed to DBM RO
                 </div>
-                <div style={{ fontSize: '28px', fontWeight: 850, color: isDark ? '#a7f3d0' : '#065f46', margin: '4px 0 2px' }}>
-                  {incumbentMetrics.approved}
+                <div style={{ fontSize: '28px', fontWeight: 850, color: isDark ? '#c7d2fe' : '#312e81', margin: '4px 0 2px' }}>
+                  {incumbentMetrics.endorsedToDbm}
                 </div>
-                <div style={{ fontSize: '11.5px', color: isDark ? '#6ee7b7' : '#059669' }}>Final approval for reclassification</div>
+                <div style={{ fontSize: '11.5px', color: isDark ? '#a5b4fc' : '#4f46e5' }}>Endorsed for DBM transmittal</div>
               </div>
 
               <div style={{
@@ -4462,12 +4560,12 @@ export default function ReclassificationPage({ onBack }) {
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
               <div>
                 <h3 style={{ fontSize: '16px', fontWeight: 800, margin: 0, color: isDark ? '#f8fafc' : '#0f172a' }}>
-                  Endorsed & Approved Counselors for DBM Transmittal
+                  Endorsed Counselors for DBM Transmittal
                 </h3>
                 <span style={{ fontSize: '12px', color: isDark ? '#94a3b8' : '#64748b', fontWeight: 600 }}>
                   {incumbents.filter(i => {
                     const s = String(i.stage_of_reclassification || '').trim().toLowerCase();
-                    return ['endorsed to ro', 'endorsed to dbm ro', 'endorsed', 'approved'].includes(s);
+                    return ['endorsed to ro', 'endorsed to dbm ro', 'endorsed'].includes(s);
                   }).length} candidates
                 </span>
               </div>
@@ -4530,7 +4628,7 @@ export default function ReclassificationPage({ onBack }) {
                   {incumbents
                     .filter(i => {
                       const s = String(i.stage_of_reclassification || '').trim().toLowerCase();
-                      return ['endorsed to ro', 'endorsed to dbm ro', 'endorsed', 'approved'].includes(s);
+                      return ['endorsed to ro', 'endorsed to dbm ro', 'endorsed'].includes(s);
                     })
                     .slice(0, 15)
                     .map((counselor, idx) => {
@@ -4728,11 +4826,11 @@ export default function ReclassificationPage({ onBack }) {
                     })}
                   {incumbents.filter(i => {
                     const s = String(i.stage_of_reclassification || '').trim().toLowerCase();
-                    return ['endorsed to ro', 'endorsed to dbm ro', 'endorsed', 'approved'].includes(s);
+                    return ['endorsed to ro', 'endorsed to dbm ro', 'endorsed'].includes(s);
                   }).length === 0 && (
                     <tr>
                       <td colSpan={canEndorseToDbm ? 7 : 6} style={{ padding: '24px', textAlign: 'center', color: isDark ? '#94a3b8' : '#64748b' }}>
-                        No counselors have been marked as Endorsed or Approved yet. Move candidates to Endorsed/Approved in Step 2.
+                        No counselors have been marked as Endorsed yet. Move candidates to Endorsed in Step 2.
                       </td>
                     </tr>
                   )}
@@ -6461,7 +6559,7 @@ export default function ReclassificationPage({ onBack }) {
                                 <span>🎯</span> Target Position
                               </div>
                               <div style={{ fontWeight: 800, color: 'var(--text)', fontSize: '13.5px', marginTop: '6px' }}>
-                                {selectedIncumbent.actual_position || selectedIncumbent.reclass_position || selectedIncumbent.target_position || 'School Counselor I'}
+                                {selectedIncumbent.target_position || selectedIncumbent.reclass_position || selectedIncumbent.actual_position || 'School Counselor I'}
                               </div>
                               <div style={{ fontSize: '11px', color: 'var(--text-secondary, #94a3b8)', marginTop: '3px' }}>
                                 Stated / Applied position
@@ -6480,6 +6578,7 @@ export default function ReclassificationPage({ onBack }) {
                                 Actual Reclassification Position <span style={{ color: '#ef4444' }}>*</span>
                               </label>
                               <select
+                                id="top-actual-reclass-position-select"
                                 value={modalTargetPosition}
                                 onChange={e => {
                                   setModalTargetPosition(e.target.value);
@@ -6570,6 +6669,7 @@ export default function ReclassificationPage({ onBack }) {
                       Actual Reclassification Position <span style={{ color: '#ef4444' }}>*</span>
                     </label>
                     <select
+                      id="actual-reclass-position-select"
                       value={modalTargetPosition}
                       onChange={e => {
                         setModalTargetPosition(e.target.value);
@@ -6618,13 +6718,7 @@ export default function ReclassificationPage({ onBack }) {
                         opacity: isRegionalOffice ? 0.85 : 1
                       }}
                     >
-                      {(selectedIncumbent?.stage_of_reclassification === 'Approved' || modalStage === 'Approved') ? (
-                        APPROVED_POST_ACTION_STAGES.map(stage => (
-                          <option key={stage} value={stage} style={{ background: 'var(--card)', color: 'var(--text)' }}>
-                            {stage === 'Approved' ? '✓ Approved (via DBM NOSCA)' : stage}
-                          </option>
-                        ))
-                      ) : isRegionalOffice ? (
+                      {isRegionalOffice ? (
                         <>
                           {!RO_RECLASS_STAGES.includes(modalStage) && (
                             <option value={modalStage} disabled style={{ background: 'var(--card)', color: 'var(--text)' }}>
@@ -6716,7 +6810,7 @@ export default function ReclassificationPage({ onBack }) {
               {!isRegionalOffice && (
                 <button
                   type="button"
-                  onClick={handleSaveModalChanges}
+                  onClick={() => handleSaveModalChanges(false)}
                   disabled={savingModalChanges}
                   style={{
                     padding: '9px 24px',
@@ -6769,6 +6863,238 @@ export default function ReclassificationPage({ onBack }) {
                   )}
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Warning Modal: Actual Reclassification Position Not Changed or Left Unassigned */}
+      {positionWarningModal.open && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(2, 6, 23, 0.78)',
+            backdropFilter: 'blur(8px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 100005,
+            padding: '20px'
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !savingModalChanges) {
+              setPositionWarningModal(prev => ({ ...prev, open: false }));
+            }
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="reclass-warning-title"
+            style={{
+              background: isDark ? '#0f172a' : '#ffffff',
+              borderRadius: '20px',
+              width: '100%',
+              maxWidth: '520px',
+              boxShadow: isDark
+                ? '0 25px 60px -12px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(245, 158, 11, 0.35)'
+                : '0 25px 50px -12px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(245, 158, 11, 0.35)',
+              border: isDark ? '1px solid rgba(245, 158, 11, 0.35)' : '1px solid #fde68a',
+              overflow: 'hidden'
+            }}
+          >
+            {/* Modal Header */}
+            <div style={{
+              padding: '20px 24px',
+              borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid #fef3c7',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '14px',
+              background: isDark
+                ? 'linear-gradient(135deg, rgba(245, 158, 11, 0.18) 0%, rgba(15, 23, 42, 0.85) 100%)'
+                : 'linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div style={{
+                  width: '44px',
+                  height: '44px',
+                  borderRadius: '12px',
+                  background: 'linear-gradient(135deg, #d97706 0%, #f59e0b 100%)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#ffffff',
+                  boxShadow: '0 4px 14px rgba(245, 158, 11, 0.35)',
+                  flexShrink: 0
+                }}>
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                    <line x1="12" y1="9" x2="12" y2="13" />
+                    <line x1="12" y1="17" x2="12.01" y2="17" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 id="reclass-warning-title" style={{ margin: 0, fontSize: '16.5px', fontWeight: 800, color: 'var(--text)', letterSpacing: '-0.01em' }}>
+                    {positionWarningModal.isUnassigned
+                      ? 'Actual Position Not Designated'
+                      : 'Actual Position Unchanged'}
+                  </h3>
+                  <p style={{ margin: '2px 0 0', fontSize: '12px', color: isDark ? '#fbbf24' : '#b45309', fontWeight: 650 }}>
+                    {positionWarningModal.isUnassigned
+                      ? 'Actual reclassification position is currently unassigned'
+                      : 'No changes were made to actual reclassification position'}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setPositionWarningModal(prev => ({ ...prev, open: false }))}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'var(--text-secondary, #94a3b8)',
+                  cursor: 'pointer',
+                  padding: '6px',
+                  borderRadius: '8px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+                title="Dismiss warning"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div style={{ padding: '22px 24px' }}>
+              {/* Candidate Info Callout */}
+              <div style={{
+                background: isDark ? 'rgba(30, 41, 59, 0.5)' : '#f8fafc',
+                borderRadius: '12px',
+                border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid #e2e8f0',
+                padding: '14px 16px',
+                marginBottom: '16px',
+                fontSize: '12.5px'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', flexWrap: 'wrap', gap: '6px' }}>
+                  <span style={{ color: 'var(--text-secondary, #94a3b8)', fontWeight: 650 }}>Candidate:</span>
+                  <span style={{ fontWeight: 800, color: 'var(--text)' }}>{positionWarningModal.candidateName}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', flexWrap: 'wrap', gap: '6px' }}>
+                  <span style={{ color: 'var(--text-secondary, #94a3b8)', fontWeight: 650 }}>🎯 Target / Applied Position:</span>
+                  <span style={{ fontWeight: 800, color: isDark ? '#38bdf8' : '#0284c7' }}>{positionWarningModal.targetPosition}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px', paddingTop: '8px', borderTop: isDark ? '1px solid rgba(51, 65, 85, 0.5)' : '1px solid #e2e8f0' }}>
+                  <span style={{ color: 'var(--text-secondary, #94a3b8)', fontWeight: 650 }}>Actual Reclassification Position:</span>
+                  <span style={{
+                    fontWeight: 850,
+                    padding: '2px 8px',
+                    borderRadius: '6px',
+                    fontSize: '12px',
+                    background: positionWarningModal.isUnassigned
+                      ? (isDark ? 'rgba(239, 68, 68, 0.2)' : '#fee2e2')
+                      : (isDark ? 'rgba(245, 158, 11, 0.2)' : '#fef3c7'),
+                    color: positionWarningModal.isUnassigned
+                      ? (isDark ? '#fca5a5' : '#dc2626')
+                      : (isDark ? '#fbbf24' : '#b45309')
+                  }}>
+                    {positionWarningModal.currentPosition || '-- Unassigned --'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Warning Text */}
+              <div style={{
+                fontSize: '13px',
+                lineHeight: 1.55,
+                color: 'var(--text)',
+                marginBottom: '6px'
+              }}>
+                {positionWarningModal.isUnassigned ? (
+                  <>
+                    The <b>Actual Reclassification Position</b> for this incumbent is currently <b>unassigned</b>. Are you sure you want to save qualification assessments without designating their final reclassification position?
+                  </>
+                ) : (
+                  <>
+                    You are saving without modifying the <b>Actual Reclassification Position</b>. It will remain as <b>{positionWarningModal.currentPosition}</b>.
+                  </>
+                )}
+              </div>
+
+              <div style={{
+                fontSize: '12px',
+                color: 'var(--text-secondary, #94a3b8)',
+                marginTop: '10px'
+              }}>
+                To assign or update the candidate's approved position, click <b>Go Back &amp; Change Position</b>.
+              </div>
+            </div>
+
+            {/* Modal Actions */}
+            <div style={{
+              padding: '16px 24px',
+              borderTop: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid #f1f5f9',
+              background: isDark ? 'rgba(15, 23, 42, 0.95)' : '#f8fafc',
+              display: 'flex',
+              justifyContent: 'flex-end',
+              alignItems: 'center',
+              gap: '12px'
+            }}>
+              <button
+                type="button"
+                onClick={() => handleSaveModalChanges(true)}
+                disabled={savingModalChanges}
+                style={{
+                  padding: '9px 18px',
+                  borderRadius: '10px',
+                  border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid #cbd5e1',
+                  background: isDark ? 'rgba(30, 41, 59, 0.6)' : '#ffffff',
+                  color: 'var(--text-secondary, #64748b)',
+                  fontSize: '12.5px',
+                  fontWeight: 700,
+                  cursor: savingModalChanges ? 'not-allowed' : 'pointer',
+                  transition: 'all 0.15s ease'
+                }}
+                onMouseOver={e => e.currentTarget.style.color = 'var(--text)'}
+                onMouseOut={e => e.currentTarget.style.color = 'var(--text-secondary, #64748b)'}
+              >
+                Proceed &amp; Save Anyway
+              </button>
+
+              <button
+                type="button"
+                onClick={handleGoBackToChangePosition}
+                disabled={savingModalChanges}
+                style={{
+                  padding: '9px 20px',
+                  borderRadius: '10px',
+                  border: 'none',
+                  background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                  color: '#ffffff',
+                  fontSize: '12.5px',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  boxShadow: '0 4px 12px rgba(2, 132, 199, 0.3)',
+                  transition: 'all 0.15s ease'
+                }}
+                onMouseOver={e => e.currentTarget.style.transform = 'translateY(-1px)'}
+                onMouseOut={e => e.currentTarget.style.transform = 'none'}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M19 12H5M12 19l-7-7 7-7" />
+                </svg>
+                {positionWarningModal.isUnassigned ? 'Go Back & Select Position' : 'Go Back & Change Position'}
+              </button>
             </div>
           </div>
         </div>
