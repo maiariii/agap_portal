@@ -472,7 +472,7 @@ export default function VacanciesPage() {
 
   const handleConfirmUnregisteredInvite = async () => {
     if (!unregisteredInvitePasscode || !unregisteredInvitePasscode.trim()) {
-      setUnregisteredInvitePasscodeError('Please enter your HR passcode.');
+      setUnregisteredInvitePasscodeError('Please enter your passcode.');
       return;
     }
 
@@ -2227,7 +2227,7 @@ export default function VacanciesPage() {
             {/* Passcode input field */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '20px' }}>
               <label style={{ color: '#92400E', fontWeight: '900', fontSize: '11px', letterSpacing: '0.06em', textTransform: 'uppercase', margin: '0 0 2px', display: 'block' }}>
-                Enter HR Passcode to Authorize Invitation
+                Enter your passcode to authorize invitation
               </label>
               <input
                 type="password"
