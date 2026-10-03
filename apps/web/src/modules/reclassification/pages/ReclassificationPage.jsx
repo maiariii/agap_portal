@@ -329,12 +329,16 @@ export default function ReclassificationPage({ onBack }) {
   });
   const [evaluatorRemarks, setEvaluatorRemarks] = useState('');
   const [evaluatorName, setEvaluatorName] = useState('');
+  const [savingStep1, setSavingStep1] = useState(false);
+  const [savingStep2, setSavingStep2] = useState(false);
+  const [savingStep3, setSavingStep3] = useState(false);
 
   // Sync modal state when an incumbent is opened
   useEffect(() => {
     if (selectedIncumbent) {
       setSelectedVaultDocKey('pds');
-      const initialPos = selectedIncumbent.actual_position || '';
+      const rawPos = selectedIncumbent.actual_position || selectedIncumbent.reclass_position || selectedIncumbent.target_position || '';
+      const initialPos = RECLASS_POSITIONS_OPTIONS.find(p => p.toLowerCase() === String(rawPos).trim().toLowerCase()) || rawPos;
       setModalTargetPosition(initialPos);
       setInitialModalPosition(initialPos);
       setModalStage(selectedIncumbent.stage_of_reclassification || 'For Review');
@@ -805,7 +809,7 @@ export default function ReclassificationPage({ onBack }) {
     setManualNoscaSchoolName(school.school_name || '');
     setManualNoscaSchoolSearch(`${school.school_id} - ${school.school_name}`);
     if (school.division && !manualNoscaDivision) {
-      setManualNoscaDivision(school.division.toLowerCase().startsWith('division') ? school.division : `Division of ${school.division}`);
+      setManualNoscaDivision(school.division.replace(/^division\s*(?:of)?\s*/i, '').trim().toUpperCase());
     }
     setShowSchoolDropdown(false);
   };
@@ -1021,6 +1025,24 @@ export default function ReclassificationPage({ onBack }) {
     return 'PENDING';
   };
 
+  // Helper memoized gating checks: Step 1 must be done before Step 2, Step 2 before Step 3
+  const isAssessmentStep1Done = useMemo(() => {
+    if (!docChecklist || docChecklist.length === 0) return false;
+    // Gating rule: If ANY document in the checklist is marked for revision, Step 1 is NOT complete!
+    const hasAnyRevision = docChecklist.some(d => d.status === 'for_revision');
+    if (hasAnyRevision) return false;
+    // All required mandatory documents must be approved
+    const requiredReqs = docChecklist.filter(d => d.required);
+    const missing = requiredReqs.filter(d => !d.submitted || !d.verified || d.status !== 'approved');
+    return missing.length === 0;
+  }, [docChecklist]);
+
+  const isAssessmentStep2Done = useMemo(() => {
+    if (!isAssessmentStep1Done) return false;
+    const overall = getCalculatedQsStatus(qsEvaluation);
+    return overall === 'QUALIFIED' || overall === 'NOT QUALIFIED';
+  }, [isAssessmentStep1Done, qsEvaluation]);
+
   // Helper to return to modal and focus actual reclassification position select
   const handleGoBackToChangePosition = () => {
     setPositionWarningModal(prev => ({ ...prev, open: false }));
@@ -1040,16 +1062,227 @@ export default function ReclassificationPage({ onBack }) {
     }, 100);
   };
 
-  // Save assessment changes from modal
+  // Step 1: Save Document Screening
+  const handleSaveStep1 = async () => {
+    if (!selectedIncumbent) return;
+    setSavingStep1(true);
+    const incumbentId = selectedIncumbent.id;
+    try {
+      await apiFetch(`/api/reclassification/incumbents/${incumbentId}/qs-evaluation`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          document_checklist: docChecklist
+        })
+      });
+
+      const updatedFields = {
+        document_checklist: docChecklist
+      };
+
+      setIncumbents(prev =>
+        prev.map(item => item.id === incumbentId ? { ...item, ...updatedFields } : item)
+      );
+      setSelectedIncumbent(prev => ({ ...prev, ...updatedFields }));
+
+      setToast({
+        type: 'success',
+        title: 'Step 1 Saved',
+        message: 'Document screening checklist saved successfully.'
+      });
+      fetchIncumbents();
+    } catch (err) {
+      console.error('[Reclass] Error saving Step 1:', err);
+      setToast({
+        type: 'error',
+        title: 'Failed to Save Step 1',
+        message: err.message || 'Error occurred while saving Step 1 documents.'
+      });
+    } finally {
+      setSavingStep1(false);
+    }
+  };
+
+  // Step 2: Save Position-Specific QS Evaluation (Requires Step 1 complete)
+  const handleSaveStep2 = async () => {
+    if (!selectedIncumbent) return;
+    if (!isAssessmentStep1Done) {
+      const hasAnyRev = docChecklist.some(d => d.status === 'for_revision');
+      setToast({
+        type: 'error',
+        title: hasAnyRev ? 'Revision Items Pending' : 'Step 1 Incomplete',
+        message: hasAnyRev
+          ? 'Cannot save Step 2: One or more documents are marked For Revision. Please resolve all revision items first.'
+          : 'Cannot save Step 2: Please complete and approve all mandatory requirements in Step 1 first.'
+      });
+      return;
+    }
+
+    setSavingStep2(true);
+    const incumbentId = selectedIncumbent.id;
+    const overallStatus = getCalculatedQsStatus(qsEvaluation);
+    const nowIso = new Date().toISOString();
+    try {
+      await apiFetch(`/api/reclassification/incumbents/${incumbentId}/qs-evaluation`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          qs_evaluation: qsEvaluation,
+          qs_eval_result: overallStatus,
+          evaluator_by: evaluatorName,
+          evaluator_remarks: evaluatorRemarks
+        })
+      });
+
+      const updatedFields = {
+        qs_evaluation: qsEvaluation,
+        qs_eval_result: overallStatus,
+        evaluated_by: evaluatorName,
+        evaluated_at: nowIso,
+        evaluator_remarks: evaluatorRemarks
+      };
+
+      setIncumbents(prev =>
+        prev.map(item => item.id === incumbentId ? { ...item, ...updatedFields } : item)
+      );
+      setSelectedIncumbent(prev => ({ ...prev, ...updatedFields }));
+
+      setToast({
+        type: 'success',
+        title: 'Step 2 Saved',
+        message: `Qualification Standards evaluation (${overallStatus}) saved successfully.`
+      });
+      fetchIncumbents();
+    } catch (err) {
+      console.error('[Reclass] Error saving Step 2:', err);
+      setToast({
+        type: 'error',
+        title: 'Failed to Save Step 2',
+        message: err.message || 'Failed to save Step 2 evaluation.'
+      });
+    } finally {
+      setSavingStep2(false);
+    }
+  };
+
+  // Step 3: Save Actual Position & Workflow Stage (Requires Step 1 & Step 2 complete)
+  const handleSaveStep3 = async () => {
+    if (!selectedIncumbent) return;
+    if (!isAssessmentStep1Done) {
+      const hasAnyRev = docChecklist.some(d => d.status === 'for_revision');
+      setToast({
+        type: 'error',
+        title: hasAnyRev ? 'Revision Items Pending' : 'Step 1 Incomplete',
+        message: hasAnyRev
+          ? 'Cannot save Step 3: One or more documents are marked For Revision. Please resolve all revision items first.'
+          : 'Cannot save Step 3: Please complete and approve all mandatory requirements in Step 1 first.'
+      });
+      return;
+    }
+    if (!isAssessmentStep2Done) {
+      setToast({
+        type: 'error',
+        title: 'Step 2 Incomplete',
+        message: 'Please complete all criteria in Step 2 (QS Evaluation) first.'
+      });
+      return;
+    }
+
+    setSavingStep3(true);
+    const incumbentId = selectedIncumbent.id;
+    const formattedPos = modalTargetPosition === '' ? null : modalTargetPosition;
+    const newStage = modalStage;
+    try {
+      const promises = [];
+      promises.push(
+        apiFetch(`/api/reclassification/incumbents/${incumbentId}/qs-evaluation`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            target_position: formattedPos,
+            actual_position: formattedPos,
+            reclass_position: formattedPos,
+            stage_of_reclassification: newStage
+          })
+        })
+      );
+      if (formattedPos !== (selectedIncumbent.actual_position || selectedIncumbent.reclass_position || selectedIncumbent.target_position)) {
+        promises.push(
+          apiFetch(`/api/reclassification/incumbents/${incumbentId}/position`, {
+            method: 'PUT',
+            body: JSON.stringify({ target_position: formattedPos, actual_position: formattedPos, reclass_position: formattedPos })
+          })
+        );
+      }
+      if (newStage !== selectedIncumbent.stage_of_reclassification) {
+        promises.push(
+          apiFetch(`/api/reclassification/incumbents/${incumbentId}/stage`, {
+            method: 'PUT',
+            body: JSON.stringify({ stage_of_reclassification: newStage })
+          })
+        );
+      }
+
+      await Promise.all(promises);
+
+      const updatedFields = {
+        target_position: formattedPos,
+        actual_position: formattedPos,
+        reclass_position: formattedPos,
+        stage_of_reclassification: newStage
+      };
+
+      setIncumbents(prev =>
+        prev.map(item => item.id === incumbentId ? { ...item, ...updatedFields } : item)
+      );
+      setSelectedIncumbent(prev => ({ ...prev, ...updatedFields }));
+      setInitialModalPosition(modalTargetPosition || '');
+
+      setToast({
+        type: 'success',
+        title: 'Step 3 Saved',
+        message: `Actual position & workflow stage updated to "${newStage}".`
+      });
+      fetchIncumbents();
+    } catch (err) {
+      console.error('[Reclass] Error saving Step 3:', err);
+      setToast({
+        type: 'error',
+        title: 'Failed to Save Step 3',
+        message: err.message || 'Error occurred while saving Step 3 position & stage.'
+      });
+    } finally {
+      setSavingStep3(false);
+    }
+  };
+
+  // Save all assessment changes from modal
   const handleSaveModalChanges = async (forceProceed = false) => {
     if (!selectedIncumbent) return;
 
-    // Check if the user is saving without designating or changing the actual reclassification position
+    if (!isAssessmentStep1Done) {
+      const hasAnyRev = docChecklist.some(d => d.status === 'for_revision');
+      setToast({
+        type: 'error',
+        title: hasAnyRev ? 'Revision Items Pending' : 'Step 1 Incomplete',
+        message: hasAnyRev
+          ? 'Cannot complete assessment: One or more documents are marked For Revision. Please resolve all revision items first.'
+          : 'Cannot complete assessment: Please approve all mandatory requirements in Step 1 first.'
+      });
+      return;
+    }
+
+    if (!isAssessmentStep2Done) {
+      setToast({
+        type: 'error',
+        title: 'Step 2 Incomplete',
+        message: 'Please complete all criteria in Step 2 (QS Evaluation) first.'
+      });
+      return;
+    }
+
+    // Check if the user is saving without designating an actual reclassification position
     const isForced = forceProceed === true;
     const isUnassigned = !modalTargetPosition || String(modalTargetPosition).trim() === '';
-    const isUnchanged = String(modalTargetPosition || '').trim() === String(initialModalPosition || '').trim();
 
-    if (!isForced && (isUnassigned || isUnchanged)) {
+    if (!isForced && isUnassigned) {
       setPositionWarningModal({
         open: true,
         isUnassigned,
@@ -1137,14 +1370,17 @@ export default function ReclassificationPage({ onBack }) {
 
       setToast({
         type: 'success',
-        message: `Assessment & QS Evaluation saved for ${selectedIncumbent.full_name}! (${overallStatus})`
+        title: 'Assessment Complete',
+        message: `Evaluation (${overallStatus}) and position successfully saved for ${selectedIncumbent.full_name}.`
       });
       setShowAssessmentModal(false);
+      fetchIncumbents();
     } catch (err) {
       console.error('[Reclass] Error saving modal changes:', err);
       setToast({
         type: 'error',
-        message: err.message || 'Failed to save assessment changes'
+        title: 'Save Failed',
+        message: err.message || 'Failed to save candidate assessment changes.'
       });
     } finally {
       setSavingModalChanges(false);
@@ -5485,11 +5721,42 @@ export default function ReclassificationPage({ onBack }) {
               {(() => {
                 const requiredReqs = docChecklist.filter(d => d.required);
                 const otherReqs = docChecklist.filter(d => !d.required);
-                const missingRequiredDocs = requiredReqs.filter(d => (!d.submitted || !d.verified || d.status !== 'approved') || d.status === 'for_revision');
-                const isDocComplete = missingRequiredDocs.length === 0;
+                const hasRevisionDoc = docChecklist.some(d => d.status === 'for_revision');
+                const missingRequiredDocs = requiredReqs.filter(d => !d.submitted || !d.verified || d.status !== 'approved');
+                const isDocComplete = !hasRevisionDoc && missingRequiredDocs.length === 0;
                 const approvedCount = docChecklist.filter(d => d.status === 'approved' || (d.submitted && d.verified && d.status !== 'for_revision')).length;
                 const requiredApprovedCount = requiredReqs.filter(d => d.status === 'approved' || (d.submitted && d.verified && d.status !== 'for_revision')).length;
                 const revisionCount = docChecklist.filter(d => d.status === 'for_revision').length;
+
+                // Document review status: 'All Documents Reviewed' if every document is approved, else 'Pending Document Review' (especially if at least one is for revision)
+                const isAllDocsApproved = docChecklist.length > 0 && docChecklist.every(d => d.status === 'approved' || (d.submitted && d.verified && d.status !== 'for_revision'));
+                const docReviewStatus = isAllDocsApproved ? 'All Documents Reviewed' : 'Pending Document Review';
+                const docStatusBadge = isAllDocsApproved ? {
+                  bg: isDark ? 'rgba(6, 78, 59, 0.45)' : '#ecfdf5',
+                  color: isDark ? '#6ee7b7' : '#047857',
+                  border: isDark ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #a7f3d0',
+                  icon: (
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                  )
+                } : {
+                  bg: hasRevisionDoc ? (isDark ? 'rgba(153, 27, 27, 0.35)' : '#fef2f2') : (isDark ? 'rgba(180, 83, 9, 0.35)' : '#fffbeb'),
+                  color: hasRevisionDoc ? (isDark ? '#f87171' : '#b91c1c') : (isDark ? '#fcd34d' : '#b45309'),
+                  border: hasRevisionDoc ? (isDark ? '1px solid rgba(239, 68, 68, 0.4)' : '1px solid #fecaca') : (isDark ? '1px solid rgba(245, 158, 11, 0.4)' : '1px solid #fde68a'),
+                  icon: hasRevisionDoc ? (
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+                      <line x1="12" y1="9" x2="12" y2="13" />
+                      <line x1="12" y1="17" x2="12.01" y2="17" />
+                    </svg>
+                  ) : (
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="10" />
+                      <polyline points="12 6 12 12 16 14" />
+                    </svg>
+                  )
+                };
 
                 const activeDoc = docChecklist.find(d => (d.key || d.id) === selectedVaultDocKey || d.id === selectedVaultDocKey) || docChecklist[0];
 
@@ -5527,15 +5794,14 @@ export default function ReclassificationPage({ onBack }) {
                     }}
                   >
                     {/* Header Controls */}
-                    <div style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      marginBottom: '14px',
-                      flexWrap: 'wrap',
-                      gap: '10px'
-                    }}>
-                      <div>
+                    <div style={{ marginBottom: '14px' }}>
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: '12px'
+                      }}>
+                        {/* Title and Review Status Badge */}
                         <div style={{
                           fontSize: '12px',
                           fontWeight: 800,
@@ -5544,84 +5810,216 @@ export default function ReclassificationPage({ onBack }) {
                           letterSpacing: '0.05em',
                           display: 'flex',
                           alignItems: 'center',
-                          gap: '6px'
+                          gap: '8px',
+                          flexWrap: 'wrap'
                         }}>
-                          <span>📁</span> 1. Document Vault &amp; Requirements Screening
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                            <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" />
+                          </svg>
+                          <span>1. Document Vault &amp; Requirements Screening</span>
+                          <span style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '5px',
+                            padding: '3px 10px',
+                            borderRadius: '8px',
+                            fontSize: '11px',
+                            fontWeight: 800,
+                            letterSpacing: 'normal',
+                            textTransform: 'none',
+                            background: docStatusBadge.bg,
+                            color: docStatusBadge.color,
+                            border: docStatusBadge.border,
+                            boxShadow: isAllDocsApproved ? '0 2px 8px rgba(16, 185, 129, 0.2)' : '0 2px 8px rgba(245, 158, 11, 0.15)'
+                          }}>
+                            <span>{docStatusBadge.icon}</span>
+                            <span>{docReviewStatus}</span>
+                          </span>
                         </div>
-                        <div style={{ fontSize: '12px', color: 'var(--text-secondary, #94a3b8)', marginTop: '2px' }}>
-                          Select any credential to preview it in the vault. Mark items as <b>Approved</b> or <b>For Revision</b>. All mandatory requirements must be approved to unlock QS Evaluation.
+
+                        {/* Top-Right Action Buttons: Approve All, Reset, Save Step 1 */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0, whiteSpace: 'nowrap' }}>
+                          {!isRegionalOffice && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={handleMarkAllDocsComplete}
+                                style={{
+                                  padding: '6px 12px',
+                                  borderRadius: '8px',
+                                  border: isDark ? '1px solid rgba(16, 185, 129, 0.5)' : '1px solid #10b981',
+                                  background: isDark ? 'rgba(6, 78, 59, 0.35)' : '#ecfdf5',
+                                  color: isDark ? '#6ee7b7' : '#047857',
+                                  fontSize: '11.5px',
+                                  fontWeight: 700,
+                                  cursor: 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '5px',
+                                  transition: 'all 0.15s ease',
+                                  whiteSpace: 'nowrap'
+                                }}
+                                onMouseEnter={e => {
+                                  e.currentTarget.style.background = isDark ? 'rgba(6, 78, 59, 0.55)' : '#d1fae5';
+                                  e.currentTarget.style.transform = 'translateY(-1px)';
+                                }}
+                                onMouseLeave={e => {
+                                  e.currentTarget.style.background = isDark ? 'rgba(6, 78, 59, 0.35)' : '#ecfdf5';
+                                  e.currentTarget.style.transform = 'none';
+                                }}
+                              >
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                  <polyline points="20 6 9 17 4 12" />
+                                </svg>
+                                <span>Approve All</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={handleResetAllDocs}
+                                style={{
+                                  padding: '6px 12px',
+                                  borderRadius: '8px',
+                                  border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid var(--line)',
+                                  background: isDark ? 'rgba(30, 41, 59, 0.5)' : 'var(--card-solid, #ffffff)',
+                                  color: 'var(--text-secondary, #94a3b8)',
+                                  fontSize: '11.5px',
+                                  fontWeight: 700,
+                                  cursor: 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '5px',
+                                  transition: 'all 0.15s ease',
+                                  whiteSpace: 'nowrap'
+                                }}
+                                onMouseEnter={e => {
+                                  e.currentTarget.style.background = isDark ? 'rgba(51, 65, 85, 0.8)' : 'var(--card-subtle)';
+                                  e.currentTarget.style.transform = 'translateY(-1px)';
+                                }}
+                                onMouseLeave={e => {
+                                  e.currentTarget.style.background = isDark ? 'rgba(30, 41, 59, 0.5)' : 'var(--card-solid, #ffffff)';
+                                  e.currentTarget.style.transform = 'none';
+                                }}
+                              >
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                                  <path d="M3 3v5h5" />
+                                </svg>
+                                <span>Reset</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={handleSaveStep1}
+                                disabled={savingStep1 || savingModalChanges}
+                                style={{
+                                  padding: '6px 14px',
+                                  borderRadius: '8px',
+                                  border: 'none',
+                                  background: savingStep1
+                                    ? '#64748b'
+                                    : 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                                  color: '#ffffff',
+                                  fontSize: '11.5px',
+                                  fontWeight: 750,
+                                  cursor: savingStep1 ? 'not-allowed' : 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '6px',
+                                  boxShadow: '0 2px 6px rgba(2, 132, 199, 0.25)',
+                                  transition: 'all 0.15s ease',
+                                  flexShrink: 0,
+                                  whiteSpace: 'nowrap'
+                                }}
+                                onMouseEnter={e => {
+                                  if (!savingStep1 && !savingModalChanges) {
+                                    e.currentTarget.style.boxShadow = '0 4px 12px rgba(2, 132, 199, 0.35)';
+                                    e.currentTarget.style.transform = 'translateY(-1px)';
+                                  }
+                                }}
+                                onMouseLeave={e => {
+                                  if (!savingStep1 && !savingModalChanges) {
+                                    e.currentTarget.style.boxShadow = '0 2px 6px rgba(2, 132, 199, 0.25)';
+                                    e.currentTarget.style.transform = 'none';
+                                  }
+                                }}
+                                title="Save Document Screening progress"
+                              >
+                                {savingStep1 ? (
+                                  <>
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ animation: 'spin 1s linear infinite' }}>
+                                      <circle cx="12" cy="12" r="10" strokeDasharray="32" strokeDashoffset="12" />
+                                    </svg>
+                                    <span>Saving...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <svg width="12.5" height="12.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                                      <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                                      <polyline points="17 21 17 13 7 13 7 21" />
+                                      <polyline points="7 3 7 8 15 8" />
+                                    </svg>
+                                    <span>Save Step 1</span>
+                                  </>
+                                )}
+                              </button>
+                            </>
+                          )}
                         </div>
                       </div>
 
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                        <span style={{
-                          fontSize: '11.5px',
-                          fontWeight: 800,
-                          padding: '3px 10px',
-                          borderRadius: '8px',
-                          background: isDocComplete
-                            ? (isDark ? 'rgba(6, 78, 59, 0.4)' : '#ecfdf5')
-                            : (isDark ? 'rgba(180, 83, 9, 0.35)' : '#fffbeb'),
-                          color: isDocComplete
-                            ? (isDark ? '#6ee7b7' : '#047857')
-                            : (isDark ? '#fcd34d' : '#b45309'),
-                          border: isDocComplete
-                            ? (isDark ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #a7f3d0')
-                            : (isDark ? '1px solid rgba(245, 158, 11, 0.4)' : '1px solid #fde68a')
-                        }}>
-                          {requiredApprovedCount} of {requiredReqs.length} Mandatory Approved ({approvedCount} of {docChecklist.length} Total)
-                        </span>
+                      {/* Subtitle & Document Counts Bar */}
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: '12px',
+                        marginTop: '6px',
+                        flexWrap: 'wrap'
+                      }}>
+                        <div style={{ fontSize: '12px', color: 'var(--text-secondary, #94a3b8)', flex: 1, minWidth: '240px' }}>
+                          Select any credential to preview it in the vault. Mark items as <b>Approved</b> or <b>For Revision</b>. All mandatory requirements must be approved to unlock QS Evaluation.
+                        </div>
 
-                        {revisionCount > 0 && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', flexShrink: 0 }}>
                           <span style={{
                             fontSize: '11.5px',
                             fontWeight: 800,
                             padding: '3px 10px',
                             borderRadius: '8px',
-                            background: isDark ? 'rgba(120, 53, 15, 0.4)' : '#fff7ed',
-                            color: isDark ? '#fdba74' : '#c2410c',
-                            border: isDark ? '1px solid rgba(249, 115, 22, 0.4)' : '1px solid #fed7aa'
+                            background: isDocComplete
+                              ? (isDark ? 'rgba(6, 78, 59, 0.4)' : '#ecfdf5')
+                              : (isDark ? 'rgba(180, 83, 9, 0.35)' : '#fffbeb'),
+                            color: isDocComplete
+                              ? (isDark ? '#6ee7b7' : '#047857')
+                              : (isDark ? '#fcd34d' : '#b45309'),
+                            border: isDocComplete
+                              ? (isDark ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid #a7f3d0')
+                              : (isDark ? '1px solid rgba(245, 158, 11, 0.4)' : '1px solid #fde68a')
                           }}>
-                            ⚠ {revisionCount} For Revision
+                            {requiredApprovedCount} of {requiredReqs.length} Mandatory Approved ({approvedCount} of {docChecklist.length} Total)
                           </span>
-                        )}
 
-                        {!isRegionalOffice && (
-                          <>
-                            <button
-                              type="button"
-                              onClick={handleMarkAllDocsComplete}
-                              style={{
-                                padding: '4px 10px',
-                                borderRadius: '6px',
-                                border: isDark ? '1px solid rgba(16, 185, 129, 0.5)' : '1px solid #10b981',
-                                background: isDark ? 'rgba(6, 78, 59, 0.35)' : '#ecfdf5',
-                                color: isDark ? '#6ee7b7' : '#047857',
-                                fontSize: '11.5px',
-                                fontWeight: 700,
-                                cursor: 'pointer'
-                              }}
-                            >
-                              ✓ Approve All
-                            </button>
-                            <button
-                              type="button"
-                              onClick={handleResetAllDocs}
-                              style={{
-                                padding: '4px 10px',
-                                borderRadius: '6px',
-                                border: isDark ? '1px solid rgba(51, 65, 85, 0.7)' : '1px solid var(--line)',
-                                background: isDark ? 'rgba(30, 41, 59, 0.5)' : 'var(--card-solid, #ffffff)',
-                                color: 'var(--text-secondary, #94a3b8)',
-                                fontSize: '11.5px',
-                                fontWeight: 700,
-                                cursor: 'pointer'
-                              }}
-                            >
-                              ↺ Reset
-                            </button>
-                          </>
-                        )}
+                          {revisionCount > 0 && (
+                            <span style={{
+                              fontSize: '11.5px',
+                              fontWeight: 800,
+                              padding: '3px 10px',
+                              borderRadius: '8px',
+                              background: isDark ? 'rgba(120, 53, 15, 0.4)' : '#fff7ed',
+                              color: isDark ? '#fdba74' : '#c2410c',
+                              border: isDark ? '1px solid rgba(249, 115, 22, 0.4)' : '1px solid #fed7aa',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '5px'
+                            }}>
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+                                <line x1="12" y1="9" x2="12" y2="13" />
+                                <line x1="12" y1="17" x2="12.01" y2="17" />
+                              </svg>
+                              <span>{revisionCount} For Revision</span>
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
 
@@ -5846,7 +6244,10 @@ export default function ReclassificationPage({ onBack }) {
                                           : 'var(--text-secondary, #64748b)'
                                       }}
                                     >
-                                      <span>✓</span> Approved
+                                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                        <polyline points="20 6 9 17 4 12" />
+                                      </svg>
+                                      <span>Approved</span>
                                     </button>
 
                                     <button
@@ -5878,7 +6279,12 @@ export default function ReclassificationPage({ onBack }) {
                                           : 'var(--text-secondary, #64748b)'
                                       }}
                                     >
-                                      <span>⚠</span> For Revision
+                                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+                                        <line x1="12" y1="9" x2="12" y2="13" />
+                                        <line x1="12" y1="17" x2="12.01" y2="17" />
+                                      </svg>
+                                      <span>For Revision</span>
                                     </button>
                                   </div>
                                 )}
@@ -6050,17 +6456,21 @@ export default function ReclassificationPage({ onBack }) {
                                     cursor: 'pointer',
                                     display: 'inline-flex',
                                     alignItems: 'center',
-                                    gap: '4px'
+                                    gap: '5px',
+                                    transition: 'all 0.15s ease'
                                   }}
                                 >
-                                  ✓ Approved
+                                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                    <polyline points="20 6 9 17 4 12" />
+                                  </svg>
+                                  <span>Approved</span>
                                 </button>
 
                                 <button
                                   type="button"
                                   onClick={() => handleSetDocStatus(activeDoc?.id, 'for_revision')}
                                   style={{
-                                    padding: '4px 10px',
+                                    padding: '5px 11px',
                                     fontSize: '11px',
                                     fontWeight: 750,
                                     borderRadius: '6px',
@@ -6076,10 +6486,16 @@ export default function ReclassificationPage({ onBack }) {
                                     cursor: 'pointer',
                                     display: 'inline-flex',
                                     alignItems: 'center',
-                                    gap: '4px'
+                                    gap: '5px',
+                                    transition: 'all 0.15s ease'
                                   }}
                                 >
-                                  ⚠ For Revision
+                                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+                                    <line x1="12" y1="9" x2="12" y2="13" />
+                                    <line x1="12" y1="17" x2="12.01" y2="17" />
+                                  </svg>
+                                  <span>For Revision</span>
                                 </button>
                               </div>
                             )}
@@ -6245,8 +6661,9 @@ export default function ReclassificationPage({ onBack }) {
 
               {/* Card 3: Position-Specific Qualification Standards (QS) Evaluation Section */}
               {(() => {
-                const missingRequiredDocs = docChecklist.filter(d => d.required && ((!d.submitted || !d.verified || d.status !== 'approved') || d.status === 'for_revision'));
-                const isDocComplete = missingRequiredDocs.length === 0;
+                const hasAnyRevision = docChecklist.some(d => d.status === 'for_revision');
+                const missingRequiredDocs = docChecklist.filter(d => d.required && (!d.submitted || !d.verified || d.status !== 'approved'));
+                const isDocComplete = !hasAnyRevision && missingRequiredDocs.length === 0;
                 const effectiveTargetPos = modalTargetPosition || selectedIncumbent.target_position || selectedIncumbent.reclass_position || 'School Counselor I';
                 const standards = getPositionQsStandards(effectiveTargetPos);
                 const displayTargetPos = standards?.title || effectiveTargetPos;
@@ -6322,6 +6739,64 @@ export default function ReclassificationPage({ onBack }) {
                         </div>
                       </div>
 
+                      {!isRegionalOffice && (
+                        <button
+                          type="button"
+                          onClick={handleSaveStep2}
+                          disabled={!isAssessmentStep1Done || savingStep2 || savingModalChanges}
+                          style={{
+                            padding: '6px 14px',
+                            borderRadius: '8px',
+                            border: 'none',
+                            background: (!isAssessmentStep1Done || savingStep2)
+                              ? (isDark ? 'rgba(71, 85, 105, 0.4)' : '#94a3b8')
+                              : 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                            color: '#ffffff',
+                            fontSize: '11.5px',
+                            fontWeight: 750,
+                            cursor: (!isAssessmentStep1Done || savingStep2) ? 'not-allowed' : 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            boxShadow: (!isAssessmentStep1Done || savingStep2) ? 'none' : '0 2px 6px rgba(2, 132, 199, 0.25)',
+                            transition: 'all 0.15s ease',
+                            flexShrink: 0,
+                            whiteSpace: 'nowrap',
+                            opacity: !isAssessmentStep1Done ? 0.65 : 1
+                          }}
+                          onMouseEnter={e => {
+                            if (isAssessmentStep1Done && !savingStep2 && !savingModalChanges) {
+                              e.currentTarget.style.boxShadow = '0 4px 12px rgba(2, 132, 199, 0.35)';
+                              e.currentTarget.style.transform = 'translateY(-1px)';
+                            }
+                          }}
+                          onMouseLeave={e => {
+                            if (isAssessmentStep1Done && !savingStep2 && !savingModalChanges) {
+                              e.currentTarget.style.boxShadow = '0 2px 6px rgba(2, 132, 199, 0.25)';
+                              e.currentTarget.style.transform = 'none';
+                            }
+                          }}
+                          title={!isAssessmentStep1Done ? (hasAnyRevision ? "Cannot save Step 2: One or more documents are marked For Revision" : "Step 1 must be completed and approved before Step 2 can be saved") : "Save QS Evaluation criteria and remarks"}
+                        >
+                          {savingStep2 ? (
+                            <>
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ animation: 'spin 1s linear infinite' }}>
+                                <circle cx="12" cy="12" r="10" strokeDasharray="32" strokeDashoffset="12" />
+                              </svg>
+                              <span>Saving...</span>
+                            </>
+                          ) : (
+                            <>
+                              <svg width="12.5" height="12.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                                <polyline points="17 21 17 13 7 13 7 21" />
+                                <polyline points="7 3 7 8 15 8" />
+                              </svg>
+                              <span>Save Step 2</span>
+                            </>
+                          )}
+                        </button>
+                      )}
                     </div>
 
                     {/* Completion Gating Lock Overlay */}
@@ -6356,7 +6831,11 @@ export default function ReclassificationPage({ onBack }) {
                           QS Evaluation is Locked
                         </div>
                         <div style={{ fontSize: '12.5px', color: 'var(--text-secondary, #94a3b8)', maxWidth: '460px', lineHeight: 1.45 }}>
-                          All mandatory documents in the checklist above must be marked as <b>Submitted &amp; Verified</b> before the Qualification Standards evaluation can be performed.
+                          {hasAnyRevision ? (
+                            <>One or more documents are currently marked <b>For Revision</b>. Resolve all revision items and approve all mandatory requirements before performing QS evaluation.</>
+                          ) : (
+                            <>All mandatory documents in the checklist above must be marked as <b>Approved</b> before the Qualification Standards evaluation can be performed.</>
+                          )}
                         </div>
                       </div>
                     ) : (
@@ -6485,8 +6964,8 @@ export default function ReclassificationPage({ onBack }) {
                               Overall Qualification Standards Assessment Result
                             </div>
                             <span style={{
-                              fontSize: '13px',
-                              fontWeight: 900,
+                              fontSize: '12px',
+                              fontWeight: 800,
                               padding: '4px 14px',
                               borderRadius: '8px',
                               letterSpacing: '0.04em',
@@ -6500,9 +6979,29 @@ export default function ReclassificationPage({ onBack }) {
                                 ? '0 2px 10px rgba(16, 185, 129, 0.35)'
                                 : overallResult === 'NOT QUALIFIED'
                                   ? '0 2px 10px rgba(239, 68, 68, 0.35)'
-                                  : 'none'
+                                  : 'none',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '6px'
                             }}>
-                              {overallResult === 'QUALIFIED' ? '✓ QUALIFIED' : overallResult === 'NOT QUALIFIED' ? '✗ NOT QUALIFIED' : 'PENDING EVALUATION'}
+                              {overallResult === 'QUALIFIED' ? (
+                                <>
+                                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round">
+                                    <polyline points="20 6 9 17 4 12" />
+                                  </svg>
+                                  <span>QUALIFIED</span>
+                                </>
+                              ) : overallResult === 'NOT QUALIFIED' ? (
+                                <>
+                                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round">
+                                    <line x1="18" y1="6" x2="6" y2="18" />
+                                    <line x1="6" y1="6" x2="18" y2="18" />
+                                  </svg>
+                                  <span>NOT QUALIFIED</span>
+                                </>
+                              ) : (
+                                <span>PENDING EVALUATION</span>
+                              )}
                             </span>
                           </div>
 
@@ -6530,84 +7029,6 @@ export default function ReclassificationPage({ onBack }) {
                               Mark all 4 criteria above as "Meets" or "Does Not Meet" to establish final reclassification qualification.
                             </div>
                           )}
-                        </div>
-
-                        {/* Audit Trail & Remarks Section */}
-                        <div style={{
-                          background: isDark ? 'rgba(2, 6, 23, 0.4)' : 'var(--card-subtle)',
-                          borderRadius: '12px',
-                          border: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid var(--line)',
-                          padding: '16px'
-                        }}>
-                          {/* Position Classification Comparison & Determination */}
-                          <div style={{
-                            display: 'grid',
-                            gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
-                            gap: '12px',
-                            marginBottom: '16px',
-                            paddingBottom: '16px',
-                            borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid var(--line)'
-                          }}>
-                            {/* 1. Target Position */}
-                            <div style={{
-                              background: isDark ? 'rgba(15, 23, 42, 0.6)' : 'var(--card-solid, #ffffff)',
-                              padding: '12px 14px',
-                              borderRadius: '10px',
-                              border: isDark ? '1px solid rgba(51, 65, 85, 0.6)' : '1px solid var(--line)'
-                            }}>
-                              <div style={{ fontSize: '10.5px', fontWeight: 800, color: 'var(--text-secondary, #94a3b8)', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                                <span>🎯</span> Target Position
-                              </div>
-                              <div style={{ fontWeight: 800, color: 'var(--text)', fontSize: '13.5px', marginTop: '6px' }}>
-                                {selectedIncumbent.target_position || selectedIncumbent.reclass_position || selectedIncumbent.actual_position || 'School Counselor I'}
-                              </div>
-                              <div style={{ fontSize: '11px', color: 'var(--text-secondary, #94a3b8)', marginTop: '3px' }}>
-                                Stated / Applied position
-                              </div>
-                            </div>
-
-                            {/* 2. Actual Reclassification Position */}
-                            <div style={{
-                              background: isDark ? 'rgba(15, 23, 42, 0.6)' : 'var(--card-solid, #ffffff)',
-                              padding: '12px 14px',
-                              borderRadius: '10px',
-                              border: isDark ? '1.5px solid #0284c7' : '1.5px solid #0284c7',
-                              boxShadow: '0 2px 8px rgba(2, 132, 199, 0.08)'
-                            }}>
-                              <label style={{ display: 'block', fontSize: '10.5px', fontWeight: 800, color: isDark ? '#38bdf8' : '#0284c7', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '5px' }}>
-                                Actual Reclassification Position <span style={{ color: '#ef4444' }}>*</span>
-                              </label>
-                              <select
-                                id="top-actual-reclass-position-select"
-                                value={modalTargetPosition}
-                                onChange={e => {
-                                  setModalTargetPosition(e.target.value);
-                                }}
-                                disabled={savingModalChanges}
-                                style={{
-                                  width: '100%',
-                                  padding: '7px 10px',
-                                  borderRadius: '8px',
-                                  border: isDark ? '1px solid rgba(51, 65, 85, 0.8)' : '1px solid var(--input-border, var(--line))',
-                                  background: 'var(--input-bg)',
-                                  fontSize: '12.5px',
-                                  fontWeight: 750,
-                                  color: 'var(--input-text, var(--text))',
-                                  cursor: isRegionalOffice ? 'not-allowed' : 'pointer',
-                                  outline: 'none'
-                                }}
-                              >
-                                <option value="">-- Unassigned --</option>
-                                {RECLASS_POSITIONS_OPTIONS.map(pos => (
-                                  <option key={pos} value={pos}>{pos}</option>
-                                ))}
-                              </select>
-                              <div style={{ fontSize: '11px', color: 'var(--text-secondary, #94a3b8)', marginTop: '4px' }}>
-                                Final endorsed position
-                              </div>
-                            </div>
-                          </div>
-
                         </div>
                       </>
                     )}
@@ -6644,25 +7065,121 @@ export default function ReclassificationPage({ onBack }) {
                       Designate the final approved actual reclassification position and update candidate progression stage.
                     </div>
                   </div>
-                  {isRegionalOffice && (
-                    <span style={{
-                      fontSize: '10.5px',
-                      fontWeight: 750,
-                      padding: '2px 7px',
-                      borderRadius: '6px',
-                      background: isDark ? 'rgba(30, 58, 138, 0.35)' : '#eff6ff',
-                      color: isDark ? '#93c5fd' : '#1d4ed8',
-                      border: isDark ? '1px solid rgba(59, 130, 246, 0.4)' : '1px solid #bfdbfe'
-                    }}>
-                      👁️ View-Only
-                    </span>
-                  )}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0, whiteSpace: 'nowrap' }}>
+                    {isRegionalOffice ? (
+                      <span style={{
+                        fontSize: '11px',
+                        fontWeight: 750,
+                        padding: '3px 9px',
+                        borderRadius: '6px',
+                        background: isDark ? 'rgba(30, 58, 138, 0.35)' : '#eff6ff',
+                        color: isDark ? '#93c5fd' : '#1d4ed8',
+                        border: isDark ? '1px solid rgba(59, 130, 246, 0.4)' : '1px solid #bfdbfe',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '5px'
+                      }}>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                          <circle cx="12" cy="12" r="3" />
+                        </svg>
+                        <span>View-Only</span>
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={handleSaveStep3}
+                        disabled={!isAssessmentStep2Done || savingStep3 || savingModalChanges}
+                        style={{
+                          padding: '6px 14px',
+                          borderRadius: '8px',
+                          border: 'none',
+                          background: (!isAssessmentStep2Done || savingStep3)
+                            ? (isDark ? 'rgba(71, 85, 105, 0.4)' : '#94a3b8')
+                            : 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                          color: '#ffffff',
+                          fontSize: '11.5px',
+                          fontWeight: 750,
+                          cursor: (!isAssessmentStep2Done || savingStep3) ? 'not-allowed' : 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          boxShadow: (!isAssessmentStep2Done || savingStep3) ? 'none' : '0 2px 8px rgba(2, 132, 199, 0.25)',
+                          transition: 'all 0.15s ease',
+                          flexShrink: 0,
+                          whiteSpace: 'nowrap',
+                          opacity: !isAssessmentStep2Done ? 0.65 : 1
+                        }}
+                        onMouseEnter={e => {
+                          if (isAssessmentStep2Done && !savingStep3 && !savingModalChanges) {
+                            e.currentTarget.style.boxShadow = '0 4px 12px rgba(2, 132, 199, 0.35)';
+                            e.currentTarget.style.transform = 'translateY(-1px)';
+                          }
+                        }}
+                        onMouseLeave={e => {
+                          if (isAssessmentStep2Done && !savingStep3 && !savingModalChanges) {
+                            e.currentTarget.style.boxShadow = '0 2px 8px rgba(2, 132, 199, 0.25)';
+                            e.currentTarget.style.transform = 'none';
+                          }
+                        }}
+                        title={!isAssessmentStep1Done ? "Step 1 must be completed first" : (!isAssessmentStep2Done ? "Complete Step 2 (QS Evaluation) before saving Step 3" : "Save Actual Position & Workflow Stage")}
+                      >
+                        {savingStep3 ? (
+                          <>
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ animation: 'spin 1s linear infinite' }}>
+                              <circle cx="12" cy="12" r="10" strokeDasharray="32" strokeDashoffset="12" />
+                            </svg>
+                            <span>Saving...</span>
+                          </>
+                        ) : (
+                          <>
+                            <svg width="12.5" height="12.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                              <polyline points="17 21 17 13 7 13 7 21" />
+                              <polyline points="7 3 7 8 15 8" />
+                            </svg>
+                            <span>Save Step 3</span>
+                          </>
+                        )}
+                      </button>
+                    )}
+                  </div>
                 </div>
+
+                {/* Step 3 Gating Notice Banner */}
+                {!isAssessmentStep2Done && (
+                  <div style={{
+                    padding: '12px 16px',
+                    borderRadius: '10px',
+                    background: isDark ? 'rgba(180, 83, 9, 0.18)' : '#fffbeb',
+                    border: isDark ? '1px dashed rgba(245, 158, 11, 0.45)' : '1px dashed #fde68a',
+                    color: isDark ? '#fbbf24' : '#b45309',
+                    fontSize: '12px',
+                    fontWeight: 650,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '9px',
+                    marginBottom: '16px'
+                  }}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                    </svg>
+                    <span>
+                      {!isAssessmentStep1Done
+                        ? (docChecklist.some(d => d.status === 'for_revision')
+                            ? 'Step 3 is locked. One or more documents are marked For Revision in Step 1.'
+                            : 'Step 3 is locked. Please review and approve all mandatory documents in Step 1 first.')
+                        : 'Step 3 is locked. Please complete all evaluation criteria in Step 2 (QS Evaluation) to unlock.'}
+                    </span>
+                  </div>
+                )}
 
                 <div style={{
                   display: 'grid',
                   gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
-                  gap: '14px'
+                  gap: '14px',
+                  opacity: !isAssessmentStep2Done ? 0.6 : 1
                 }}>
                   <div>
                     <label style={{ display: 'block', fontSize: '11.5px', fontWeight: 750, color: 'var(--text)', marginBottom: '5px' }}>
@@ -6670,11 +7187,11 @@ export default function ReclassificationPage({ onBack }) {
                     </label>
                     <select
                       id="actual-reclass-position-select"
-                      value={modalTargetPosition}
+                      value={RECLASS_POSITIONS_OPTIONS.find(p => p.toLowerCase() === String(modalTargetPosition).trim().toLowerCase()) || modalTargetPosition || ''}
                       onChange={e => {
                         setModalTargetPosition(e.target.value);
                       }}
-                      disabled={isRegionalOffice || savingModalChanges}
+                      disabled={!isAssessmentStep2Done || isRegionalOffice || savingModalChanges}
                       style={{
                         width: '100%',
                         padding: '9px 12px',
@@ -6684,15 +7201,18 @@ export default function ReclassificationPage({ onBack }) {
                         fontSize: '13px',
                         fontWeight: 700,
                         color: 'var(--input-text, var(--text))',
-                        cursor: isRegionalOffice ? 'not-allowed' : 'pointer',
+                        cursor: (!isAssessmentStep2Done || isRegionalOffice) ? 'not-allowed' : 'pointer',
                         outline: 'none',
-                        opacity: isRegionalOffice ? 0.85 : 1
+                        opacity: (!isAssessmentStep2Done || isRegionalOffice) ? 0.75 : 1
                       }}
                     >
                       <option value="" style={{ background: 'var(--card)', color: 'var(--text)' }}>-- Unassigned --</option>
                       {RECLASS_POSITIONS_OPTIONS.map(pos => (
                         <option key={pos} value={pos} style={{ background: 'var(--card)', color: 'var(--text)' }}>{pos}</option>
                       ))}
+                      {modalTargetPosition && !RECLASS_POSITIONS_OPTIONS.some(p => p.toLowerCase() === String(modalTargetPosition).trim().toLowerCase()) && (
+                        <option value={modalTargetPosition} style={{ background: 'var(--card)', color: 'var(--text)' }}>{modalTargetPosition}</option>
+                      )}
                     </select>
                   </div>
 
@@ -6703,7 +7223,7 @@ export default function ReclassificationPage({ onBack }) {
                     <select
                       value={modalStage}
                       onChange={e => setModalStage(e.target.value)}
-                      disabled={isRegionalOffice || savingModalChanges}
+                      disabled={!isAssessmentStep2Done || isRegionalOffice || savingModalChanges}
                       style={{
                         width: '100%',
                         padding: '9px 12px',
@@ -6713,9 +7233,9 @@ export default function ReclassificationPage({ onBack }) {
                         fontSize: '13px',
                         fontWeight: 700,
                         color: 'var(--input-text, var(--text))',
-                        cursor: isRegionalOffice ? 'not-allowed' : 'pointer',
+                        cursor: (!isAssessmentStep2Done || isRegionalOffice) ? 'not-allowed' : 'pointer',
                         outline: 'none',
-                        opacity: isRegionalOffice ? 0.85 : 1
+                        opacity: (!isAssessmentStep2Done || isRegionalOffice) ? 0.75 : 1
                       }}
                     >
                       {isRegionalOffice ? (
@@ -6811,38 +7331,40 @@ export default function ReclassificationPage({ onBack }) {
                 <button
                   type="button"
                   onClick={() => handleSaveModalChanges(false)}
-                  disabled={savingModalChanges}
+                  disabled={savingModalChanges || !isAssessmentStep2Done}
                   style={{
                     padding: '9px 24px',
                     borderRadius: '10px',
                     border: 'none',
-                    background: savingModalChanges
-                      ? '#64748b'
+                    background: (!isAssessmentStep2Done || savingModalChanges)
+                      ? (isDark ? 'rgba(71, 85, 105, 0.4)' : '#94a3b8')
                       : 'linear-gradient(135deg, #1e40af 0%, #2563eb 100%)',
                     color: '#ffffff',
                     fontSize: '13px',
                     fontWeight: 750,
-                    cursor: savingModalChanges ? 'not-allowed' : 'pointer',
+                    cursor: (!isAssessmentStep2Done || savingModalChanges) ? 'not-allowed' : 'pointer',
                     display: 'inline-flex',
                     alignItems: 'center',
                     gap: '8px',
-                    boxShadow: savingModalChanges
+                    boxShadow: (!isAssessmentStep2Done || savingModalChanges)
                       ? 'none'
                       : '0 4px 12px rgba(37, 99, 235, 0.3)',
-                    transition: 'all 0.15s ease'
+                    transition: 'all 0.15s ease',
+                    opacity: !isAssessmentStep2Done ? 0.65 : 1
                   }}
                   onMouseOver={e => {
-                    if (!savingModalChanges) {
+                    if (isAssessmentStep2Done && !savingModalChanges) {
                       e.currentTarget.style.boxShadow = '0 6px 16px rgba(37, 99, 235, 0.4)';
                       e.currentTarget.style.transform = 'translateY(-1px)';
                     }
                   }}
                   onMouseOut={e => {
-                    if (!savingModalChanges) {
+                    if (isAssessmentStep2Done && !savingModalChanges) {
                       e.currentTarget.style.boxShadow = '0 4px 12px rgba(37, 99, 235, 0.3)';
                       e.currentTarget.style.transform = 'none';
                     }
                   }}
+                  title={!isAssessmentStep1Done ? "Step 1 must be completed and approved first" : (!isAssessmentStep2Done ? "Complete Step 2 (QS Evaluation) before saving assessment" : "Save all changes and update incumbent record")}
                 >
                   {savingModalChanges ? (
                     <>
@@ -8389,7 +8911,7 @@ export default function ReclassificationPage({ onBack }) {
                           </div>
                           <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.4)' : '1px solid #f1f5f9' }}>
                             <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>Division</span>
-                            <span style={{ fontWeight: 700, color: isDark ? '#f8fafc' : '#0f172a', textAlign: 'right' }}>{scannedNoscaResult.division ? `Division of ${scannedNoscaResult.division}` : 'Regional Scope'}</span>
+                            <span style={{ fontWeight: 700, color: isDark ? '#f8fafc' : '#0f172a', textAlign: 'right' }}>{scannedNoscaResult.division ? scannedNoscaResult.division.replace(/^division\s*(?:of)?\s*/i, '') : 'Regional Scope'}</span>
                           </div>
                           <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: isDark ? '1px solid rgba(51, 65, 85, 0.4)' : '1px solid #f1f5f9' }}>
                             <span style={{ color: isDark ? '#94a3b8' : '#64748b' }}>Station</span>
@@ -8858,7 +9380,7 @@ export default function ReclassificationPage({ onBack }) {
                                         </span>
                                       </div>
                                       <div style={{ fontSize: '10px', color: isDark ? '#94a3b8' : '#64748b', paddingLeft: '2px', lineHeight: 1.3 }}>
-                                        {school.division ? `Division of ${school.division}` : ''}{school.region ? ` • ${school.region}` : ''}
+                                        {school.division ? school.division.replace(/^division\s*(?:of)?\s*/i, '') : ''}{school.region ? ` • ${school.region}` : ''}
                                       </div>
                                     </div>
                                   );
@@ -8993,7 +9515,7 @@ export default function ReclassificationPage({ onBack }) {
                           Division & Station
                         </div>
                         <div style={{ fontSize: '13px', fontWeight: 850, color: isDark ? '#ede9fe' : '#4c1d95', margin: '2px 0 1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {scannedNoscaResult.division ? `Division of ${scannedNoscaResult.division}` : 'Regional Scope'}
+                          {scannedNoscaResult.division ? scannedNoscaResult.division.replace(/^division\s*(?:of)?\s*/i, '') : 'Regional Scope'}
                         </div>
                         <div style={{ fontSize: '10.5px', color: isDark ? '#a78bfa' : '#7c3aed', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {scannedNoscaResult.school_name || 'All Stations'}
@@ -9848,7 +10370,7 @@ export default function ReclassificationPage({ onBack }) {
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span style={{ color: isDark ? '#94a3b8' : '#64748b', fontWeight: 600 }}>Division:</span>
-                <span style={{ fontWeight: 700, color: isDark ? '#f8fafc' : '#0f172a' }}>{scannedNoscaResult?.division ? `Division of ${scannedNoscaResult.division}` : 'Regional Office'}</span>
+                <span style={{ fontWeight: 700, color: isDark ? '#f8fafc' : '#0f172a' }}>{scannedNoscaResult?.division ? scannedNoscaResult.division.replace(/^division\s*(?:of)?\s*/i, '') : 'Regional Office'}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span style={{ color: isDark ? '#94a3b8' : '#64748b', fontWeight: 600 }}>Actual Reclassification Position:</span>

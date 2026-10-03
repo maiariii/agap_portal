@@ -30,7 +30,7 @@ export async function syncNoscaItems() {
             new_item_no_status,
             created_at,
             updated_at
-          ) VALUES ($1, 'ELEMENTARY', 'School Counselor Associate I', 'Division of Manila', 'National Capital Region', 'Regional Allocation Station', 'AVAILABLE', NOW(), NOW())
+          ) VALUES ($1, 'ELEMENTARY', 'School Counselor Associate I', 'MANILA', 'National Capital Region', 'Regional Allocation Station', 'AVAILABLE', NOW(), NOW())
           ON CONFLICT DO NOTHING;
         `, [itemNo]);
       }

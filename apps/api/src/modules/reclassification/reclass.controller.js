@@ -547,7 +547,9 @@ export async function getIncumbents(req, res) {
         g.school_id,
         g.school_name,
         g.qs_status,
-        g.qs_status AS qs_eval_result,
+        COALESCE(g.qs_eval_result, g.qs_status, 'PENDING') AS qs_eval_result,
+        g.document_checklist,
+        g.qs_evaluation,
         g.stage_of_reclassification,
         COALESCE(ra.reclass_position, g.reclass_position) AS actual_position,
         COALESCE(ra.reclass_position, g.reclass_position) AS reclass_position,
@@ -653,7 +655,10 @@ export async function getIncumbents(req, res) {
     }
 
     const formatted = result.rows.map(row => {
-      const resolvedActualPos = row.actual_position || row.reclass_position || null;
+      const rawPos = row.actual_position || row.reclass_position || null;
+      const resolvedActualPos = rawPos
+        ? (VALID_POSITIONS.find(p => p.toLowerCase() === String(rawPos).trim().toLowerCase()) || rawPos)
+        : null;
       const rawDocs = docsByItemNo.get((row.item_no || '').trim().toLowerCase()) || [];
       const documentChecklist = rawDocs.map(d => ({
         id: d.document_title || d.file_name,
@@ -695,7 +700,13 @@ export async function getIncumbents(req, res) {
         reupload: row.reupload,
         created_at: row.created_at,
         updated_at: row.updated_at,
-        document_checklist: documentChecklist,
+        document_checklist: (Array.isArray(row.document_checklist) && row.document_checklist.length > 0)
+          ? row.document_checklist
+          : documentChecklist,
+        qs_evaluation: row.qs_evaluation || null,
+        evaluated_by: (row.qs_evaluation && typeof row.qs_evaluation === 'object' && row.qs_evaluation.evaluated_by) || null,
+        evaluated_at: (row.qs_evaluation && typeof row.qs_evaluation === 'object' && row.qs_evaluation.evaluated_at) || null,
+        evaluator_remarks: (row.qs_evaluation && typeof row.qs_evaluation === 'object' && row.qs_evaluation.evaluator_remarks) || '',
         assessment: {
           education: 'Bachelor of Science in Psychology / Guidance Counseling',
           years_experience: 5.0,
@@ -790,15 +801,20 @@ export async function updateIncumbentPosition(req, res) {
     }
 
     const { id } = req.params;
-    const { target_position, reclass_position } = req.body;
+    const { target_position, reclass_position, actual_position } = req.body;
 
-    const posInput = (target_position !== undefined ? target_position : reclass_position);
-    const targetPosition = (posInput === '' || posInput === undefined) ? null : posInput;
+    const posInput = (actual_position !== undefined ? actual_position : (target_position !== undefined ? target_position : reclass_position));
+    const rawTarget = (posInput === '' || posInput === undefined) ? null : posInput;
+    let targetPosition = null;
 
-    if (targetPosition !== null && !VALID_POSITIONS.includes(targetPosition)) {
-      return res.status(400).json({
-        error: `Invalid target_position. Must be one of: ${VALID_POSITIONS.join(', ')} or null/empty`
-      });
+    if (rawTarget !== null) {
+      const match = VALID_POSITIONS.find(p => p.toLowerCase() === String(rawTarget).trim().toLowerCase());
+      if (!match) {
+        return res.status(400).json({
+          error: `Invalid target_position. Must be one of: ${VALID_POSITIONS.join(', ')} or null/empty`
+        });
+      }
+      targetPosition = match;
     }
 
     const updateQuery = `
@@ -827,11 +843,16 @@ export async function updateIncumbentPosition(req, res) {
          OR ($3 <> '' AND item_no ILIKE $3)
     `, [targetPosition, updatedIncumbent.id, itemNo]);
 
+    const resolvedActualPos = updatedIncumbent.reclass_position
+      ? (VALID_POSITIONS.find(p => p.toLowerCase() === String(updatedIncumbent.reclass_position).trim().toLowerCase()) || updatedIncumbent.reclass_position)
+      : null;
+
     res.json({
       ...updatedIncumbent,
       plantilla_item_number: updatedIncumbent.item_no,
-      actual_position: updatedIncumbent.reclass_position,
-      target_position: updatedIncumbent.reclass_position,
+      actual_position: resolvedActualPos,
+      target_position: resolvedActualPos,
+      reclass_position: resolvedActualPos,
       new_item_number: updatedIncumbent.new_item_no || null
     });
   } catch (error) {
@@ -862,24 +883,47 @@ export async function saveIncumbentQsEvaluation(req, res) {
     } = req.body;
 
     const evaluatedBy = req.user?.name || req.user?.fullName || req.user?.username || req.user?.email || 'Division HRMO';
-    const evalResult = qs_eval_result || 'PENDING';
+    const evalResult = qs_eval_result !== undefined ? qs_eval_result : null;
     const posParam = actual_position !== undefined ? actual_position : (target_position !== undefined ? target_position : reclass_position);
-    const targetPosToSave = (posParam === '' || posParam === undefined) ? null : posParam;
+    const rawPosToSave = (posParam === '' || posParam === undefined) ? null : posParam;
+    const targetPosToSave = rawPosToSave
+      ? (VALID_POSITIONS.find(p => p.toLowerCase() === String(rawPosToSave).trim().toLowerCase()) || rawPosToSave)
+      : null;
+
+    let mergedQsEvaluation = null;
+    let qsEvalParam = null;
+    if (qs_evaluation !== undefined) {
+      mergedQsEvaluation = {
+        ...(qs_evaluation && typeof qs_evaluation === 'object' ? qs_evaluation : {}),
+        evaluated_by: evaluatedBy,
+        evaluated_at: new Date().toISOString(),
+        evaluator_remarks: evaluator_remarks !== undefined ? evaluator_remarks : ((qs_evaluation && typeof qs_evaluation === 'object' && qs_evaluation.evaluator_remarks) || '')
+      };
+      qsEvalParam = JSON.stringify(mergedQsEvaluation);
+    }
+
+    const docChecklistParam = document_checklist !== undefined ? JSON.stringify(document_checklist) : null;
+    const stageParam = stage_of_reclassification !== undefined ? stage_of_reclassification : null;
 
     const updateQuery = `
       UPDATE reclass_gc
       SET qs_status = COALESCE($1, qs_status),
-          reclass_position = COALESCE($2, reclass_position),
-          stage_of_reclassification = COALESCE($3, stage_of_reclassification),
+          qs_eval_result = COALESCE($1, qs_eval_result),
+          qs_evaluation = COALESCE($2::jsonb, qs_evaluation),
+          document_checklist = COALESCE($3::jsonb, document_checklist),
+          reclass_position = COALESCE($4, reclass_position),
+          stage_of_reclassification = COALESCE($5, stage_of_reclassification),
           updated_at = NOW()
-      WHERE id = $4
+      WHERE id = $6
       RETURNING *;
     `;
 
     const result = await pool.query(updateQuery, [
       evalResult,
+      qsEvalParam,
+      docChecklistParam,
       targetPosToSave,
-      stage_of_reclassification || null,
+      stageParam,
       id
     ]);
 
@@ -964,13 +1008,23 @@ export async function saveIncumbentQsEvaluation(req, res) {
       url: d.file_url
     }));
 
+    const resolvedPos = updatedInc.reclass_position
+      ? (VALID_POSITIONS.find(p => p.toLowerCase() === String(updatedInc.reclass_position).trim().toLowerCase()) || updatedInc.reclass_position)
+      : null;
+
     res.json({
       ...updatedInc,
       plantilla_item_number: updatedInc.item_no,
-      actual_position: updatedInc.reclass_position,
-      target_position: updatedInc.reclass_position,
+      actual_position: resolvedPos,
+      target_position: resolvedPos,
+      reclass_position: resolvedPos,
       new_item_number: updatedInc.new_item_no || null,
-      document_checklist: updatedChecklist,
+      document_checklist: updatedInc.document_checklist || updatedChecklist,
+      qs_evaluation: updatedInc.qs_evaluation || mergedQsEvaluation,
+      qs_eval_result: updatedInc.qs_eval_result || evalResult,
+      evaluated_by: (updatedInc.qs_evaluation && typeof updatedInc.qs_evaluation === 'object' && updatedInc.qs_evaluation.evaluated_by) || evaluatedBy,
+      evaluated_at: (updatedInc.qs_evaluation && typeof updatedInc.qs_evaluation === 'object' && updatedInc.qs_evaluation.evaluated_at) || new Date().toISOString(),
+      evaluator_remarks: (updatedInc.qs_evaluation && typeof updatedInc.qs_evaluation === 'object' && updatedInc.qs_evaluation.evaluator_remarks) || evaluator_remarks || '',
       documents: updatedDocsRes.rows
     });
   } catch (error) {
@@ -1455,8 +1509,8 @@ export async function uploadReclassCsv(req, res) {
         }
 
         const email = emailIdx !== -1 && row[emailIdx] ? String(row[emailIdx]).trim() : null;
-        const region = regionIdx !== -1 && row[regionIdx] ? String(row[regionIdx]).trim() : null;
-        const division = divisionIdx !== -1 && row[divisionIdx] ? String(row[divisionIdx]).trim() : (stationIdx !== -1 && row[stationIdx] ? String(row[stationIdx]).trim() : null);
+        const rawDivision = divisionIdx !== -1 && row[divisionIdx] ? String(row[divisionIdx]).trim() : (stationIdx !== -1 && row[stationIdx] ? String(row[stationIdx]).trim() : null);
+        const division = rawDivision ? rawDivision.replace(/^division\s*(?:of)?\s*/i, '').trim().toUpperCase() : null;
         const school_id = schoolIdIdx !== -1 && row[schoolIdIdx] ? String(row[schoolIdIdx]).trim() : null;
         let school_name = schoolNameIdx !== -1 && row[schoolNameIdx] ? String(row[schoolNameIdx]).trim() : null;
         if (!school_name && stationIdx !== -1 && row[stationIdx] && stationIdx !== divisionIdx && stationIdx !== schoolIdIdx) {
@@ -1910,7 +1964,7 @@ export async function importNoscaItems(req, res) {
 
       const itemCategory = getCategoryForItem(trimmedItem);
       const divName = division 
-        ? (division.toLowerCase().startsWith('division') ? division : `Division of ${division}`) 
+        ? division.replace(/^division\s*(?:of)?\s*/i, '').trim().toUpperCase() 
         : 'Regional Office';
       const schName = schoolName || 'Regional Allocation Station';
 
@@ -2058,7 +2112,7 @@ export async function uploadNoscaAndMatch(req, res) {
 
     const finalSerial = detectedSerial || `RO-NOSCA-${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`;
     const finalFileName = fileName || `NOSCA_${finalSerial}.pdf`;
-    const finalDivision = detectedDivision || 'Regional Scope';
+    const finalDivision = detectedDivision ? detectedDivision.replace(/^division\s*(?:of)?\s*/i, '').trim().toUpperCase() : 'Regional Scope';
 
     client = await pool.connect();
     await client.query('BEGIN');

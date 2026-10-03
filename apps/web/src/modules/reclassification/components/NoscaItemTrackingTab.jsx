@@ -2250,10 +2250,6 @@ export default function NoscaItemTrackingTab({
                 transform: scale(1) translateY(0);
               }
             }
-            @keyframes pulseEmeraldDot {
-              0%, 100% { transform: scale(1); opacity: 1; }
-              50% { transform: scale(1.35); opacity: 0.6; }
-            }
             .agap-modal-scrollbar::-webkit-scrollbar {
               width: 6px;
               height: 6px;
@@ -2322,58 +2318,11 @@ export default function NoscaItemTrackingTab({
                 justifyContent: 'space-between',
                 gap: '16px'
               }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                  <div style={{
-                    width: '48px',
-                    height: '48px',
-                    borderRadius: '14px',
-                    background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)',
-                    color: '#ffffff',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    boxShadow: '0 8px 20px -4px rgba(16, 185, 129, 0.45)',
-                    flexShrink: 0
-                  }}>
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
-                      <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
-                      <path d="M9 12h6" />
-                      <path d="M9 16h6" />
-                    </svg>
-                  </div>
-                  <div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                      <span style={{
-                        fontSize: '10.5px',
-                        fontWeight: 800,
-                        padding: '3px 10px',
-                        borderRadius: '999px',
-                        background: isDark ? 'rgba(16, 185, 129, 0.18)' : '#dcfce7',
-                        color: isDark ? '#6ee7b7' : '#15803d',
-                        border: isDark ? '1px solid rgba(16, 185, 129, 0.35)' : '1px solid #86efac',
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.06em',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '6px'
-                      }}>
-                        <span style={{
-                          width: '7px',
-                          height: '7px',
-                          borderRadius: '50%',
-                          background: '#10b981',
-                          display: 'inline-block',
-                          boxShadow: '0 0 8px #10b981',
-                          animation: 'pulseEmeraldDot 2s ease-in-out infinite'
-                        }} />
-                        Unassigned Inventory
-                      </span>
-                      <h3 style={{ fontSize: '19px', fontWeight: 850, margin: 0, color: isDark ? '#f8fafc' : '#0f172a', letterSpacing: '-0.025em' }}>
-                        Available Plantilla Item Numbers
-                      </h3>
-                    </div>
-                    <div style={{ fontSize: '12.5px', color: 'var(--text-secondary, #64748b)', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div>
+                  <h3 style={{ fontSize: '19px', fontWeight: 850, margin: 0, color: isDark ? '#f8fafc' : '#0f172a', letterSpacing: '-0.025em' }}>
+                    Available Plantilla Item Numbers
+                  </h3>
+                  <div style={{ fontSize: '12.5px', color: 'var(--text-secondary, #64748b)', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <span>
                         Showing <strong style={{ color: isDark ? '#f1f5f9' : '#0f172a' }}>{availableItemsList.length}</strong> of <strong style={{ color: isDark ? '#f1f5f9' : '#0f172a' }}>{roAvailableCount}</strong> unassigned items ready for candidate assignment.
                       </span>
@@ -2392,7 +2341,6 @@ export default function NoscaItemTrackingTab({
                       )}
                     </div>
                   </div>
-                </div>
 
                 <button
                   type="button"

@@ -21,9 +21,9 @@ import { runMigration as runCollaboratorsMigration } from './db/migration_collab
 import { runMigration as runIncumbentCounselorsMigration } from './db/migration_incumbent_counselors.js';
 import { runMigration as runNoscaMigration } from './db/migration_nosca_items.js';
 import { runMigration as runReclassGcSchoolMigration } from './db/migration_reclass_gc_school.js';
-import { runMigration as runReclassApplicationsMigration } from './db/migration_reclass_applications_schema.js';
 import { runMigration as runRenameToReclassItemNoMigration } from './db/migration_rename_to_reclass_item_no.js';
 import { runMigration as runUniqueReclassGcItemNoMigration } from './db/migration_unique_reclass_gc_item_no.js';
+import { runMigration as runQsEvaluationMigration } from './db/migration_qs_evaluation.js';
 import { syncNoscaItems } from './db/sync_nosca_items_from_docs.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -47,6 +47,7 @@ const PORT = process.env.PORT || 5000;
     await runReclassApplicationsMigration();
     await runRenameToReclassItemNoMigration();
     await runUniqueReclassGcItemNoMigration();
+    await runQsEvaluationMigration();
     await syncNoscaItems();
   } catch (err) {
     console.error('[Server Startup Migration Error]', err.message);
